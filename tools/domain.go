@@ -10,9 +10,9 @@ import (
 )
 
 type InitDomainParams struct {
-	Name          string              `json:"name" jsonschema:"description=Nom du domaine d'apprentissage"`
-	Concepts      []string            `json:"concepts" jsonschema:"description=Liste des concepts du domaine"`
-	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"description=Graphe de prerequis (concept -> liste de prerequis)"`
+	Name          string              `json:"name" jsonschema:"Nom du domaine d'apprentissage"`
+	Concepts      []string            `json:"concepts" jsonschema:"Liste des concepts du domaine"`
+	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"Graphe de prerequis (concept -> liste de prerequis)"`
 }
 
 func registerInitDomain(server *mcp.Server, deps *Deps) {

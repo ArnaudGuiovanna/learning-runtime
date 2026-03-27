@@ -12,12 +12,12 @@ import (
 )
 
 type RecordInteractionParams struct {
-	Concept             string  `json:"concept" jsonschema:"description=Le concept concerne"`
-	ActivityType        string  `json:"activity_type" jsonschema:"description=Type d'activite (RECALL_EXERCISE, NEW_CONCEPT, etc.)"`
-	Success             bool    `json:"success" jsonschema:"description=L'exercice a ete reussi"`
-	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"description=Temps de reponse en secondes"`
-	Confidence          float64 `json:"confidence" jsonschema:"description=Confiance estimee entre 0 et 1"`
-	Notes               string  `json:"notes" jsonschema:"description=Notes optionnelles sur l'interaction"`
+	Concept             string  `json:"concept" jsonschema:"Le concept concerne"`
+	ActivityType        string  `json:"activity_type" jsonschema:"Type d'activite (RECALL_EXERCISE, NEW_CONCEPT, etc.)"`
+	Success             bool    `json:"success" jsonschema:"L'exercice a ete reussi"`
+	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"Temps de reponse en secondes"`
+	Confidence          float64 `json:"confidence" jsonschema:"Confiance estimee entre 0 et 1"`
+	Notes               string  `json:"notes" jsonschema:"Notes optionnelles sur l'interaction"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {

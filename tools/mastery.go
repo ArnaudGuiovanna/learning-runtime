@@ -10,7 +10,7 @@ import (
 )
 
 type CheckMasteryParams struct {
-	Concept string `json:"concept" jsonschema:"description=Le concept a verifier pour la maitrise"`
+	Concept string `json:"concept" jsonschema:"Le concept a verifier pour la maitrise"`
 }
 
 func registerCheckMastery(server *mcp.Server, deps *Deps) {
