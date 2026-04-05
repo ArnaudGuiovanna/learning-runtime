@@ -121,6 +121,33 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 		tutorMode := engine.ComputeTutorMode(currentAffect, alerts)
 
+		// Apply tutor_mode adjustments to activity difficulty
+		switch tutorMode {
+		case "lighter":
+			activity.DifficultyTarget *= 0.7
+			activity.EstimatedMinutes = int(float64(activity.EstimatedMinutes) * 0.6)
+			if activity.EstimatedMinutes < 5 {
+				activity.EstimatedMinutes = 5
+			}
+		case "scaffolding":
+			activity.DifficultyTarget *= 0.75
+		case "recontextualize":
+			activity.Rationale += " · recontextualisation demandee"
+		}
+
+		// Apply calibration bias adjustment
+		// Positive bias = over-estimates → increase difficulty
+		// Negative bias = under-estimates → decrease difficulty
+		if calibBias != 0 {
+			activity.DifficultyTarget += calibBias * 0.1
+			if activity.DifficultyTarget < 0.3 {
+				activity.DifficultyTarget = 0.3
+			}
+			if activity.DifficultyTarget > 0.85 {
+				activity.DifficultyTarget = 0.85
+			}
+		}
+
 		r, _ := jsonResult(map[string]interface{}{
 			"needs_domain_setup":    false,
 			"domain_id":             domain.ID,
