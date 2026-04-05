@@ -80,6 +80,11 @@ func main() {
 	// Health check
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if err := database.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"unhealthy","error":"database unreachable"}`))
+			return
+		}
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
@@ -111,7 +116,10 @@ func main() {
 	defer scheduler.Stop()
 
 	// Wrap with CORS + request logging
-	handler := requestLogger(logger, corsMiddleware(mux))
+	handler := requestLogger(logger, corsMiddleware(
+		[]string{"https://claude.ai", baseURL},
+		mux,
+	))
 
 	logger.Info("learning runtime starting", "port", port, "base_url", baseURL)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
@@ -138,9 +146,16 @@ func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
+	allowed := make(map[string]bool)
+	for _, o := range allowedOrigins {
+		allowed[o] = true
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if allowed[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id")
 		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
