@@ -726,3 +726,79 @@ func (s *Store) GetConceptsDueForReview(learnerID string) ([]string, error) {
 	}
 	return concepts, nil
 }
+
+// ─── OAuth Persistence ──────────────────────────────────────────────────────
+
+// AuthCode holds the authorization code state (persisted in DB).
+type AuthCode struct {
+	Code          string
+	LearnerID     string
+	CodeChallenge string
+	ExpiresAt     time.Time
+}
+
+func (s *Store) CreateAuthCode(code, learnerID, codeChallenge string, expiresAt time.Time) error {
+	_, err := s.db.Exec(
+		`INSERT INTO oauth_codes (code, learner_id, code_challenge, expires_at) VALUES (?, ?, ?, ?)`,
+		code, learnerID, codeChallenge, expiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create auth code: %w", err)
+	}
+	return nil
+}
+
+// ConsumeAuthCode retrieves and deletes an auth code in one operation.
+// Returns error if the code does not exist.
+func (s *Store) ConsumeAuthCode(code string) (*AuthCode, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	ac := &AuthCode{}
+	err = tx.QueryRow(
+		`SELECT code, learner_id, code_challenge, expires_at FROM oauth_codes WHERE code = ?`,
+		code,
+	).Scan(&ac.Code, &ac.LearnerID, &ac.CodeChallenge, &ac.ExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("consume auth code: %w", err)
+	}
+
+	if _, err := tx.Exec(`DELETE FROM oauth_codes WHERE code = ?`, code); err != nil {
+		return nil, fmt.Errorf("delete auth code: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit consume auth code: %w", err)
+	}
+	return ac, nil
+}
+
+func (s *Store) CreateOAuthClient(clientID, clientName, redirectURIs string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES (?, ?, ?)`,
+		clientID, clientName, redirectURIs,
+	)
+	if err != nil {
+		return fmt.Errorf("create oauth client: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CleanupExpiredCodes() (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM oauth_codes WHERE expires_at < ?`, time.Now().UTC())
+	if err != nil {
+		return 0, fmt.Errorf("cleanup expired codes: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+func (s *Store) CleanupExpiredRefreshTokens() (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM refresh_tokens WHERE expires_at < ?`, time.Now().UTC())
+	if err != nil {
+		return 0, fmt.Errorf("cleanup expired refresh tokens: %w", err)
+	}
+	return result.RowsAffected()
+}
