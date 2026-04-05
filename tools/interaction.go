@@ -17,13 +17,15 @@ type RecordInteractionParams struct {
 	Success             bool    `json:"success" jsonschema:"L'exercice a ete reussi"`
 	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"Temps de reponse en secondes"`
 	Confidence          float64 `json:"confidence" jsonschema:"Confiance estimee entre 0 et 1"`
+	ErrorType           string  `json:"error_type,omitempty" jsonschema:"Type d'erreur si echec: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP (optionnel)"`
 	Notes               string  `json:"notes" jsonschema:"Notes optionnelles sur l'interaction"`
+	DomainID            string  `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_interaction",
-		Description: "Enregistre le resultat d'un exercice et met a jour l'etat cognitif de l'apprenant.",
+		Description: "Enregistre le resultat d'un exercice et met a jour l'etat cognitif de l'apprenant. Supporte error_type pour ajuster le BKT selon le type d'erreur.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordInteractionParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -44,6 +46,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			Success:      params.Success,
 			ResponseTime: int(params.ResponseTimeSeconds),
 			Confidence:   params.Confidence,
+			ErrorType:    params.ErrorType,
 			Notes:        params.Notes,
 		}
 		if err := deps.Store.CreateInteraction(interaction); err != nil {
@@ -57,7 +60,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			cs = models.NewConceptState(learnerID, params.Concept)
 		}
 
-		// BKT update
+		// BKT update — error-type-aware
 		bktState := algorithms.BKTState{
 			PMastery: cs.PMastery,
 			PLearn:   cs.PLearn,
@@ -65,7 +68,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			PSlip:    cs.PSlip,
 			PGuess:   cs.PGuess,
 		}
-		bktState = algorithms.BKTUpdate(bktState, params.Success)
+		bktState = algorithms.BKTUpdateWithErrorType(bktState, params.Success, params.ErrorType)
 		cs.PMastery = bktState.PMastery
 
 		// FSRS ReviewCard
@@ -138,6 +141,10 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			engagementSignal = "declining"
 		}
 
+		// Compute cognitive signals from session patterns
+		sessionInteractions, _ := deps.Store.GetSessionInteractions(learnerID)
+		fatigueSignal, frustrationSignal := computeCognitiveSignals(sessionInteractions)
+
 		nextReviewHours := float64(fsrsCard.ScheduledDays) * 24.0
 
 		r, _ := jsonResult(map[string]interface{}{
@@ -145,7 +152,84 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			"new_mastery":          cs.PMastery,
 			"next_review_in_hours": nextReviewHours,
 			"engagement_signal":    engagementSignal,
+			"fatigue_signal":       fatigueSignal,
+			"frustration_signal":   frustrationSignal,
 		})
 		return r, nil, nil
 	})
+}
+
+// computeCognitiveSignals analyzes session interaction patterns for fatigue and frustration.
+func computeCognitiveSignals(sessionInteractions []*models.Interaction) (fatigue string, frustration string) {
+	fatigue = "none"
+	frustration = "none"
+
+	if len(sessionInteractions) < 3 {
+		return
+	}
+
+	// Fatigue: declining accuracy + increasing response time in last N interactions
+	// Look at the most recent 5 interactions (they're sorted newest-first)
+	window := sessionInteractions
+	if len(window) > 5 {
+		window = window[:5]
+	}
+
+	recentSuccesses := 0
+	recentTotalTime := 0
+	for _, i := range window {
+		if i.Success {
+			recentSuccesses++
+		}
+		recentTotalTime += i.ResponseTime
+	}
+	recentRate := float64(recentSuccesses) / float64(len(window))
+	avgRecentTime := float64(recentTotalTime) / float64(len(window))
+
+	// Compare with earlier interactions if available
+	if len(sessionInteractions) >= 6 {
+		earlier := sessionInteractions[len(window):]
+		if len(earlier) > 5 {
+			earlier = earlier[:5]
+		}
+		earlySuccesses := 0
+		earlyTotalTime := 0
+		for _, i := range earlier {
+			if i.Success {
+				earlySuccesses++
+			}
+			earlyTotalTime += i.ResponseTime
+		}
+		earlyRate := float64(earlySuccesses) / float64(len(earlier))
+		avgEarlyTime := float64(earlyTotalTime) / float64(len(earlier))
+
+		// Fatigue: accuracy drops AND response time increases
+		if recentRate < earlyRate-0.2 && avgRecentTime > avgEarlyTime*1.3 {
+			fatigue = "high"
+		} else if recentRate < earlyRate-0.1 || avgRecentTime > avgEarlyTime*1.2 {
+			fatigue = "moderate"
+		}
+	}
+
+	// Frustration: consecutive failures + low confidence
+	consecutiveFailures := 0
+	lowConfidenceCount := 0
+	for _, i := range window {
+		if !i.Success {
+			consecutiveFailures++
+			if i.Confidence < 0.3 {
+				lowConfidenceCount++
+			}
+		} else {
+			break
+		}
+	}
+
+	if consecutiveFailures >= 3 && lowConfidenceCount >= 2 {
+		frustration = "high"
+	} else if consecutiveFailures >= 2 && lowConfidenceCount >= 1 {
+		frustration = "moderate"
+	}
+
+	return
 }

@@ -12,20 +12,33 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type GetCockpitStateParams struct{}
+type GetCockpitStateParams struct {
+	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Si absent, affiche tous les domaines actifs."`
+}
 
 type conceptProgress struct {
-	Concept    string  `json:"concept"`
-	Mastery    float64 `json:"mastery"`
-	Retention  float64 `json:"retention"`
-	Status     string  `json:"status"`
-	CardState  string  `json:"card_state"`
+	Concept   string  `json:"concept"`
+	Mastery   float64 `json:"mastery"`
+	Retention float64 `json:"retention"`
+	Status    string  `json:"status"`
+	CardState string  `json:"card_state"`
+}
+
+type domainCockpit struct {
+	DomainID       string            `json:"domain_id"`
+	Name           string            `json:"name"`
+	TotalConcepts  int               `json:"total_concepts"`
+	MasteredCount  int               `json:"mastered_count"`
+	ProgressPct    float64           `json:"progress_percent"`
+	Concepts       []conceptProgress `json:"concepts"`
+	RetentionAlerts []map[string]interface{} `json:"retention_alerts"`
+	NextAction     string            `json:"next_action"`
 }
 
 func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_cockpit_state",
-		Description: "Genere l'etat complet du cockpit: progression par concept, alertes, signaux, prochaine action.",
+		Description: "Genere l'etat complet du cockpit: progression par concept, alertes, signaux, prochaine action. Sans domain_id, affiche tous les domaines.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetCockpitStateParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -33,95 +46,147 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		domain, err := deps.Store.GetDomainByLearner(learnerID)
-		if err != nil {
-			r, _ := errorResult("aucun domaine configure")
-			return r, nil, nil
-		}
-
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, 20)
 		sessionStart, _ := deps.Store.GetSessionStart(learnerID)
 
-		// Build mastery map
-		mastery := make(map[string]float64)
+		// Build global maps
 		stateMap := make(map[string]*models.ConceptState)
 		for _, cs := range states {
-			mastery[cs.Concept] = cs.PMastery
 			stateMap[cs.Concept] = cs
 		}
 
-		graph := algorithms.KSTGraph{
-			Concepts:      domain.Graph.Concepts,
-			Prerequisites: domain.Graph.Prerequisites,
+		// Determine which domains to show
+		var domains []*models.Domain
+		if params.DomainID != "" {
+			d, err := deps.Store.GetDomainByID(params.DomainID)
+			if err != nil {
+				r, _ := errorResult(fmt.Sprintf("domain not found: %v", err))
+				return r, nil, nil
+			}
+			domains = []*models.Domain{d}
+		} else {
+			allDomains, err := deps.Store.GetDomainsByLearner(learnerID)
+			if err != nil || len(allDomains) == 0 {
+				r, _ := errorResult("aucun domaine configure")
+				return r, nil, nil
+			}
+			domains = allDomains
 		}
 
-		// Build per-concept progress
-		var concepts []conceptProgress
-		masteredCount := 0
-		for _, concept := range domain.Graph.Concepts {
-			status := algorithms.ConceptStatus(graph, mastery, concept)
-			cs := stateMap[concept]
+		// Build cockpit for each domain
+		var domainCockpits []domainCockpit
+		totalMastered := 0
+		totalConcepts := 0
 
-			cp := conceptProgress{
-				Concept:   concept,
-				Mastery:   mastery[concept],
-				Retention: 1.0,
-				Status:    status,
-				CardState: "new",
-			}
-
-			if cs != nil {
-				cp.CardState = cs.CardState
-				elapsed := cs.ElapsedDays
-				if cs.LastReview != nil {
-					elapsed = int(time.Since(*cs.LastReview).Hours() / 24)
+		for _, domain := range domains {
+			mastery := make(map[string]float64)
+			for _, c := range domain.Graph.Concepts {
+				if cs, ok := stateMap[c]; ok {
+					mastery[c] = cs.PMastery
 				}
-				cp.Retention = algorithms.Retrievability(elapsed, cs.Stability)
 			}
 
-			if status == "done" {
-				masteredCount++
+			graph := algorithms.KSTGraph{
+				Concepts:      domain.Graph.Concepts,
+				Prerequisites: domain.Graph.Prerequisites,
 			}
 
-			concepts = append(concepts, cp)
+			var concepts []conceptProgress
+			masteredCount := 0
+			for _, concept := range domain.Graph.Concepts {
+				status := algorithms.ConceptStatus(graph, mastery, concept)
+				cs := stateMap[concept]
+
+				cp := conceptProgress{
+					Concept:   concept,
+					Mastery:   mastery[concept],
+					Retention: 1.0,
+					Status:    status,
+					CardState: "new",
+				}
+
+				if cs != nil {
+					cp.CardState = cs.CardState
+					elapsed := cs.ElapsedDays
+					if cs.LastReview != nil {
+						elapsed = int(time.Since(*cs.LastReview).Hours() / 24)
+					}
+					cp.Retention = algorithms.Retrievability(elapsed, cs.Stability)
+				}
+
+				if status == "done" {
+					masteredCount++
+				}
+				concepts = append(concepts, cp)
+			}
+
+			// Retention alerts for this domain
+			var retentionAlerts []map[string]interface{}
+			for _, cp := range concepts {
+				if cp.Retention < 0.50 && cp.CardState != "new" {
+					color := "orange"
+					if cp.Retention < 0.30 {
+						color = "rouge"
+					}
+					retentionAlerts = append(retentionAlerts, map[string]interface{}{
+						"concept":   cp.Concept,
+						"retention": cp.Retention,
+						"color":     color,
+					})
+				}
+			}
+			if retentionAlerts == nil {
+				retentionAlerts = []map[string]interface{}{}
+			}
+
+			// Next action for this domain
+			frontier := algorithms.ComputeFrontier(graph, mastery)
+			nextAction := "continuer la revision"
+			if len(frontier) > 0 {
+				nextAction = fmt.Sprintf("nouveau concept: %s", frontier[0])
+			}
+
+			progressPct := 0.0
+			if len(domain.Graph.Concepts) > 0 {
+				progressPct = float64(masteredCount) / float64(len(domain.Graph.Concepts)) * 100
+			}
+
+			domainCockpits = append(domainCockpits, domainCockpit{
+				DomainID:        domain.ID,
+				Name:            domain.Name,
+				TotalConcepts:   len(domain.Graph.Concepts),
+				MasteredCount:   masteredCount,
+				ProgressPct:     progressPct,
+				Concepts:        concepts,
+				RetentionAlerts: retentionAlerts,
+				NextAction:      nextAction,
+			})
+
+			totalMastered += masteredCount
+			totalConcepts += len(domain.Graph.Concepts)
 		}
 
-		// Compute alerts
+		// Global alerts
 		alerts := engine.ComputeAlerts(states, interactions, sessionStart)
 		if alerts == nil {
 			alerts = []models.Alert{}
 		}
 
-		// Retention alerts (concepts with retention < 50%)
-		var retentionAlerts []map[string]interface{}
-		for _, cp := range concepts {
-			if cp.Retention < 0.50 && cp.CardState != "new" {
-				color := "orange"
-				if cp.Retention < 0.30 {
-					color = "rouge"
-				}
-				retentionAlerts = append(retentionAlerts, map[string]interface{}{
-					"concept":   cp.Concept,
-					"retention": cp.Retention,
-					"color":     color,
-				})
-			}
-		}
-		if retentionAlerts == nil {
-			retentionAlerts = []map[string]interface{}{}
-		}
-
-		// Trajectory signal
+		// Global trajectory signal
 		signal := "stable"
 		if len(interactions) >= 3 {
 			recentSuccesses := 0
-			for _, i := range interactions[:min(5, len(interactions))] {
+			window := interactions
+			if len(window) > 5 {
+				window = window[:5]
+			}
+			for _, i := range window {
 				if i.Success {
 					recentSuccesses++
 				}
 			}
-			rate := float64(recentSuccesses) / float64(min(5, len(interactions)))
+			rate := float64(recentSuccesses) / float64(len(window))
 			if rate >= 0.8 {
 				signal = "positive"
 			} else if rate < 0.4 {
@@ -129,40 +194,20 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		// Next action
-		frontier := algorithms.ComputeFrontier(graph, mastery)
-		nextAction := "continuer la revision"
-		if len(alerts) > 0 && alerts[0].Urgency == models.UrgencyCritical {
-			nextAction = fmt.Sprintf("urgence: %s — %s", alerts[0].Concept, alerts[0].RecommendedAction)
-		} else if len(frontier) > 0 {
-			nextAction = fmt.Sprintf("nouveau concept: %s", frontier[0])
-		}
-
-		// Overall progress
-		totalConcepts := len(domain.Graph.Concepts)
-		progressPct := 0.0
+		// Global progress
+		globalProgress := 0.0
 		if totalConcepts > 0 {
-			progressPct = float64(masteredCount) / float64(totalConcepts) * 100
+			globalProgress = float64(totalMastered) / float64(totalConcepts) * 100
 		}
 
 		r, _ := jsonResult(map[string]interface{}{
-			"domain":           domain.Name,
+			"domains":          domainCockpits,
 			"total_concepts":   totalConcepts,
-			"mastered_count":   masteredCount,
-			"progress_percent": progressPct,
-			"concepts":         concepts,
-			"retention_alerts": retentionAlerts,
+			"total_mastered":   totalMastered,
+			"global_progress":  globalProgress,
 			"alerts":           alerts,
 			"signal":           signal,
-			"next_action":      nextAction,
 		})
 		return r, nil, nil
 	})
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

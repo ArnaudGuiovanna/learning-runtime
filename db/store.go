@@ -57,7 +57,7 @@ func (s *Store) CreateLearner(email, passwordHash, objective, webhookURL string)
 
 func (s *Store) GetLearnerByID(id string) (*models.Learner, error) {
 	row := s.db.QueryRow(
-		`SELECT id, email, password_hash, objective, webhook_url, created_at, last_active
+		`SELECT id, email, password_hash, objective, webhook_url, profile_json, created_at, last_active
 		 FROM learners WHERE id = ?`, id,
 	)
 	return scanLearner(row)
@@ -65,7 +65,7 @@ func (s *Store) GetLearnerByID(id string) (*models.Learner, error) {
 
 func (s *Store) GetLearnerByEmail(email string) (*models.Learner, error) {
 	row := s.db.QueryRow(
-		`SELECT id, email, password_hash, objective, webhook_url, created_at, last_active
+		`SELECT id, email, password_hash, objective, webhook_url, profile_json, created_at, last_active
 		 FROM learners WHERE email = ?`, email,
 	)
 	return scanLearner(row)
@@ -74,14 +74,20 @@ func (s *Store) GetLearnerByEmail(email string) (*models.Learner, error) {
 func scanLearner(row *sql.Row) (*models.Learner, error) {
 	l := &models.Learner{}
 	var lastActive sql.NullTime
+	var profileJSON sql.NullString
 	err := row.Scan(
-		&l.ID, &l.Email, &l.PasswordHash, &l.Objective, &l.WebhookURL, &l.CreatedAt, &lastActive,
+		&l.ID, &l.Email, &l.PasswordHash, &l.Objective, &l.WebhookURL, &profileJSON, &l.CreatedAt, &lastActive,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan learner: %w", err)
 	}
 	if lastActive.Valid {
 		l.LastActive = lastActive.Time
+	}
+	if profileJSON.Valid {
+		l.ProfileJSON = profileJSON.String
+	} else {
+		l.ProfileJSON = "{}"
 	}
 	return l, nil
 }
@@ -99,7 +105,7 @@ func (s *Store) UpdateLastActive(id string) error {
 
 func (s *Store) GetActiveLearners() ([]*models.Learner, error) {
 	rows, err := s.db.Query(
-		`SELECT id, email, password_hash, objective, webhook_url, created_at, last_active
+		`SELECT id, email, password_hash, objective, webhook_url, profile_json, created_at, last_active
 		 FROM learners WHERE webhook_url != ''`,
 	)
 	if err != nil {
@@ -111,17 +117,34 @@ func (s *Store) GetActiveLearners() ([]*models.Learner, error) {
 	for rows.Next() {
 		l := &models.Learner{}
 		var lastActive sql.NullTime
+		var profileJSON sql.NullString
 		if err := rows.Scan(
-			&l.ID, &l.Email, &l.PasswordHash, &l.Objective, &l.WebhookURL, &l.CreatedAt, &lastActive,
+			&l.ID, &l.Email, &l.PasswordHash, &l.Objective, &l.WebhookURL, &profileJSON, &l.CreatedAt, &lastActive,
 		); err != nil {
 			return nil, fmt.Errorf("scan learner row: %w", err)
 		}
 		if lastActive.Valid {
 			l.LastActive = lastActive.Time
 		}
+		if profileJSON.Valid {
+			l.ProfileJSON = profileJSON.String
+		} else {
+			l.ProfileJSON = "{}"
+		}
 		learners = append(learners, l)
 	}
 	return learners, rows.Err()
+}
+
+func (s *Store) UpdateLearnerProfile(learnerID, profileJSON string) error {
+	_, err := s.db.Exec(
+		`UPDATE learners SET profile_json = ? WHERE id = ?`,
+		profileJSON, learnerID,
+	)
+	if err != nil {
+		return fmt.Errorf("update learner profile: %w", err)
+	}
+	return nil
 }
 
 // ─── Refresh Tokens ───────────────────────────────────────────────────────────
@@ -213,6 +236,82 @@ func (s *Store) GetDomainByLearner(learnerID string) (*models.Domain, error) {
 		return nil, fmt.Errorf("unmarshal graph: %w", err)
 	}
 	return d, nil
+}
+
+func (s *Store) GetDomainByID(id string) (*models.Domain, error) {
+	d := &models.Domain{}
+	var graphJSON string
+	err := s.db.QueryRow(
+		`SELECT id, learner_id, name, graph_json, created_at
+		 FROM domains WHERE id = ?`, id,
+	).Scan(&d.ID, &d.LearnerID, &d.Name, &graphJSON, &d.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get domain by id: %w", err)
+	}
+	if err := json.Unmarshal([]byte(graphJSON), &d.Graph); err != nil {
+		return nil, fmt.Errorf("unmarshal graph: %w", err)
+	}
+	return d, nil
+}
+
+func (s *Store) GetDomainsByLearner(learnerID string) ([]*models.Domain, error) {
+	rows, err := s.db.Query(
+		`SELECT id, learner_id, name, graph_json, created_at
+		 FROM domains WHERE learner_id = ? ORDER BY created_at DESC`,
+		learnerID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get domains by learner: %w", err)
+	}
+	defer rows.Close()
+
+	var domains []*models.Domain
+	for rows.Next() {
+		d := &models.Domain{}
+		var graphJSON string
+		if err := rows.Scan(&d.ID, &d.LearnerID, &d.Name, &graphJSON, &d.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan domain row: %w", err)
+		}
+		if err := json.Unmarshal([]byte(graphJSON), &d.Graph); err != nil {
+			return nil, fmt.Errorf("unmarshal graph: %w", err)
+		}
+		domains = append(domains, d)
+	}
+	return domains, rows.Err()
+}
+
+func (s *Store) UpdateDomainGraph(domainID string, graph models.KnowledgeSpace) error {
+	graphJSON, err := json.Marshal(graph)
+	if err != nil {
+		return fmt.Errorf("marshal graph: %w", err)
+	}
+	_, err = s.db.Exec(
+		`UPDATE domains SET graph_json = ? WHERE id = ?`,
+		string(graphJSON), domainID,
+	)
+	if err != nil {
+		return fmt.Errorf("update domain graph: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) InsertConceptStateIfNotExists(cs *models.ConceptState) error {
+	cs.UpdatedAt = time.Now().UTC()
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO concept_states
+		    (learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
+		     reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
+		     p_slip, p_guess, theta, pfa_successes, pfa_failures, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cs.LearnerID, cs.Concept, cs.Stability, cs.Difficulty, cs.ElapsedDays, cs.ScheduledDays,
+		cs.Reps, cs.Lapses, cs.CardState, cs.LastReview, cs.NextReview,
+		cs.PMastery, cs.PLearn, cs.PForget, cs.PSlip, cs.PGuess,
+		cs.Theta, cs.PFASuccesses, cs.PFAFailures, cs.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert concept state if not exists: %w", err)
+	}
+	return nil
 }
 
 // ─── Concept States ───────────────────────────────────────────────────────────
@@ -325,10 +424,10 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 func (s *Store) CreateInteraction(i *models.Interaction) error {
 	i.CreatedAt = time.Now().UTC()
 	result, err := s.db.Exec(
-		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, notes, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.LearnerID, i.Concept, i.ActivityType, boolToInt(i.Success),
-		i.ResponseTime, i.Confidence, i.Notes, i.CreatedAt,
+		i.ResponseTime, i.Confidence, i.ErrorType, i.Notes, i.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create interaction: %w", err)
@@ -343,7 +442,7 @@ func (s *Store) CreateInteraction(i *models.Interaction) error {
 
 func (s *Store) GetRecentInteractions(learnerID, concept string, limit int) ([]*models.Interaction, error) {
 	rows, err := s.db.Query(
-		`SELECT id, learner_id, concept, activity_type, success, response_time, confidence, notes, created_at
+		`SELECT id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, created_at
 		 FROM interactions WHERE learner_id = ? AND concept = ?
 		 ORDER BY created_at DESC LIMIT ?`,
 		learnerID, concept, limit,
@@ -357,7 +456,7 @@ func (s *Store) GetRecentInteractions(learnerID, concept string, limit int) ([]*
 
 func (s *Store) GetRecentInteractionsByLearner(learnerID string, limit int) ([]*models.Interaction, error) {
 	rows, err := s.db.Query(
-		`SELECT id, learner_id, concept, activity_type, success, response_time, confidence, notes, created_at
+		`SELECT id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, created_at
 		 FROM interactions WHERE learner_id = ?
 		 ORDER BY created_at DESC LIMIT ?`,
 		learnerID, limit,
@@ -369,18 +468,37 @@ func (s *Store) GetRecentInteractionsByLearner(learnerID string, limit int) ([]*
 	return scanInteractions(rows)
 }
 
+func (s *Store) GetSessionInteractions(learnerID string) ([]*models.Interaction, error) {
+	cutoff := time.Now().UTC().Add(-2 * time.Hour)
+	rows, err := s.db.Query(
+		`SELECT id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, created_at
+		 FROM interactions WHERE learner_id = ? AND created_at > ?
+		 ORDER BY created_at DESC`,
+		learnerID, cutoff,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get session interactions: %w", err)
+	}
+	defer rows.Close()
+	return scanInteractions(rows)
+}
+
 func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 	var interactions []*models.Interaction
 	for rows.Next() {
 		i := &models.Interaction{}
 		var successInt int
+		var errorType sql.NullString
 		if err := rows.Scan(
 			&i.ID, &i.LearnerID, &i.Concept, &i.ActivityType,
-			&successInt, &i.ResponseTime, &i.Confidence, &i.Notes, &i.CreatedAt,
+			&successInt, &i.ResponseTime, &i.Confidence, &errorType, &i.Notes, &i.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan interaction row: %w", err)
 		}
 		i.Success = successInt != 0
+		if errorType.Valid {
+			i.ErrorType = errorType.String
+		}
 		interactions = append(interactions, i)
 	}
 	return interactions, rows.Err()
@@ -491,4 +609,120 @@ func (s *Store) MarkAlertSent(id int64) error {
 		return fmt.Errorf("mark alert sent: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) WasAlertSentToday(learnerID, alertType string) (bool, error) {
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM scheduled_alerts
+		 WHERE learner_id = ? AND alert_type = ? AND created_at >= ?`,
+		learnerID, alertType, today,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check alert sent today: %w", err)
+	}
+	return count > 0, nil
+}
+
+// ─── Stats for Scheduler ─────────────────────────────────────────────────────
+
+// GetDailyStreak returns how many consecutive days the learner has had interactions.
+func (s *Store) GetDailyStreak(learnerID string) (int, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT DATE(created_at) as d FROM interactions
+		 WHERE learner_id = ? ORDER BY d DESC`,
+		learnerID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("get daily streak: %w", err)
+	}
+	defer rows.Close()
+
+	streak := 0
+	expected := time.Now().UTC().Truncate(24 * time.Hour)
+	for rows.Next() {
+		var dateStr string
+		if err := rows.Scan(&dateStr); err != nil {
+			return streak, nil
+		}
+		d, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			return streak, nil
+		}
+		// Allow today or yesterday to start the streak
+		if streak == 0 {
+			diff := expected.Sub(d).Hours() / 24
+			if diff > 1 {
+				return 0, nil // last activity was more than 1 day ago
+			}
+			streak = 1
+			expected = d.AddDate(0, 0, -1)
+			continue
+		}
+		if d.Equal(expected) {
+			streak++
+			expected = d.AddDate(0, 0, -1)
+		} else {
+			break
+		}
+	}
+	return streak, nil
+}
+
+// GetTodayInteractionCount returns the number of interactions today.
+func (s *Store) GetTodayInteractionCount(learnerID string) (int, error) {
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM interactions WHERE learner_id = ? AND created_at >= ?`,
+		learnerID, today,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get today interactions: %w", err)
+	}
+	return count, nil
+}
+
+// GetTodaySuccessRate returns success rate for today's interactions.
+func (s *Store) GetTodaySuccessRate(learnerID string) (float64, int, error) {
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	var total, successes int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(success), 0) FROM interactions
+		 WHERE learner_id = ? AND created_at >= ?`,
+		learnerID, today,
+	).Scan(&total, &successes)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get today success rate: %w", err)
+	}
+	if total == 0 {
+		return 0, 0, nil
+	}
+	return float64(successes) / float64(total), total, nil
+}
+
+// GetConceptsDueForReview returns concepts where next_review is in the past.
+func (s *Store) GetConceptsDueForReview(learnerID string) ([]string, error) {
+	now := time.Now().UTC()
+	rows, err := s.db.Query(
+		`SELECT concept FROM concept_states
+		 WHERE learner_id = ? AND next_review IS NOT NULL AND next_review <= ? AND card_state != 'new'
+		 ORDER BY next_review ASC`,
+		learnerID, now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get concepts due for review: %w", err)
+	}
+	defer rows.Close()
+
+	var concepts []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return concepts, nil
+		}
+		concepts = append(concepts, c)
+	}
+	return concepts, nil
 }

@@ -59,10 +59,16 @@ func main() {
 	deps := &tools.Deps{Store: store}
 	tools.RegisterTools(mcpServer, deps)
 
-	// Create MCP handler
+	// Create MCP handler — disable localhost protection (behind Tailscale Funnel)
+	// and allow Claude.ai cross-origin requests
+	cop := http.NewCrossOriginProtection()
+	cop.AddTrustedOrigin("https://claude.ai")
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return mcpServer
-	}, nil)
+	}, &mcp.StreamableHTTPOptions{
+		DisableLocalhostProtection: true,
+		CrossOriginProtection:      cop,
+	})
 
 	// OAuth server
 	oauthServer := auth.NewOAuthServer(store, baseURL, logger)
@@ -90,11 +96,46 @@ func main() {
 	}
 	defer scheduler.Stop()
 
+	// Wrap with CORS + request logging
+	handler := requestLogger(logger, corsMiddleware(mux))
+
 	logger.Info("learning runtime starting", "port", port, "base_url", baseURL)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		logger.Error("server failed", "err", err)
 		os.Exit(1)
 	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rec, r)
+		logger.Info("request", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ua", r.UserAgent())
+	})
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id")
+		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func parseLogLevel(level string) slog.Level {

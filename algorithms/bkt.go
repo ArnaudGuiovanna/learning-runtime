@@ -29,6 +29,30 @@ func BKTUpdate(state BKTState, correct bool) BKTState {
 	return result
 }
 
+// BKTUpdateWithErrorType adjusts BKT parameters based on error type before updating.
+// SYNTAX_ERROR: careless mistake — higher slip, less penalizing to mastery.
+// KNOWLEDGE_GAP: genuine lack of understanding — lower guess, more penalizing.
+// LOGIC_ERROR or empty: standard BKT update.
+func BKTUpdateWithErrorType(state BKTState, correct bool, errorType string) BKTState {
+	if correct || errorType == "" {
+		return BKTUpdate(state, correct)
+	}
+
+	adjusted := state
+	switch errorType {
+	case "SYNTAX_ERROR":
+		// Syntax errors indicate carelessness, not lack of knowledge.
+		// Temporarily boost PSlip to reduce mastery penalty.
+		adjusted.PSlip = clamp(state.PSlip+0.15, 0, 0.5)
+	case "KNOWLEDGE_GAP":
+		// Genuine knowledge gap — reduce PGuess to penalize more.
+		adjusted.PGuess = clamp(state.PGuess-0.10, 0.05, 0.5)
+	}
+	// LOGIC_ERROR uses standard parameters
+
+	return BKTUpdate(adjusted, correct)
+}
+
 func BKTIsMastered(state BKTState) bool {
 	return state.PMastery >= BKTMasteryThreshold
 }

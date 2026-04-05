@@ -7,6 +7,7 @@ import (
 
 	"learning-runtime/auth"
 	"learning-runtime/db"
+	"learning-runtime/models"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -22,6 +23,14 @@ func getLearnerID(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("authentication required")
 	}
 	return id, nil
+}
+
+// resolveDomain resolves a domain by ID or falls back to the learner's most recent domain.
+func resolveDomain(store *db.Store, learnerID, domainID string) (*models.Domain, error) {
+	if domainID != "" {
+		return store.GetDomainByID(domainID)
+	}
+	return store.GetDomainByLearner(learnerID)
 }
 
 func jsonResult(v interface{}) (*mcp.CallToolResult, error) {
@@ -48,5 +57,7 @@ func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerGetAvailabilityModel(server, deps)
 	registerGetCockpitState(server, deps)
 	registerInitDomain(server, deps)
+	registerAddConcepts(server, deps)
+	registerUpdateLearnerProfile(server, deps)
 	RegisterPrompt(server)
 }

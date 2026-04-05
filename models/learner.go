@@ -8,6 +8,7 @@ type Learner struct {
 	PasswordHash string
 	Objective    string
 	WebhookURL   string
+	ProfileJSON  string
 	CreatedAt    time.Time
 	LastActive   time.Time
 }
@@ -60,6 +61,7 @@ type Interaction struct {
 	Success      bool
 	ResponseTime int
 	Confidence   float64
+	ErrorType    string
 	Notes        string
 	CreatedAt    time.Time
 }

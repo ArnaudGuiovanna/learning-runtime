@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS learners (
     password_hash TEXT NOT NULL,
     objective     TEXT NOT NULL,
     webhook_url   TEXT DEFAULT '',
+    profile_json  TEXT DEFAULT '{}',
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_active   DATETIME
 );
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS interactions (
     success       INTEGER NOT NULL,
     response_time INTEGER,
     confidence    REAL,
+    error_type    TEXT DEFAULT '',
     notes         TEXT,
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -48,6 +48,7 @@ func (s *OAuthServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /authorize", s.handleAuthorizeGet)
 	mux.HandleFunc("POST /authorize", s.handleAuthorizePost)
 	mux.HandleFunc("POST /token", s.handleToken)
+	mux.HandleFunc("POST /register", s.handleDynamicClientRegistration)
 }
 
 func (s *OAuthServer) handleAuthServerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +60,8 @@ func (s *OAuthServer) handleAuthServerMetadata(w http.ResponseWriter, r *http.Re
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"scopes_supported":                      []string{"learner"},
+		"registration_endpoint":                    s.baseURL + "/register",
+		"token_endpoint_auth_methods_supported":    []string{"none"},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(meta)
@@ -66,7 +69,7 @@ func (s *OAuthServer) handleAuthServerMetadata(w http.ResponseWriter, r *http.Re
 
 func (s *OAuthServer) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
 	meta := map[string]interface{}{
-		"resource":              s.baseURL,
+		"resource":              s.baseURL + "/mcp",
 		"authorization_servers": []string{s.baseURL},
 		"scopes_supported":      []string{"learner"},
 	}
@@ -196,8 +199,12 @@ func (s *OAuthServer) handleToken(w http.ResponseWriter, r *http.Request) {
 func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	codeVerifier := r.FormValue("code_verifier")
+	clientID := r.FormValue("client_id")
+
+	s.logger.Info("token exchange attempt", "code_len", len(code), "verifier_len", len(codeVerifier), "client_id", clientID)
 
 	if code == "" || codeVerifier == "" {
+		s.logger.Error("token exchange: missing code or verifier")
 		writeTokenError(w, "invalid_request", http.StatusBadRequest)
 		return
 	}
@@ -210,6 +217,7 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 	s.codesMu.Unlock()
 
 	if !ok || time.Now().After(authCode.ExpiresAt) {
+		s.logger.Error("token exchange: code not found or expired", "found", ok)
 		writeTokenError(w, "invalid_grant", http.StatusBadRequest)
 		return
 	}
@@ -217,7 +225,9 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 	// Verify PKCE: SHA256(code_verifier) == code_challenge (base64url, no padding).
 	h := sha256.Sum256([]byte(codeVerifier))
 	computed := base64.RawURLEncoding.EncodeToString(h[:])
+	s.logger.Info("PKCE check", "stored_challenge", authCode.CodeChallenge, "computed", computed, "match", computed == authCode.CodeChallenge)
 	if computed != authCode.CodeChallenge {
+		s.logger.Error("token exchange: PKCE mismatch")
 		writeTokenError(w, "invalid_grant", http.StatusBadRequest)
 		return
 	}
@@ -291,6 +301,43 @@ func writeTokenError(w http.ResponseWriter, errCode string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": errCode})
+}
+
+// handleDynamicClientRegistration implements RFC 7591.
+// Claude.ai must register as an OAuth client before starting the auth flow.
+func (s *OAuthServer) handleDynamicClientRegistration(w http.ResponseWriter, r *http.Request) {
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid_client_metadata"}`, http.StatusBadRequest)
+		return
+	}
+
+	s.logger.Info("dynamic client registration request", "body", req)
+
+	// Generate a client_id for this client
+	clientID, err := generateCode()
+	if err != nil {
+		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Echo back all client metadata + add our fields (RFC 7591 compliance)
+	resp := map[string]interface{}{
+		"client_id":                  clientID,
+		"client_id_issued_at":        time.Now().Unix(),
+		"client_name":               req["client_name"],
+		"redirect_uris":             req["redirect_uris"],
+		"grant_types":               []string{"authorization_code", "refresh_token"},
+		"response_types":            []string{"code"},
+		"token_endpoint_auth_method": "none",
+		"scope":                      "learner",
+	}
+
+	s.logger.Info("dynamic client registered", "client_id", clientID)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func generateCode() (string, error) {

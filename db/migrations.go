@@ -27,5 +27,13 @@ func Migrate(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// Incremental migrations for existing databases (ALTER TABLE is idempotent-safe)
+	alterMigrations := []string{
+		`ALTER TABLE learners ADD COLUMN profile_json TEXT DEFAULT '{}'`,
+		`ALTER TABLE interactions ADD COLUMN error_type TEXT DEFAULT ''`,
+	}
+	for _, m := range alterMigrations {
+		_, _ = db.Exec(m) // ignore "duplicate column" errors
+	}
 	return nil
 }
