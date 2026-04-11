@@ -23,6 +23,8 @@ type RecordInteractionParams struct {
 	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"Nombre d'indices demandes pendant l'echange (optionnel, defaut 0)"`
 	SelfInitiated       bool    `json:"self_initiated,omitempty" jsonschema:"true si la session a demarre sans alerte webhook"`
 	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"ID de la prediction de calibration associee (optionnel)"`
+	MisconceptionType   string  `json:"misconception_type,omitempty" jsonschema:"Label libre de la misconception detectee (optionnel, ignore si success=true)"`
+	MisconceptionDetail string  `json:"misconception_detail,omitempty" jsonschema:"Description de la misconception en une phrase (optionnel)"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {
@@ -61,6 +63,12 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			HintsRequested: params.HintsRequested,
 			SelfInitiated:  params.SelfInitiated,
 			CalibrationID:  params.CalibrationID,
+		}
+
+		// Misconception fields — only stored on failures
+		if !params.Success && params.MisconceptionType != "" {
+			interaction.MisconceptionType = params.MisconceptionType
+			interaction.MisconceptionDetail = params.MisconceptionDetail
 		}
 
 		// Check proactive review before recording
