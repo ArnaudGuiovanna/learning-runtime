@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"learning-runtime/algorithms"
@@ -149,13 +150,43 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		r, _ := jsonResult(map[string]interface{}{
-			"needs_domain_setup":    false,
-			"domain_id":             domain.ID,
-			"activity":              activity,
-			"session_concepts_done": len(sessionConcepts),
-			"metacognitive_mirror":  mirror,
-			"tutor_mode":            tutorMode,
+		// Misconception enrichment for selected concept
+		var activeMisconceptions any = []any{}
+		var knownMisconceptionTypes any = []string{}
+
+		if activity.Concept != "" {
+			if active, err := deps.Store.GetActiveMisconceptions(learnerID, activity.Concept); err == nil && len(active) > 0 {
+				activeMisconceptions = active
+
+				// Inject misconceptions into prompt
+				misconceptionPrompt := fmt.Sprintf("\nATTENTION : l'apprenant a %d misconception(s) active(s) : ", len(active))
+				for i, m := range active {
+					if i > 0 {
+						misconceptionPrompt += " ; "
+					}
+					misconceptionPrompt += m.MisconceptionType
+					if m.LastErrorDetail != "" {
+						misconceptionPrompt += " — " + m.LastErrorDetail
+					}
+				}
+				misconceptionPrompt += ". Cible ces confusions dans ton explication et ton exercice. Ne mentionne pas explicitement les misconceptions — concois l'exercice pour qu'il les confronte naturellement."
+				activity.PromptForLLM += misconceptionPrompt
+			}
+
+			if types, err := deps.Store.GetDistinctMisconceptionTypes(learnerID, activity.Concept); err == nil && len(types) > 0 {
+				knownMisconceptionTypes = types
+			}
+		}
+
+		r, _ := jsonResult(map[string]any{
+			"needs_domain_setup":        false,
+			"domain_id":                 domain.ID,
+			"activity":                  activity,
+			"session_concepts_done":     len(sessionConcepts),
+			"metacognitive_mirror":      mirror,
+			"tutor_mode":               tutorMode,
+			"active_misconceptions":     activeMisconceptions,
+			"known_misconception_types": knownMisconceptionTypes,
 		})
 		return r, nil, nil
 	})
