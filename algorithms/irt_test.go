@@ -32,3 +32,20 @@ func TestIRTIsInZPD(t *testing.T) {
 	if IRTIsInZPD(0.90) { t.Error("0.90 should NOT be in ZPD") }
 	if IRTIsInZPD(0.40) { t.Error("0.40 should NOT be in ZPD") }
 }
+
+func TestFSRSDifficultyToIRT(t *testing.T) {
+	tests := []struct {
+		fsrs float64
+		want float64
+	}{
+		{1.0, -3.0},   // easiest FSRS → lowest IRT
+		{10.0, 3.0},   // hardest FSRS → highest IRT
+		{5.5, 0.0},    // midpoint → zero
+	}
+	for _, tt := range tests {
+		got := FSRSDifficultyToIRT(tt.fsrs)
+		if !approxEqual(got, tt.want, 0.01) {
+			t.Errorf("FSRSDifficultyToIRT(%.1f) = %.2f, want %.2f", tt.fsrs, got, tt.want)
+		}
+	}
+}
