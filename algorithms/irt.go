@@ -33,3 +33,8 @@ func IRTUpdateTheta(theta float64, items []IRTItem, responses []bool) float64 {
 func IRTIsInZPD(pCorrect float64) bool {
 	return pCorrect >= 0.55 && pCorrect <= 0.80
 }
+
+// FSRSDifficultyToIRT maps FSRS difficulty [1, 10] to IRT scale [-3, 3].
+func FSRSDifficultyToIRT(fsrsDifficulty float64) float64 {
+	return (fsrsDifficulty-1.0)*2.0/3.0 - 3.0
+}

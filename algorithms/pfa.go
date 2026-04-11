@@ -22,6 +22,14 @@ func PFAScore(state PFAState) float64 {
 	return pfaBetaSuccess*state.Successes + pfaBetaFailure*state.Failures
 }
 
+// PFAProbability applies the logistic sigmoid to PFAScore, producing a
+// proper probability in (0, 1). At extreme scores the sigmoid saturates,
+// making consecutive deltas small — which is how PFADetectPlateau
+// identifies genuine learning plateaus.
+func PFAProbability(state PFAState) float64 {
+	return 1.0 / (1.0 + math.Exp(-PFAScore(state)))
+}
+
 func PFADetectPlateau(recentScores []float64, minCount int) bool {
 	if len(recentScores) < minCount { return false }
 	scores := recentScores[len(recentScores)-minCount:]
@@ -30,5 +38,5 @@ func PFADetectPlateau(recentScores []float64, minCount int) bool {
 		delta := math.Abs(scores[i] - scores[i-1])
 		if delta > maxDelta { maxDelta = delta }
 	}
-	return maxDelta < 0.011
+	return maxDelta < 0.025
 }

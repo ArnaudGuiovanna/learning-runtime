@@ -96,7 +96,32 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 		}
 	}
 
-	// PLATEAU: PFA score stagnation
+	// Predictive ZPD via IRT: probability of success below 55% signals incoming drift
+	// before 3 failures accumulate. Only for concepts with review history (Reps > 0).
+	zpdConcepts := make(map[string]bool)
+	for _, a := range alerts {
+		if a.Type == models.AlertZPDDrift {
+			zpdConcepts[a.Concept] = true
+		}
+	}
+	for _, cs := range states {
+		if cs.CardState == "new" || cs.Reps == 0 || zpdConcepts[cs.Concept] {
+			continue
+		}
+		irtDiff := algorithms.FSRSDifficultyToIRT(cs.Difficulty)
+		pCorrect := algorithms.IRTProbability(cs.Theta, irtDiff, 1.0)
+		if pCorrect < 0.55 {
+			alerts = append(alerts, models.Alert{
+				Type:              models.AlertZPDDrift,
+				Concept:           cs.Concept,
+				Urgency:           models.UrgencyInfo,
+				ErrorRate:         1.0 - pCorrect,
+				RecommendedAction: fmt.Sprintf("IRT: probabilite de reussite a %.0f%% — difficulte a reduire", pCorrect*100),
+			})
+		}
+	}
+
+	// PLATEAU: PFA probability stagnation (sigmoid saturates at extremes)
 	conceptInteractions := groupByConcept(recentInteractions)
 	for concept, interactions := range conceptInteractions {
 		if len(interactions) >= 4 {
@@ -104,7 +129,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 			state := algorithms.PFAState{}
 			for _, i := range interactions {
 				state = algorithms.PFAUpdate(state, i.Success)
-				scores = append(scores, algorithms.PFAScore(state))
+				scores = append(scores, algorithms.PFAProbability(state))
 			}
 			if algorithms.PFADetectPlateau(scores, 4) {
 				alerts = append(alerts, models.Alert{
