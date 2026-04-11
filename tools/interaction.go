@@ -124,7 +124,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 
 		// IRT UpdateTheta
 		item := algorithms.IRTItem{
-			Difficulty:     cs.Difficulty / 10.0, // normalize to IRT scale
+			Difficulty:     algorithms.FSRSDifficultyToIRT(cs.Difficulty),
 			Discrimination: 1.0,
 		}
 		cs.Theta = algorithms.IRTUpdateTheta(cs.Theta, []algorithms.IRTItem{item}, []bool{params.Success})

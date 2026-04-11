@@ -62,6 +62,50 @@ func TestComputeAlertsZPDDrift(t *testing.T) {
 	}
 }
 
+func TestComputeAlertsIRTPredictiveZPDDrift(t *testing.T) {
+	// Concept with low theta and high difficulty → IRT pCorrect < 0.55
+	// Theta = -1.0, FSRS difficulty = 8.0 → IRT difficulty ≈ 1.67
+	// pCorrect = 1/(1+exp(-1*(-1.0-1.67))) ≈ 0.065 — well below 0.55
+	states := []*models.ConceptState{
+		{Concept: "channels", Theta: -1.0, Difficulty: 8.0, Reps: 3, CardState: "review"},
+	}
+	alerts := ComputeAlerts(states, nil, time.Time{})
+
+	found := false
+	for _, a := range alerts {
+		if a.Type == models.AlertZPDDrift && a.Concept == "channels" && a.Urgency == models.UrgencyInfo {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected IRT-predictive ZPD_DRIFT (info) for channels")
+	}
+}
+
+func TestComputeAlertsIRTPredictiveSkipsWhenFailureBased(t *testing.T) {
+	// Concept already has 3 failures → failure-based ZPD_DRIFT (warning) exists.
+	// IRT-predictive should NOT add a duplicate.
+	states := []*models.ConceptState{
+		{Concept: "pointers", Theta: -1.0, Difficulty: 8.0, Reps: 5, CardState: "review", PMastery: 0.3},
+	}
+	interactions := []*models.Interaction{
+		{Concept: "pointers", Success: false},
+		{Concept: "pointers", Success: false},
+		{Concept: "pointers", Success: false},
+	}
+	alerts := ComputeAlerts(states, interactions, time.Time{})
+
+	zpdCount := 0
+	for _, a := range alerts {
+		if a.Type == models.AlertZPDDrift && a.Concept == "pointers" {
+			zpdCount++
+		}
+	}
+	if zpdCount != 1 {
+		t.Errorf("expected exactly 1 ZPD_DRIFT for pointers, got %d", zpdCount)
+	}
+}
+
 func TestComputeAlertsDependencyIncreasing(t *testing.T) {
 	autonomyScores := []float64{0.4, 0.5, 0.6} // declining (newest first)
 	alerts := ComputeMetacognitiveAlerts(autonomyScores, 0.3, nil, nil)
