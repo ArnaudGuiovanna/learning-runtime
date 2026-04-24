@@ -459,6 +459,10 @@ func (s *Scheduler) sendWebhook(url, message string) error {
 // 4 attempts: immediate, +1s, +5s, +25s.
 // Stops on 4xx (except 429). Respects Discord Retry-After header on 429.
 func (s *Scheduler) doWithRetry(url string, body []byte) error {
+	if !db.IsSafeWebhookURL(url) {
+		s.logger.Error("webhook blocked: unsafe url", "url", url)
+		return fmt.Errorf("unsafe webhook url")
+	}
 	delays := []time.Duration{0, 1 * time.Second, 5 * time.Second, 25 * time.Second}
 	var lastErr error
 	for attempt, delay := range delays {

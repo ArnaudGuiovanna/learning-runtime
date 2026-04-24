@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
     code           TEXT PRIMARY KEY,
     learner_id     TEXT NOT NULL REFERENCES learners(id),
     code_challenge TEXT NOT NULL,
+    client_id      TEXT NOT NULL DEFAULT '',
     expires_at     DATETIME NOT NULL,
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );

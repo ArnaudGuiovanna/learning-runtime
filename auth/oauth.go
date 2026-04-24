@@ -3,10 +3,14 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -66,16 +70,62 @@ func (s *OAuthServer) HandleProtectedResourceMetadata(w http.ResponseWriter, r *
 	json.NewEncoder(w).Encode(meta)
 }
 
+// validateRedirectURI checks that the supplied redirectURI is strictly equal
+// to one of the URIs registered for the given clientID. No prefix / wildcard.
+func (s *OAuthServer) validateRedirectURI(clientID, redirectURI string) error {
+	if clientID == "" || redirectURI == "" {
+		return fmt.Errorf("missing client_id or redirect_uri")
+	}
+	client, err := s.store.GetOAuthClient(clientID)
+	if err != nil {
+		return fmt.Errorf("unknown client")
+	}
+	var registered []string
+	if err := json.Unmarshal([]byte(client.RedirectURIs), &registered); err != nil {
+		return fmt.Errorf("malformed registration")
+	}
+	for _, u := range registered {
+		if u == redirectURI {
+			return nil
+		}
+	}
+	return fmt.Errorf("redirect_uri not registered")
+}
+
 func (s *OAuthServer) HandleAuthorizeGet(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	clientID := q.Get("client_id")
+	redirectURI := q.Get("redirect_uri")
+
+	if err := s.validateRedirectURI(clientID, redirectURI); err != nil {
+		http.Error(w, "invalid redirect_uri: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	csrfToken, err := generateCSRFToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "csrf_token",
+		Value:    csrfToken,
+		Path:     "/authorize",
+		MaxAge:   600,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
 	data := authPageData{
-		ClientID:            q.Get("client_id"),
-		RedirectURI:         q.Get("redirect_uri"),
+		ClientID:            clientID,
+		RedirectURI:         redirectURI,
 		ResponseType:        q.Get("response_type"),
 		State:               q.Get("state"),
 		CodeChallenge:       q.Get("code_challenge"),
 		CodeChallengeMethod: q.Get("code_challenge_method"),
 		Scope:               q.Get("scope"),
+		CSRFToken:           csrfToken,
 	}
 	renderAuthPage(w, data, "", "login")
 }
@@ -86,22 +136,37 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	cookie, cerr := r.Cookie("csrf_token")
+	formCSRF := r.FormValue("csrf_token")
+	if cerr != nil || cookie.Value == "" || formCSRF == "" ||
+		subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(formCSRF)) != 1 {
+		http.Error(w, "forbidden: csrf check failed", http.StatusForbidden)
+		return
+	}
+
+	clientID := r.FormValue("client_id")
+	redirectURI := r.FormValue("redirect_uri")
+	if err := s.validateRedirectURI(clientID, redirectURI); err != nil {
+		http.Error(w, "invalid redirect_uri: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	mode := r.FormValue("mode") // "login" or "register"
 	email := r.FormValue("email")
 	password := r.FormValue("password")
 
-	redirectURI := r.FormValue("redirect_uri")
 	state := r.FormValue("state")
 	codeChallenge := r.FormValue("code_challenge")
 
 	data := authPageData{
-		ClientID:            r.FormValue("client_id"),
+		ClientID:            clientID,
 		RedirectURI:         redirectURI,
 		ResponseType:        r.FormValue("response_type"),
 		State:               state,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: r.FormValue("code_challenge_method"),
 		Scope:               r.FormValue("scope"),
+		CSRFToken:           formCSRF,
 	}
 
 	if email == "" || password == "" {
@@ -164,7 +229,7 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.store.CreateAuthCode(code, learnerID, codeChallenge, time.Now().Add(5*time.Minute)); err != nil {
+	if err := s.store.CreateAuthCode(code, learnerID, codeChallenge, clientID, time.Now().Add(5*time.Minute)); err != nil {
 		s.logger.Error("create auth code failed", "err", err)
 		renderAuthPage(w, data, "Internal error. Please try again.", mode)
 		return
@@ -200,17 +265,17 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 	codeVerifier := r.FormValue("code_verifier")
 	clientID := r.FormValue("client_id")
 
-	s.logger.Info("token exchange attempt", "code_len", len(code), "verifier_len", len(codeVerifier), "client_id", clientID)
+	s.logger.Debug("token exchange attempt", "code_len", len(code), "verifier_len", len(codeVerifier), "client_id", clientID)
 
-	if code == "" || codeVerifier == "" {
-		s.logger.Error("token exchange: missing code or verifier")
+	if code == "" || codeVerifier == "" || clientID == "" {
+		s.logger.Debug("token exchange: missing code, verifier or client_id")
 		writeTokenError(w, "invalid_request", http.StatusBadRequest)
 		return
 	}
 
-	authCode, err := s.store.ConsumeAuthCode(code)
+	authCode, err := s.store.ConsumeAuthCode(code, clientID)
 	if err != nil || time.Now().After(authCode.ExpiresAt) {
-		s.logger.Error("token exchange: code not found or expired", "err", err)
+		s.logger.Debug("token exchange: code not found or expired", "err", err)
 		writeTokenError(w, "invalid_grant", http.StatusBadRequest)
 		return
 	}
@@ -218,9 +283,9 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 	// Verify PKCE: SHA256(code_verifier) == code_challenge (base64url, no padding).
 	h := sha256.Sum256([]byte(codeVerifier))
 	computed := base64.RawURLEncoding.EncodeToString(h[:])
-	s.logger.Info("PKCE check", "stored_challenge", authCode.CodeChallenge, "computed", computed, "match", computed == authCode.CodeChallenge)
+	s.logger.Debug("PKCE check", "match", computed == authCode.CodeChallenge)
 	if computed != authCode.CodeChallenge {
-		s.logger.Error("token exchange: PKCE mismatch")
+		s.logger.Debug("token exchange: PKCE mismatch")
 		writeTokenError(w, "invalid_grant", http.StatusBadRequest)
 		return
 	}
@@ -296,6 +361,65 @@ func writeTokenError(w http.ResponseWriter, errCode string, status int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": errCode})
 }
 
+// validateRegistrationRedirectURIs enforces https-or-loopback and rejects
+// private IPs to prevent SSRF / open-redirect through client registration.
+func validateRegistrationRedirectURIs(uris []string) error {
+	if len(uris) > 5 {
+		return fmt.Errorf("too many redirect_uris (max 5)")
+	}
+	for _, raw := range uris {
+		if len(raw) > 512 {
+			return fmt.Errorf("redirect_uri too long (max 512 chars)")
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("invalid redirect_uri: %w", err)
+		}
+		host := u.Hostname()
+		if host == "localhost" || host == "127.0.0.1" {
+			continue
+		}
+		if u.Scheme != "https" {
+			return fmt.Errorf("redirect_uri must use https (got %q)", u.Scheme)
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			if isPrivateIP(ip) {
+				return fmt.Errorf("redirect_uri points to private IP range")
+			}
+		}
+	}
+	return nil
+}
+
+var privateCIDRs = func() []*net.IPNet {
+	blocks := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"127.0.0.0/8",
+		"::1/128",
+		"fc00::/7",
+	}
+	var out []*net.IPNet
+	for _, b := range blocks {
+		_, n, err := net.ParseCIDR(b)
+		if err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
+func isPrivateIP(ip net.IP) bool {
+	for _, n := range privateCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // HandleRegister implements RFC 7591 dynamic client registration.
 // Claude.ai must register as an OAuth client before starting the auth flow.
 func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
@@ -305,27 +429,43 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger.Info("dynamic client registration request", "body", req)
+	clientName := ""
+	if name, ok := req["client_name"].(string); ok {
+		clientName = name
+	}
+	s.logger.Info("dynamic client registration request", "client_name", clientName)
 
-	// Generate a client_id for this client
+	var uris []string
+	if raw, ok := req["redirect_uris"]; ok {
+		if arr, ok := raw.([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					uris = append(uris, s)
+				}
+			}
+		}
+	}
+	if len(uris) == 0 {
+		writeRegistrationError(w, "invalid_redirect_uri", "at least one redirect_uri required")
+		return
+	}
+	if err := validateRegistrationRedirectURIs(uris); err != nil {
+		writeRegistrationError(w, "invalid_redirect_uri", err.Error())
+		return
+	}
+
 	clientID, err := generateCode()
 	if err != nil {
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// Persist the client registration
-	redirectURIs := "[]"
-	if uris, ok := req["redirect_uris"]; ok {
-		if b, err := json.Marshal(uris); err == nil {
-			redirectURIs = string(b)
-		}
+	redirectURIsJSON, err := json.Marshal(uris)
+	if err != nil {
+		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
+		return
 	}
-	clientName := ""
-	if name, ok := req["client_name"].(string); ok {
-		clientName = name
-	}
-	if err := s.store.CreateOAuthClient(clientID, clientName, redirectURIs); err != nil {
+	if err := s.store.CreateOAuthClient(clientID, clientName, string(redirectURIsJSON)); err != nil {
 		s.logger.Error("persist client registration failed", "err", err)
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 		return
@@ -335,10 +475,10 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"client_id":                  clientID,
 		"client_id_issued_at":        time.Now().Unix(),
-		"client_name":               req["client_name"],
-		"redirect_uris":             req["redirect_uris"],
-		"grant_types":               []string{"authorization_code", "refresh_token"},
-		"response_types":            []string{"code"},
+		"client_name":                clientName,
+		"redirect_uris":              uris,
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
 		"token_endpoint_auth_method": "none",
 		"scope":                      "learner",
 	}
@@ -350,7 +490,24 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func writeRegistrationError(w http.ResponseWriter, errCode, desc string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":             errCode,
+		"error_description": desc,
+	})
+}
+
 func generateCode() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func generateCSRFToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err

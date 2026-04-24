@@ -6,10 +6,38 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"learning-runtime/models"
 )
+
+// IsSafeWebhookURL validates that a webhook URL targets Discord over HTTPS.
+// SSRF guard: only Discord webhook hosts allowed (blocks IMDS, internal ranges, etc.).
+func IsSafeWebhookURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" || strings.Contains(host, "..") {
+		return false
+	}
+	if net.ParseIP(host) != nil {
+		return false
+	}
+	host = strings.ToLower(host)
+	switch host {
+	case "discord.com", "discordapp.com":
+		return true
+	}
+	return strings.HasSuffix(host, ".discord.com") || strings.HasSuffix(host, ".discordapp.com")
+}
 
 type Store struct {
 	db *sql.DB
@@ -42,6 +70,9 @@ func boolToInt(b bool) int {
 // ─── Learners ────────────────────────────────────────────────────────────────
 
 func (s *Store) CreateLearner(email, passwordHash, objective, webhookURL string) (*models.Learner, error) {
+	if webhookURL != "" && !IsSafeWebhookURL(webhookURL) {
+		return nil, fmt.Errorf("invalid webhook_url: must be https://discord.com/...")
+	}
 	id := generateID()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
@@ -896,13 +927,22 @@ type AuthCode struct {
 	Code          string
 	LearnerID     string
 	CodeChallenge string
+	ClientID      string
 	ExpiresAt     time.Time
 }
 
-func (s *Store) CreateAuthCode(code, learnerID, codeChallenge string, expiresAt time.Time) error {
+// OAuthClient is a dynamically-registered OAuth client.
+// RedirectURIs holds the JSON array as persisted.
+type OAuthClient struct {
+	ClientID     string
+	ClientName   string
+	RedirectURIs string
+}
+
+func (s *Store) CreateAuthCode(code, learnerID, codeChallenge, clientID string, expiresAt time.Time) error {
 	_, err := s.db.Exec(
-		`INSERT INTO oauth_codes (code, learner_id, code_challenge, expires_at) VALUES (?, ?, ?, ?)`,
-		code, learnerID, codeChallenge, expiresAt,
+		`INSERT INTO oauth_codes (code, learner_id, code_challenge, client_id, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		code, learnerID, codeChallenge, clientID, expiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create auth code: %w", err)
@@ -911,8 +951,8 @@ func (s *Store) CreateAuthCode(code, learnerID, codeChallenge string, expiresAt 
 }
 
 // ConsumeAuthCode retrieves and deletes an auth code in one operation.
-// Returns error if the code does not exist.
-func (s *Store) ConsumeAuthCode(code string) (*AuthCode, error) {
+// Binds the code to the requesting client_id: returns invalid_grant if mismatch.
+func (s *Store) ConsumeAuthCode(code, clientID string) (*AuthCode, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -921,9 +961,12 @@ func (s *Store) ConsumeAuthCode(code string) (*AuthCode, error) {
 
 	ac := &AuthCode{}
 	err = tx.QueryRow(
-		`SELECT code, learner_id, code_challenge, expires_at FROM oauth_codes WHERE code = ?`,
-		code,
-	).Scan(&ac.Code, &ac.LearnerID, &ac.CodeChallenge, &ac.ExpiresAt)
+		`SELECT code, learner_id, code_challenge, client_id, expires_at FROM oauth_codes WHERE code = ? AND client_id = ?`,
+		code, clientID,
+	).Scan(&ac.Code, &ac.LearnerID, &ac.CodeChallenge, &ac.ClientID, &ac.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("invalid_grant")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("consume auth code: %w", err)
 	}
@@ -947,6 +990,18 @@ func (s *Store) CreateOAuthClient(clientID, clientName, redirectURIs string) err
 		return fmt.Errorf("create oauth client: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) GetOAuthClient(clientID string) (*OAuthClient, error) {
+	c := &OAuthClient{}
+	err := s.db.QueryRow(
+		`SELECT client_id, client_name, redirect_uris FROM oauth_clients WHERE client_id = ?`,
+		clientID,
+	).Scan(&c.ClientID, &c.ClientName, &c.RedirectURIs)
+	if err != nil {
+		return nil, fmt.Errorf("get oauth client: %w", err)
+	}
+	return c, nil
 }
 
 func (s *Store) CleanupExpiredCodes() (int64, error) {
