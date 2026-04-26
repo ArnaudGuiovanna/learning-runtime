@@ -194,6 +194,47 @@ export LOG_LEVEL=debug        # debug | info | warn | error
 go build -o learning-runtime && ./learning-runtime
 ```
 
+## Capacité & Dimensionnement
+
+Cette implémentation est volontairement **single-tenant, mono-nœud** — une brique open-source à auto-héberger pour soi, un petit groupe ou une organisation modeste. Pas de cluster, pas de multi-writer : SQLite + scheduler in-process.
+
+Les chiffres ci-dessous intègrent un buffer de sécurité (~50 %) par rapport aux limites théoriques. Au-delà, il faut passer à Postgres + scheduler externalisé.
+
+| Profil | Apprenants actifs / jour | Apprenants enregistrés | Usage |
+|--------|--------------------------|------------------------|-------|
+| **Personnel** | 1 | 1–5 | usage individuel |
+| **Petit groupe** (famille, équipe) | 1–10 | jusqu'à 30 | usage régulier |
+| **Classe / atelier** | 10–50 | jusqu'à 150 | sessions encadrées |
+| **Petit organisme** | 50–200 | jusqu'à 600 | charge soutenue |
+
+> **Plafond dur recommandé : ~200 apprenants actifs simultanés.** Au-delà, le tick de 30 min du scheduler et la sérialisation des écritures SQLite (WAL = un seul writer) deviennent le facteur limitant.
+
+## Configuration serveur
+
+### Minimum (usage personnel ou petit groupe ≤10)
+
+- **CPU** : 1 vCPU
+- **RAM** : 512 MB
+- **Disque** : 2 GB SSD (binaire ~15 MB + DB qui grossit lentement)
+- **OS** : Linux moderne (Debian 12+, Ubuntu 22.04+, Alpine)
+- **Réseau** : sortie Internet pour les webhooks Discord
+- **Exemples** : Raspberry Pi 4, VPS à 5 €/mois, container LXC
+
+### Recommandé (jusqu'à 200 apprenants actifs)
+
+- **CPU** : 2 vCPU
+- **RAM** : 2 GB
+- **Disque** : 20 GB SSD (la table `interactions` croît de quelques KB par apprenant et par jour)
+- **OS** : Linux moderne avec systemd
+- **Reverse proxy** : Caddy ou Nginx pour TLS, ou Tailscale Funnel
+- **Sauvegarde** : snapshot quotidien de `data/runtime.db` (en mode WAL : copier `runtime.db` + `runtime.db-wal` ou utiliser `sqlite3 .backup`)
+
+### Empreinte au repos
+
+- Binaire Go : ~15 MB sur disque, ~30 MB RSS
+- Base SQLite WAL : ~10 MB initial, +~50 KB par apprenant actif et par mois
+- Aucune dépendance externe : pas de Redis, pas de broker, pas de second processus — tout tient dans le binaire et le fichier `.db`
+
 ## Tech Stack
 
 - **Go 1.25** with the official [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk)
