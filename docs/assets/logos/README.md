@@ -15,11 +15,11 @@ The brand names, logos and trademarks displayed remain the property of their res
 
 ## Files
 
-| File | Used for |
-|------|----------|
-| `claude.svg` | Claude (claude.ai) |
-| `openai.svg` | ChatGPT |
-| `mistral.svg` | Le Chat (Mistral) |
-| `gemini.svg` | Gemini |
+| File | Used for | Source variant |
+|------|----------|----------------|
+| `claude.svg` | Claude (claude.ai) | `claude-color` (coloured) |
+| `openai.svg` | ChatGPT | `openai` (monochrome), recoloured to ChatGPT teal `#10A37F` |
+| `mistral.svg` | Le Chat (Mistral) | `mistral-color` (coloured) |
+| `gemini.svg` | Gemini | `gemini-color` (coloured) |
 
-All SVGs use `fill="currentColor"` so they adapt to the surrounding text colour (light/dark theme on GitHub).
+All four logos carry an explicit `fill` so they remain visible on both light and dark themes. Lobe-icons' `currentColor` variants would only render correctly when embedded inline with surrounding CSS — GitHub serves SVGs through `<img>`, which strips that context.
