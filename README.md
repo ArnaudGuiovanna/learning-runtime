@@ -4,6 +4,20 @@
 
 Concretely, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
+## Compatible MCP clients
+
+Learning Runtime works out of the box with the main MCP-capable assistants — connect it to any of them via a custom connector (see [Setup workflow](#setup-workflow)).
+
+<p align="left">
+  <a href="#claude-claudeai"><img src="docs/assets/logos/claude.svg" width="40" height="40" alt="Claude" title="Claude" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="#chatgpt"><img src="docs/assets/logos/openai.svg" width="40" height="40" alt="ChatGPT" title="ChatGPT" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="#le-chat-mistral"><img src="docs/assets/logos/mistral.svg" width="40" height="40" alt="Le Chat" title="Le Chat (Mistral)" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="#gemini"><img src="docs/assets/logos/gemini.svg" width="40" height="40" alt="Gemini" title="Gemini" /></a>
+</p>
+
 ## Design Choice — The LLM is the Content Engine
 
 Traditional learning platforms (Duolingo, Anki, Khan Academy) are bounded by their item banks: once the catalog is exhausted, the system stops. Learning Runtime takes the opposite bet.
@@ -241,7 +255,7 @@ CLI clients running on the same machine as the runtime can use `http://localhost
 
 **First-time login.** When a client connects for the first time, the runtime starts an OAuth 2.1 + PKCE flow with dynamic client registration (no client ID or secret to copy by hand). The client opens the runtime's `/authorize` page in a new tab — click **"Create one"** to register (email + password) on the very first connection, or log in if the account already exists. Subsequent launches reuse the issued tokens and re-authenticate silently.
 
-##### Claude (claude.ai)
+##### <img src="docs/assets/logos/claude.svg" width="20" height="20" alt="" /> Claude (claude.ai)
 
 Custom connectors are available on Pro, Max, Team and Enterprise plans (Free is limited to one connector).
 
@@ -254,7 +268,7 @@ Custom connectors are available on Pro, Max, Team and Enterprise plans (Free is 
 
 Reference: [Anthropic — Get started with custom connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
 
-##### ChatGPT
+##### <img src="docs/assets/logos/openai.svg" width="20" height="20" alt="" /> ChatGPT
 
 Custom MCP connectors require **Developer Mode** and are available on Plus, Pro, Team, Enterprise and Edu plans (not Free).
 
@@ -269,7 +283,7 @@ Custom MCP connectors require **Developer Mode** and are available on Plus, Pro,
 
 Reference: [OpenAI — Developer mode and MCP apps in ChatGPT](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt-beta).
 
-##### Le Chat (Mistral)
+##### <img src="docs/assets/logos/mistral.svg" width="20" height="20" alt="" /> Le Chat (Mistral)
 
 1. Open `chat.mistral.ai` → **Connectors**.
 2. Click **+ Add Connector** and switch to the **Custom MCP Connector** tab.
@@ -281,7 +295,7 @@ Reference: [OpenAI — Developer mode and MCP apps in ChatGPT](https://help.open
 
 Reference: [Mistral — Configuring a Custom Connector](https://help.mistral.ai/en/articles/393572-configuring-a-custom-connector).
 
-##### Gemini
+##### <img src="docs/assets/logos/gemini.svg" width="20" height="20" alt="" /> Gemini
 
 As of April 2026, the consumer Gemini web app (`gemini.google.com`) does not yet expose a self-serve UI to add a custom MCP server. Two paths are available today:
 
