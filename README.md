@@ -1,6 +1,21 @@
 # Learning Runtime — MCP Server (v1.0)
 
-An adaptive learning engine exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server. It turns any LLM into a personalised tutor by providing real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous.
+**Learning Runtime is the adaptive brain behind a personalised tutor.** You tell an LLM (Claude, ChatGPT, …) what you want to learn — *Spanish for travel*, *Go for backend*, *options trading*, *medieval history* — and the runtime orchestrates the journey end-to-end: what to study next, when to review, how hard the next exercise should be, when you've mastered a concept, when you're losing motivation, when you're ready to be more autonomous. It works on **any subject the learner can describe in natural language** — no content catalog, no curation, no editorial backlog.
+
+Concretely, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
+
+## Design Choice — The LLM is the Content Engine
+
+Traditional learning platforms (Duolingo, Anki, Khan Academy) are bounded by their item banks: once the catalog is exhausted, the system stops. Learning Runtime takes the opposite bet.
+
+> The LLM is trained on humanity's knowledge. It is the most flexible content generator that has ever existed. The runtime never stores exercises — it generates them on demand, calibrated in real time to the learner's mastery, ability, affect, and personal goal.
+
+- **Domains and prerequisite graphs** are co-authored by the learner and the LLM at `init_domain` time — not pre-curated.
+- **Exercises, explanations, hints, feedback, motivational nudges** — all generated on the fly by the LLM.
+- The **runtime** brings the cognitive science: five algorithms (BKT, FSRS, IRT, PFA, KST), an alert engine, a motivation engine, a metacognitive loop.
+- The **LLM** brings infinite domain breadth and on-demand calibration.
+
+This is what makes the system work on day one for any topic — and what lets it scale without an editorial team.
 
 ## How It Works
 
