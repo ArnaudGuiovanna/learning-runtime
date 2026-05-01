@@ -240,6 +240,32 @@ func TestAuthorizePost_CSRFMismatch(t *testing.T) {
 	}
 }
 
+func TestAuthorizeGet_PublicClientWithoutPKCERejected(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://good.example/cb")
+
+	req := httptest.NewRequest("GET", "/authorize?client_id=cid&redirect_uri=https://good.example/cb&response_type=code&state=xyz", nil)
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizeGet(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("public client without code_challenge should be rejected, got %d", rec.Code)
+	}
+}
+
+func TestAuthorizeGet_PublicClientWithPlainPKCERejected(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://good.example/cb")
+
+	req := httptest.NewRequest("GET", "/authorize?client_id=cid&redirect_uri=https://good.example/cb&response_type=code&code_challenge=abc&code_challenge_method=plain", nil)
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizeGet(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("plain PKCE method should be rejected, got %d", rec.Code)
+	}
+}
+
 func TestAuthorizePost_CSRFMatch_InvalidCreds(t *testing.T) {
 	s, store := newTestServer(t)
 	seedClient(t, store, "cid", "https://good.example/cb")
@@ -250,6 +276,8 @@ func TestAuthorizePost_CSRFMatch_InvalidCreds(t *testing.T) {
 	form.Set("mode", "login")
 	form.Set("client_id", "cid")
 	form.Set("redirect_uri", "https://good.example/cb")
+	form.Set("code_challenge", "abc")
+	form.Set("code_challenge_method", "S256")
 	form.Set("email", "u@example.com")
 	form.Set("password", "wrong-password")
 
