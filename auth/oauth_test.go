@@ -240,6 +240,32 @@ func TestAuthorizePost_CSRFMismatch(t *testing.T) {
 	}
 }
 
+func TestAuthorizeGet_RendersStrictCSPWithoutInlineHandlers(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://good.example/cb")
+
+	req := httptest.NewRequest("GET", "/authorize?client_id=cid&redirect_uri=https://good.example/cb&response_type=code&code_challenge=abc&code_challenge_method=S256", nil)
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizeGet(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("missing Content-Security-Policy header")
+	}
+	for _, must := range []string{"default-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "'nonce-"} {
+		if !strings.Contains(csp, must) {
+			t.Fatalf("CSP missing %q: %s", must, csp)
+		}
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "onclick=") {
+		t.Fatal("inline onclick handler still present in rendered page")
+	}
+}
+
 func TestAuthorizeGet_PublicClientWithoutPKCERejected(t *testing.T) {
 	s, store := newTestServer(t)
 	seedClient(t, store, "cid", "https://good.example/cb")
