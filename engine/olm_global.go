@@ -108,11 +108,14 @@ func BuildGlobalOLMSnapshot(store *db.Store, learnerID string) (*GlobalOLMSnapsh
 	g.Streak, _ = store.GetActivityStreak(learnerID)
 
 	// Calibration sparkline — last 30 samples. GetCalibrationBiasHistory returns
-	// DESC; reverse-index assigns oldest→newest days for the X-axis.
+	// DESC (newest-first); reverse-iterate so the resulting slice is oldest-first
+	// to match the autonomy/satisfaction sparklines. Each entry's Day is its own
+	// day-offset (i=0 newest → today; i=len-1 oldest → today - (len-1)).
 	if hist, err := store.GetCalibrationBiasHistory(learnerID, sparklineWindow); err == nil {
-		for i, v := range hist {
-			day := time.Now().UTC().AddDate(0, 0, -(len(hist)-1-i)).Format("2006-01-02")
-			g.CalibrationHistory = append(g.CalibrationHistory, TimePoint{Day: day, Value: v})
+		now := time.Now().UTC()
+		for i := len(hist) - 1; i >= 0; i-- {
+			day := now.AddDate(0, 0, -i).Format("2006-01-02")
+			g.CalibrationHistory = append(g.CalibrationHistory, TimePoint{Day: day, Value: hist[i]})
 		}
 	}
 

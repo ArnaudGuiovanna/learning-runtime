@@ -294,6 +294,11 @@
     return el;
   }
 
+  // We do not check ev.origin here. The iframe is sandboxed by Claude Desktop /
+  // claude.ai with no stable parent origin, and all rendered content goes through
+  // safe DOM methods (textContent + createElement). A malicious page postMessaging
+  // the iframe could only feed bogus structuredContent — visible UI corruption,
+  // not XSS. Logical integrity is the parent client's responsibility.
   window.addEventListener('message', (ev) => {
     const m = ev.data;
     if (!(m && m.params && m.params.structuredContent)) return;

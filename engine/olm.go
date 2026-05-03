@@ -25,6 +25,11 @@ import (
 	"tutor-mcp/models"
 )
 
+// nodeFragileMasteryThreshold is the lower mastery boundary for the Fragile
+// state in NodeClassify. Mirrored in db/store.go (fragileThreshold) — the
+// import cycle prevents sharing. If you tune this, update both packages.
+const nodeFragileMasteryThreshold = 0.30
+
 // NodeState classifies a concept's mastery for OLM rendering. The values are
 // stable JSON strings used both server-side (BuildOLMGraph) and client-side
 // (cockpit.html JS rendering).
@@ -55,7 +60,7 @@ func NodeClassify(cs *models.ConceptState) NodeState {
 	if cs.PMastery >= algorithms.KSTMasteryThreshold {
 		return NodeSolid
 	}
-	if cs.PMastery < 0.30 {
+	if cs.PMastery < nodeFragileMasteryThreshold {
 		return NodeFragile
 	}
 	if algorithms.Retrievability(cs.ElapsedDays, cs.Stability) < 0.50 {
