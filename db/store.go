@@ -1048,3 +1048,50 @@ func (s *Store) CleanupExpiredRefreshTokens() (int64, error) {
 	}
 	return result.RowsAffected()
 }
+
+// GetActivityStreak returns the number of consecutive UTC days, ending today,
+// during which the learner has at least one interaction. Returns 0 if the
+// learner has no interaction today.
+//
+// Implementation: pulls all distinct interaction days (DESC), then counts
+// from today backwards until the first gap.
+func (s *Store) GetActivityStreak(learnerID string) (int, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT substr(created_at, 1, 10) AS d
+		 FROM interactions
+		 WHERE learner_id = ?
+		 ORDER BY d DESC`,
+		learnerID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("get activity streak: %w", err)
+	}
+	defer rows.Close()
+
+	var days []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return 0, fmt.Errorf("scan streak day: %w", err)
+		}
+		days = append(days, d)
+	}
+	if len(days) == 0 {
+		return 0, nil
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	if days[0] != today {
+		return 0, nil
+	}
+
+	streak := 1
+	for i := 1; i < len(days); i++ {
+		expected := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		if days[i] != expected {
+			break
+		}
+		streak++
+	}
+	return streak, nil
+}

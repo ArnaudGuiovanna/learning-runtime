@@ -872,3 +872,60 @@ func TestCreateOAuthClientWithSecret(t *testing.T) {
 		t.Errorf("secret hash = %q want 'deadbeef'", got.ClientSecretHash)
 	}
 }
+
+// ─── GetActivityStreak ──────────────────────────────────────────────────────
+
+func TestGetActivityStreak(t *testing.T) {
+	store := setupTestDB(t)
+	now := time.Now().UTC()
+	day := func(offset int) time.Time { return now.Add(time.Duration(offset) * 24 * time.Hour) }
+
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.db.Exec(q, args...); err != nil {
+			t.Fatalf("exec: %v", err)
+		}
+	}
+
+	// Learner with no interactions → 0
+	mustExec(`INSERT INTO learners (id,email,password_hash,objective,created_at) VALUES ('Lzero','z@t.com','h','o',?)`, now)
+	got, err := store.GetActivityStreak("Lzero")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("zero-interaction learner streak = %d, want 0", got)
+	}
+
+	// Learner with 3 consecutive days (today, -1, -2) → 3
+	mustExec(`INSERT INTO learners (id,email,password_hash,objective,created_at) VALUES ('L3','3@t.com','h','o',?)`, now)
+	for _, off := range []int{0, -1, -2} {
+		mustExec(
+			`INSERT INTO interactions (learner_id, concept, activity_type, success, created_at) VALUES (?,'c','RECALL',1,?)`,
+			"L3", day(off),
+		)
+	}
+	got, err = store.GetActivityStreak("L3")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != 3 {
+		t.Errorf("3-day learner streak = %d, want 3", got)
+	}
+
+	// Learner with a hole (today + day -2 but missing -1) → 1
+	mustExec(`INSERT INTO learners (id,email,password_hash,objective,created_at) VALUES ('Lhole','h@t.com','h','o',?)`, now)
+	for _, off := range []int{0, -2} {
+		mustExec(
+			`INSERT INTO interactions (learner_id, concept, activity_type, success, created_at) VALUES (?,'c','RECALL',1,?)`,
+			"Lhole", day(off),
+		)
+	}
+	got, err = store.GetActivityStreak("Lhole")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != 1 {
+		t.Errorf("hole-pattern learner streak = %d, want 1", got)
+	}
+}
