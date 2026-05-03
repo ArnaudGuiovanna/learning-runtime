@@ -328,13 +328,24 @@ func TestSendReviewReminders_FiresOnDueConceptsAndInactivity(t *testing.T) {
 
 	rawDB, store, learnerID := rawTestSetup(t, srv.URL)
 
-	// Concept due for review (next_review in the past).
-	due := time.Now().UTC().Add(-1 * time.Hour)
+	now := time.Now().UTC()
+	// Create a domain with concept X.
 	_, err := rawDB.Exec(
+		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis, created_at)
+		 VALUES ('d1', ?, 'test', '{"concepts":["X"],"prerequisites":{}}', 'goal', 0, '', '', ?)`,
+		learnerID, now,
+	)
+	if err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+
+	// Concept due for review (next_review in the past).
+	due := now.Add(-1 * time.Hour)
+	_, err = rawDB.Exec(
 		`INSERT INTO concept_states
 		    (learner_id, concept, card_state, next_review, p_mastery, updated_at)
 		 VALUES (?, 'X', 'review', ?, 0.5, ?)`,
-		learnerID, due, time.Now().UTC(),
+		learnerID, due, now,
 	)
 	if err != nil {
 		t.Fatalf("insert concept_state: %v", err)

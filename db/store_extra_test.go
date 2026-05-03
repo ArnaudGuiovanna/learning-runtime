@@ -451,6 +451,12 @@ func TestGetConceptsDueForReview(t *testing.T) {
 			t.Fatalf("exec: %v", err)
 		}
 	}
+	// Create a domain with all test concepts.
+	mustExec(
+		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis, created_at)
+		 VALUES ('d-test','L1','test','{"concepts":["C-due","C-future","C-new","C-null"],"prerequisites":{}}','goal',0,'','',?)`,
+		now,
+	)
 	// Due (review state, past next_review) — should appear.
 	mustExec(
 		`INSERT INTO concept_states (learner_id, concept, card_state, next_review, updated_at)
@@ -797,6 +803,57 @@ func TestGetDailyStreak_StaleStartReturnsZero(t *testing.T) {
 	}
 	if streak != 0 {
 		t.Errorf("streak stale = %d want 0", streak)
+	}
+}
+
+// ─── GetConceptsDueForReview ─────────────────────────────────────────────
+
+func TestGetConceptsDueForReview_ExcludesArchivedDomain(t *testing.T) {
+	store := setupTestDB(t)
+
+	now := time.Now().UTC()
+	past := now.Add(-time.Hour) // due
+
+	// Create a second learner (L1 is created by setupTestDB).
+	if _, err := store.db.Exec(
+		`INSERT INTO learners (id, email, password_hash, objective, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"L2", "l2@test.com", "h", "obj", now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Active domain with concept "active_c".
+	if _, err := store.db.Exec(
+		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis, created_at)
+		 VALUES ('d_active','L2','active','{"concepts":["active_c"],"prerequisites":{}}','goal',0,'','',?)`,
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Archived domain with concept "archived_c".
+	if _, err := store.db.Exec(
+		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis, created_at)
+		 VALUES ('d_arch','L2','arch','{"concepts":["archived_c"],"prerequisites":{}}','goal',1,'','',?)`,
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Concept states: BOTH due, BOTH non-new.
+	for _, c := range []string{"active_c", "archived_c"} {
+		if _, err := store.db.Exec(
+			`INSERT INTO concept_states (learner_id, concept, p_mastery, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, card_state, last_review, next_review, p_learn, p_forget, p_slip, p_guess, theta, pfa_successes, pfa_failures)
+			 VALUES (?, ?, 0.5, 5, 5, 1, 1, 1, 0, 'review', ?, ?, 0.15, 0.1, 0.1, 0.2, 0, 0, 0)`,
+			"L2", c, past, past,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := store.GetConceptsDueForReview("L2")
+	if err != nil {
+		t.Fatalf("GetConceptsDueForReview: %v", err)
+	}
+	if len(got) != 1 || got[0] != "active_c" {
+		t.Fatalf("expected only [active_c], got %v", got)
 	}
 }
 

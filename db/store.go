@@ -921,7 +921,20 @@ func (s *Store) GetConceptsDueForReview(learnerID string) ([]string, error) {
 		}
 		concepts = append(concepts, c)
 	}
-	return concepts, nil
+
+	// Filter out concepts whose domain is archived or deleted.
+	// ActiveDomainConceptSet returns concepts from non-archived, non-deleted domains only.
+	activeSet, err := s.ActiveDomainConceptSet(learnerID)
+	if err != nil {
+		return nil, fmt.Errorf("get concepts due for review: filter active: %w", err)
+	}
+	filtered := concepts[:0]
+	for _, c := range concepts {
+		if activeSet[c] {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered, nil
 }
 
 // ─── OAuth Persistence ──────────────────────────────────────────────────────
