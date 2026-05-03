@@ -150,7 +150,7 @@
     <!-- TABS (premium, animated underline) -->
     <div class="tabs anim-fade-up anim-fade-up-2" role="tablist">
       <button id="tab-session" class="tab-link tab-active" role="tab" aria-selected="true" aria-controls="panel-session">Cette session</button>
-      <button id="tab-global" class="tab-link" role="tab" aria-selected="false" aria-disabled="true" aria-controls="panel-global" title="à venir" disabled>Modèle global</button>
+      <button id="tab-global" class="tab-link" role="tab" aria-selected="false" aria-controls="panel-global">Modèle global</button>
     </div>
 
     <div id="panel-session" role="tabpanel" aria-labelledby="tab-session">
@@ -211,7 +211,63 @@
     </div>
 
     </div><!-- /panel-session -->
-    <div id="panel-global" role="tabpanel" aria-labelledby="tab-global" hidden></div>
+    <div id="panel-global" role="tabpanel" aria-labelledby="tab-global" hidden>
+
+      <!-- HEADER STATS -->
+      <div class="anim-fade-up anim-fade-up-2" style="display:flex;gap:24px;margin-bottom:18px;align-items:baseline;flex-wrap:wrap;">
+        <div>
+          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--cream-500);text-transform:uppercase;margin-bottom:4px;">Série</div>
+          <div id="global-streak" style="font-size:18px;font-weight:600;color:var(--cream-100);"></div>
+        </div>
+        <div>
+          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--cream-500);text-transform:uppercase;margin-bottom:4px;">Concepts solides</div>
+          <div id="global-total-solid" style="font-size:18px;font-weight:600;color:var(--cream-100);"></div>
+        </div>
+      </div>
+
+      <!-- 3-COLUMN GRID: Savoir / Métacognition / Objectifs -->
+      <div class="anim-fade-up anim-fade-up-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:18px;">
+
+        <!-- SAVOIR -->
+        <div style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
+          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Savoir · par domaine</div>
+          <div id="savoir-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+        </div>
+
+        <!-- METACOGNITION -->
+        <div style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
+          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Métacognition · 30 derniers jours</div>
+          <div style="display:flex;flex-direction:column;gap:14px;">
+            <div>
+              <div style="font-size:11px;color:var(--cream-300);margin-bottom:4px;">Calibration (auto-évaluation vs réel)</div>
+              <svg id="spark-calibration" viewBox="0 0 220 32" style="width:100%;height:32px;display:block;" role="img" aria-label="Calibration sparkline"></svg>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--cream-300);margin-bottom:4px;">Autonomie (recours aux indices)</div>
+              <svg id="spark-autonomy" viewBox="0 0 220 32" style="width:100%;height:32px;display:block;" role="img" aria-label="Autonomy sparkline"></svg>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--cream-300);margin-bottom:4px;">Satisfaction (1=frustré, 4=flow)</div>
+              <svg id="spark-satisfaction" viewBox="0 0 220 32" style="width:100%;height:32px;display:block;" role="img" aria-label="Satisfaction sparkline"></svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- OBJECTIFS -->
+        <div style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
+          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Objectifs personnels</div>
+          <div id="goals-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+        </div>
+
+      </div>
+
+      <!-- TIMELINE -->
+      <div class="anim-fade-up anim-fade-up-4" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
+        <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Évènements récents · 7 derniers jours</div>
+        <div id="timeline-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
+    </div>
 
   </div>
 
@@ -240,9 +296,14 @@
 
   window.addEventListener('message', (ev) => {
     const m = ev.data;
-    if (m && m.params && m.params.structuredContent) {
-      snap = m.params.structuredContent;
+    if (!(m && m.params && m.params.structuredContent)) return;
+    const sc = m.params.structuredContent;
+    if (sc.concepts && sc.edges !== undefined) {
+      snap = sc;
       render();
+    } else if (sc.domains && sc.calibration_history !== undefined) {
+      globalData = sc;
+      renderGlobal();
     }
   });
 
@@ -389,6 +450,162 @@
     const txt = container.querySelector(".signal-text");
     if (txt) txt.textContent = text;
   }
+
+  let globalData = null;
+
+  function switchTab(name) {
+    document.querySelectorAll(".tab-link").forEach(t => {
+      const isActive = t.dataset.tab === name || t.id === "tab-" + name;
+      t.classList.toggle("tab-active", isActive);
+      t.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    document.querySelectorAll('[role="tabpanel"]').forEach(p => {
+      const isActive = p.id === "panel-" + name;
+      if (isActive) p.removeAttribute("hidden");
+      else p.setAttribute("hidden", "");
+    });
+    if (name === "global" && !globalData) {
+      dispatch("tools/call", { name: "get_olm_snapshot", arguments: { scope: "global" } });
+    }
+  }
+
+  function renderGlobal() {
+    if (!globalData) return;
+    setText("global-streak", globalData.streak ? globalData.streak + " jours d'affilée" : "—");
+    setText("global-total-solid", (globalData.total_solid || 0) + " concepts solides");
+    renderSavoir(globalData.domains);
+    renderSparkline("spark-calibration", globalData.calibration_history);
+    renderSparkline("spark-autonomy", globalData.autonomy_history);
+    renderSparkline("spark-satisfaction", globalData.satisfaction_history);
+    renderGoals(globalData.goals);
+    renderTimeline(globalData.recent_events);
+  }
+
+  function renderSavoir(domains) {
+    const container = document.getElementById("savoir-list");
+    if (!container) return;
+    clearChildren(container);
+    for (const d of (domains || [])) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;flex-direction:column;gap:4px;";
+      const name = document.createElement("div");
+      name.style.cssText = "font-size:13px;color:var(--cream-100);font-weight:500;";
+      name.textContent = d.domain_name;
+      row.appendChild(name);
+      // 4-segment bar (Solid/InProgress/Fragile/NotStarted)
+      const total = (d.solid || 0) + (d.in_progress || 0) + (d.fragile || 0) + (d.not_started || 0);
+      const bar = document.createElement("div");
+      bar.style.cssText = "display:flex;height:6px;border-radius:1px;overflow:hidden;background:var(--bg-elevated);";
+      const segments = [
+        { val: d.solid || 0,       color: "#e8804a" },
+        { val: d.in_progress || 0, color: "#f3a875" },
+        { val: d.fragile || 0,     color: "#da6e38" },
+        { val: d.not_started || 0, color: "transparent" },
+      ];
+      for (const s of segments) {
+        if (s.val > 0 && total > 0) {
+          const seg = document.createElement("div");
+          seg.style.cssText = "background:" + s.color + ";flex:" + s.val + ";";
+          bar.appendChild(seg);
+        }
+      }
+      row.appendChild(bar);
+      const meta = document.createElement("div");
+      meta.style.cssText = "font-size:11px;color:var(--cream-500);";
+      meta.textContent = (d.solid || 0) + " / " + total + " solides · " + Math.round((d.kst_progress || 0) * 100) + "%";
+      row.appendChild(meta);
+      container.appendChild(row);
+    }
+  }
+
+  function renderSparkline(svgId, points) {
+    const svg = document.getElementById(svgId);
+    if (!svg) return;
+    clearChildren(svg);
+    if (!points || points.length === 0) return;
+    const w = 220, h = 32;
+    const xs = (i) => points.length === 1 ? w / 2 : (i / (points.length - 1)) * w;
+    const vmin = Math.min(...points.map(p => p.value));
+    const vmax = Math.max(...points.map(p => p.value));
+    const ys = (v) => h - ((v - vmin) / (vmax - vmin || 1)) * (h - 4) - 2;
+    const polyline = svgNode("polyline", {
+      fill: "none",
+      stroke: "#f3a875",
+      "stroke-width": "1.5",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      points: points.map((p, i) => xs(i) + "," + ys(p.value)).join(" "),
+    });
+    svg.appendChild(polyline);
+  }
+
+  function renderGoals(goals) {
+    const container = document.getElementById("goals-list");
+    if (!container) return;
+    clearChildren(container);
+    for (const g of (goals || [])) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;flex-direction:column;gap:4px;";
+      const txt = document.createElement("div");
+      txt.style.cssText = "font-size:13px;color:var(--cream-100);";
+      txt.textContent = g.personal_goal || "(sans objectif)";
+      row.appendChild(txt);
+      // progress bar
+      const barWrap = document.createElement("div");
+      barWrap.style.cssText = "background:var(--bg-elevated);height:4px;border-radius:1px;overflow:hidden;";
+      const bar = document.createElement("div");
+      const pct = Math.max(0, Math.min(1, g.progress || 0));
+      bar.style.cssText = "background:var(--accent-500);height:100%;width:" + (pct * 100) + "%;";
+      barWrap.appendChild(bar);
+      row.appendChild(barWrap);
+      const meta = document.createElement("div");
+      meta.style.cssText = "font-size:11px;color:var(--cream-500);";
+      meta.textContent = Math.round(pct * 100) + "%";
+      row.appendChild(meta);
+      container.appendChild(row);
+    }
+  }
+
+  function renderTimeline(events) {
+    const container = document.getElementById("timeline-list");
+    if (!container) return;
+    clearChildren(container);
+    if (!events || events.length === 0) {
+      const empty = document.createElement("div");
+      empty.style.cssText = "font-size:12px;color:var(--cream-500);font-style:italic;";
+      empty.textContent = "Pas d'évènement marquant cette semaine.";
+      container.appendChild(empty);
+      return;
+    }
+    for (const e of events) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:baseline;font-size:12px;";
+      const when = document.createElement("span");
+      when.style.cssText = "font-family:ui-monospace,monospace;color:var(--cream-500);";
+      try {
+        when.textContent = new Date(e.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+      } catch (_) {
+        when.textContent = e.at || "";
+      }
+      const kind = document.createElement("span");
+      kind.style.cssText = "font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1px;color:var(--accent-300);text-transform:uppercase;";
+      kind.textContent = e.kind || "";
+      const msg = document.createElement("span");
+      msg.style.cssText = "color:var(--cream-100);";
+      msg.textContent = e.message || "";
+      row.appendChild(when);
+      row.appendChild(kind);
+      row.appendChild(msg);
+      container.appendChild(row);
+    }
+  }
+
+  document.querySelectorAll(".tab-link").forEach(t => {
+    t.addEventListener("click", () => {
+      const name = t.id.replace(/^tab-/, "");
+      switchTab(name);
+    });
+  });
 
   const cta = document.querySelector("#cta-attack");
   if (cta) cta.addEventListener("click", () => {

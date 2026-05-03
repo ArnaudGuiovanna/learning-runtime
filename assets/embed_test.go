@@ -46,3 +46,23 @@ func TestEmbeddedCockpitHTML_HasV4Markers(t *testing.T) {
 		t.Errorf("cockpit.html size %d bytes exceeds 100 KB budget", len(data))
 	}
 }
+
+func TestEmbeddedCockpitHTML_HasTab2Markers(t *testing.T) {
+	data, err := FS.ReadFile("cockpit.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	mustContain := []string{
+		"id=\"tab-global\"",   // Tab 2 trigger (already present, but assert it's still present after refactor)
+		"id=\"panel-global\"", // Tab 2 panel
+		"renderGlobal",        // JS function
+		"calibration_history", // structuredContent key referenced by JS
+		"recent_events",       // structuredContent key referenced by JS
+	}
+	for _, m := range mustContain {
+		if !strings.Contains(body, m) {
+			t.Errorf("cockpit.html missing required marker: %q", m)
+		}
+	}
+}
