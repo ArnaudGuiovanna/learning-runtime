@@ -49,7 +49,7 @@ func NewConceptState(learnerID, concept string) *ConceptState {
 		Difficulty: 0.3,
 		CardState:  "new",
 		PMastery:   0.1,
-		PLearn:     0.3,
+		PLearn:     0.15,
 		PForget:    0.05,
 		PSlip:      0.1,
 		PGuess:     0.2,

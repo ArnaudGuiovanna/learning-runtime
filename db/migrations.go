@@ -52,6 +52,15 @@ func Migrate(db *sql.DB) error {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors
 	}
 
+	// Data migration: BKT.PLearn default lowered from 0.30 to 0.15 after
+	// the synthetic-learner harness investigation showed BKT systematically
+	// over-estimates mastery by +0.27 with PLearn=0.30 (see
+	// eval/PLEARN_FINDINGS.md). Idempotent: matches no rows after the
+	// first run on this database.
+	if _, err := db.Exec(`UPDATE concept_states SET p_learn = 0.15 WHERE p_learn = 0.3`); err != nil {
+		return fmt.Errorf("data migration plearn: %w", err)
+	}
+
 	// Idempotent table + index creation for existing databases
 	idempotentMigrations := []string{
 		`CREATE TABLE IF NOT EXISTS oauth_codes (
