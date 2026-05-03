@@ -314,108 +314,6 @@ func TestSendWebhook_PostsContentField(t *testing.T) {
 	}
 }
 
-// ─── formatCriticalAlert / formatReviewReminder / formatMetacognitiveAlert ──
-
-func TestFormatCriticalAlert(t *testing.T) {
-	alert := models.Alert{
-		Type:              models.AlertForgetting,
-		Concept:           "goroutines",
-		Urgency:           models.UrgencyCritical,
-		Retention:         0.25,
-		RecommendedAction: "revise now",
-	}
-	p := formatCriticalAlert(alert)
-	if len(p.Embeds) != 1 {
-		t.Fatalf("embeds = %d, want 1", len(p.Embeds))
-	}
-	emb := p.Embeds[0]
-	if !strings.Contains(emb.Title, "goroutines") {
-		t.Errorf("title %q should mention concept", emb.Title)
-	}
-	if !strings.Contains(emb.Description, "25%") {
-		t.Errorf("description should mention retention 25%%, got %q", emb.Description)
-	}
-	if !strings.Contains(emb.Description, "revise now") {
-		t.Errorf("description should include recommended action, got %q", emb.Description)
-	}
-	if emb.Color != 0xFF0000 {
-		t.Errorf("color = %#x, want red 0xFF0000", emb.Color)
-	}
-}
-
-func TestFormatReviewReminder(t *testing.T) {
-	cases := []struct {
-		name    string
-		due     []string
-		hours   float64
-		wantSub []string
-	}{
-		{"single", []string{"A"}, 5, []string{"1 concept", "→ A"}},
-		{"three", []string{"A", "B", "C"}, 8, []string{"3 concept", "→ A", "→ B", "→ C"}},
-		{"more than three", []string{"A", "B", "C", "D", "E"}, 12, []string{"5 concept", "→ A", "→ B", "→ C", "et 2 autres"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := formatReviewReminder(tc.due, tc.hours)
-			if len(p.Embeds) != 1 {
-				t.Fatalf("embeds = %d, want 1", len(p.Embeds))
-			}
-			emb := p.Embeds[0]
-			for _, sub := range tc.wantSub {
-				if !strings.Contains(emb.Description, sub) {
-					t.Errorf("description %q missing %q", emb.Description, sub)
-				}
-			}
-			if emb.Color != 0xFFA500 {
-				t.Errorf("color = %#x, want orange 0xFFA500", emb.Color)
-			}
-			// "more than three" must not list the truncated entries verbatim.
-			if tc.name == "more than three" {
-				if strings.Contains(emb.Description, "→ D") || strings.Contains(emb.Description, "→ E") {
-					t.Errorf("description should truncate to first 3 concepts, got %q", emb.Description)
-				}
-			}
-		})
-	}
-}
-
-func TestFormatMetacognitiveAlert(t *testing.T) {
-	cases := []struct {
-		name      string
-		alertType models.AlertType
-		concept   string
-		titlePart string
-	}{
-		{"dependency", models.AlertDependencyIncreasing, "", "Autonomie"},
-		{"calibration", models.AlertCalibrationDiverging, "", "Calibration"},
-		{"affect", models.AlertAffectNegative, "", "difficiles"},
-		{"transfer", models.AlertTransferBlocked, "Goroutines", "Goroutines"},
-		{"unknown falls back to type string", models.AlertType("CUSTOM_X"), "", "CUSTOM_X"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := formatMetacognitiveAlert(models.Alert{
-				Type:              tc.alertType,
-				Concept:           tc.concept,
-				RecommendedAction: "do this",
-			})
-			if len(p.Embeds) != 1 {
-				t.Fatalf("embeds = %d, want 1", len(p.Embeds))
-			}
-			emb := p.Embeds[0]
-			if !strings.Contains(emb.Title, tc.titlePart) {
-				t.Errorf("title %q missing %q", emb.Title, tc.titlePart)
-			}
-			if emb.Description != "do this" {
-				t.Errorf("description = %q, want %q", emb.Description, "do this")
-			}
-			if emb.Color != 0xFFA500 {
-				t.Errorf("color = %#x, want orange 0xFFA500", emb.Color)
-			}
-		})
-	}
-}
-
 // ─── queueKindTitle / queueKindColor ────────────────────────────────────────
 
 func TestQueueKindTitleAndColor(t *testing.T) {
@@ -483,17 +381,6 @@ func TestNewSchedulerAndStop(t *testing.T) {
 	}
 	// Stop on a never-Started cron must not panic.
 	s.Stop()
-}
-
-// guard: ensures fmt.Sprintf usage in formatCriticalAlert produces percent literal
-// even at zero retention.
-func TestFormatCriticalAlert_ZeroRetention(t *testing.T) {
-	p := formatCriticalAlert(models.Alert{
-		Type: models.AlertForgetting, Concept: "X", Retention: 0.0, RecommendedAction: "do",
-	})
-	if !strings.Contains(p.Embeds[0].Description, "0%") {
-		t.Errorf("expected 0%% in description, got %q", p.Embeds[0].Description)
-	}
 }
 
 // Sanity guard: doWithRetry still returns the *last* status when all attempts fail.

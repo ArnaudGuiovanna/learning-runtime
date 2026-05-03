@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"tutor-mcp/db"
@@ -35,191 +34,31 @@ func NewScheduler(store *db.Store, logger *slog.Logger) *Scheduler {
 }
 
 func (s *Scheduler) Start() error {
-	// Critical alerts: every 30 min
-	if _, err := s.cron.AddFunc("*/30 * * * *", s.checkCriticalAlerts); err != nil {
-		return fmt.Errorf("add critical alerts job: %w", err)
+	// OLM: once a day at 13h UTC. Replaces the previous critical-alerts
+	// (every 30 min) and review-reminders (3x/day) jobs — see
+	// docs/superpowers/specs/2026-05-03-webhook-olm-design.md.
+	if _, err := s.cron.AddFunc("0 13 * * *", s.sendOLM); err != nil {
+		return fmt.Errorf("add olm job: %w", err)
 	}
-	// Review reminders: 3x/day (9h, 13h, 19h UTC)
-	if _, err := s.cron.AddFunc("0 9,13,19 * * *", s.sendReviewReminders); err != nil {
-		return fmt.Errorf("add review reminders job: %w", err)
-	}
-	// Daily motivation: once at 8h UTC
+	// Daily motivation: once at 8h UTC.
 	if _, err := s.cron.AddFunc("0 8 * * *", s.sendDailyMotivation); err != nil {
 		return fmt.Errorf("add daily motivation job: %w", err)
 	}
-	// End-of-day recap: once at 21h UTC
+	// End-of-day recap: once at 21h UTC.
 	if _, err := s.cron.AddFunc("0 21 * * *", s.sendDailyRecap); err != nil {
 		return fmt.Errorf("add daily recap job: %w", err)
 	}
-	// Cleanup expired auth codes and refresh tokens: hourly
+	// Cleanup: hourly.
 	if _, err := s.cron.AddFunc("0 * * * *", s.cleanupExpiredData); err != nil {
 		return fmt.Errorf("add cleanup job: %w", err)
 	}
 
 	s.cron.Start()
-	s.logger.Info("scheduler started", "jobs", "critical(30m), reviews(9/13/19h), motivation(8h), recap(21h), cleanup(1h)")
+	s.logger.Info("scheduler started", "jobs", "olm(13h), motivation(8h), recap(21h), cleanup(1h)")
 	return nil
 }
 
 func (s *Scheduler) Stop() { s.cron.Stop() }
-
-// filterStatesByActiveConcepts keeps only states whose concept is in the set.
-// Empty set means "no domains" → return as-is so the caller can decide what to
-// do (a learner with no domains shouldn't get any alerts anyway).
-func filterStatesByActiveConcepts(states []*models.ConceptState, set map[string]bool) []*models.ConceptState {
-	if len(set) == 0 {
-		return nil
-	}
-	out := make([]*models.ConceptState, 0, len(states))
-	for _, cs := range states {
-		if set[cs.Concept] {
-			out = append(out, cs)
-		}
-	}
-	return out
-}
-
-func filterInteractionsByActiveConcepts(interactions []*models.Interaction, set map[string]bool) []*models.Interaction {
-	if len(set) == 0 {
-		return nil
-	}
-	out := make([]*models.Interaction, 0, len(interactions))
-	for _, i := range interactions {
-		if set[i.Concept] {
-			out = append(out, i)
-		}
-	}
-	return out
-}
-
-// ─── Critical Alerts (every 30min) ──────────────────────────────────────────
-
-func (s *Scheduler) checkCriticalAlerts() {
-	learners, err := s.store.GetActiveLearners()
-	if err != nil {
-		s.logger.Error("scheduler: get learners", "err", err)
-		return
-	}
-
-	for _, learner := range learners {
-		if learner.WebhookURL == "" {
-			continue
-		}
-		avail, _ := s.store.GetAvailability(learner.ID)
-		if avail != nil && avail.DoNotDisturb {
-			continue
-		}
-
-		states, err := s.store.GetConceptStatesByLearner(learner.ID)
-		if err != nil {
-			continue
-		}
-		interactions, _ := s.store.GetRecentInteractionsByLearner(learner.ID, 20)
-
-		// Drop orphan concepts left behind by delete_domain so we don't
-		// page a user about a concept that no longer belongs to any of
-		// their domains.
-		activeConcepts, _ := s.store.ActiveDomainConceptSet(learner.ID)
-		states = filterStatesByActiveConcepts(states, activeConcepts)
-		interactions = filterInteractionsByActiveConcepts(interactions, activeConcepts)
-
-		alerts := ComputeAlerts(states, interactions, time.Time{})
-
-		for _, alert := range alerts {
-			if alert.Urgency != "critical" {
-				continue
-			}
-			// Dedup: don't send same alert type twice in one day
-			sent, _ := s.store.WasAlertSentToday(learner.ID, string(alert.Type))
-			if sent {
-				continue
-			}
-
-			msg := formatCriticalAlert(alert)
-			if err := s.sendDiscordEmbed(learner.WebhookURL, msg); err != nil {
-				s.logger.Error("scheduler: critical webhook", "err", err, "learner", learner.ID)
-				continue
-			}
-			s.store.CreateScheduledAlert(learner.ID, string(alert.Type), alert.Concept, time.Now())
-			s.logger.Info("scheduler: critical alert sent", "learner", learner.ID, "type", alert.Type)
-		}
-
-		// Metacognitive alerts
-		affects, _ := s.store.GetRecentAffectStates(learner.ID, 5)
-		calibBias, _ := s.store.GetCalibrationBias(learner.ID, 20)
-
-		var autonomyScores []float64
-		for _, a := range affects {
-			autonomyScores = append(autonomyScores, a.AutonomyScore)
-		}
-
-		metaAlerts := ComputeMetacognitiveAlerts(autonomyScores, calibBias, affects, interactions)
-		for _, alert := range metaAlerts {
-			sent, _ := s.store.WasAlertSentToday(learner.ID, string(alert.Type))
-			if sent {
-				continue
-			}
-			msg := formatMetacognitiveAlert(alert)
-			if err := s.sendDiscordEmbed(learner.WebhookURL, msg); err != nil {
-				s.logger.Error("scheduler: metacognitive webhook", "err", err, "learner", learner.ID)
-				continue
-			}
-			s.store.CreateScheduledAlert(learner.ID, string(alert.Type), alert.Concept, time.Now())
-			s.logger.Info("scheduler: metacognitive alert sent", "learner", learner.ID, "type", alert.Type)
-		}
-	}
-}
-
-// ─── Review Reminders (3x/day) ──────────────────────────────────────────────
-
-func (s *Scheduler) sendReviewReminders() {
-	learners, err := s.store.GetActiveLearners()
-	if err != nil {
-		return
-	}
-
-	for _, learner := range learners {
-		if learner.WebhookURL == "" {
-			continue
-		}
-		avail, _ := s.store.GetAvailability(learner.ID)
-		if avail != nil && avail.DoNotDisturb {
-			continue
-		}
-
-		// Don't remind if already sent a review reminder today
-		sent, _ := s.store.WasAlertSentToday(learner.ID, "REVIEW_REMINDER")
-		if sent {
-			continue
-		}
-
-		// Check for concepts due
-		due, _ := s.store.GetConceptsDueForReview(learner.ID)
-		if len(due) == 0 {
-			continue
-		}
-
-		// Check if already studied today
-		todayCount, _ := s.store.GetTodayInteractionCount(learner.ID)
-		if todayCount > 0 {
-			continue // already active, no need to nag
-		}
-
-		// Check inactivity duration
-		hoursSinceActive := time.Since(learner.LastActive).Hours()
-		if hoursSinceActive < 4 {
-			continue // was active recently
-		}
-
-		msg := formatReviewReminder(due, hoursSinceActive)
-		if err := s.sendDiscordEmbed(learner.WebhookURL, msg); err != nil {
-			s.logger.Error("scheduler: review webhook", "err", err)
-			continue
-		}
-		s.store.CreateScheduledAlert(learner.ID, "REVIEW_REMINDER", strings.Join(due, ","), time.Now())
-		s.logger.Info("scheduler: review reminder sent", "learner", learner.ID, "due", len(due))
-	}
-}
 
 // ─── Daily Motivation (8h) ──────────────────────────────────────────────────
 //
@@ -381,65 +220,6 @@ type discordEmbed struct {
 
 type discordPayload struct {
 	Embeds []discordEmbed `json:"embeds"`
-}
-
-func formatMetacognitiveAlert(alert models.Alert) discordPayload {
-	title := ""
-	color := 0xFFA500 // orange
-
-	switch alert.Type {
-	case models.AlertDependencyIncreasing:
-		title = "📉 Autonomie en baisse"
-	case models.AlertCalibrationDiverging:
-		title = "🎯 Calibration divergente"
-	case models.AlertAffectNegative:
-		title = "😔 Sessions difficiles"
-	case models.AlertTransferBlocked:
-		title = fmt.Sprintf("🔒 Transfert bloque: %s", alert.Concept)
-	default:
-		title = string(alert.Type)
-	}
-
-	return discordPayload{
-		Embeds: []discordEmbed{{
-			Title:       title,
-			Description: alert.RecommendedAction,
-			Color:       color,
-		}},
-	}
-}
-
-func formatCriticalAlert(alert models.Alert) discordPayload {
-	return discordPayload{
-		Embeds: []discordEmbed{{
-			Title:       fmt.Sprintf("🚨 %s en danger", alert.Concept),
-			Description: fmt.Sprintf("Retention a **%.0f%%** — %s\n\nOuvre Claude pour reviser maintenant.", alert.Retention*100, alert.RecommendedAction),
-			Color:       0xFF0000, // red
-		}},
-	}
-}
-
-func formatReviewReminder(due []string, hoursSinceActive float64) discordPayload {
-	conceptList := due
-	if len(conceptList) > 3 {
-		conceptList = conceptList[:3]
-	}
-	desc := fmt.Sprintf("**%d concept(s)** a reviser :", len(due))
-	for _, c := range conceptList {
-		desc += fmt.Sprintf("\n→ %s", c)
-	}
-	if len(due) > 3 {
-		desc += fmt.Sprintf("\n... et %d autres", len(due)-3)
-	}
-	desc += "\n\n10 minutes suffisent pour garder ta progression."
-
-	return discordPayload{
-		Embeds: []discordEmbed{{
-			Title:       "📚 Revision disponible",
-			Description: desc,
-			Color:       0xFFA500, // orange
-		}},
-	}
 }
 
 // Note: formatDailyMotivation / formatDailyRecap / formatInactivityNudge have been
