@@ -3,833 +3,549 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:;">
-<title>Cockpit — état d'apprentissage</title>
+<title>Cockpit</title>
 <style>
-  /* ────────────────────────────────────────────────────────────
-     Design tokens — single source of truth
-     Derived from docs/banner.svg ; WCAG 2.2 AA + APCA Lc 75+
-     ──────────────────────────────────────────────────────────── */
-  html, body { margin: 0; padding: 0; }
-  body.cockpit-v4 {
-    --bg-base:        #0c0908;
-    --bg-panel:       #15110f;
-    --bg-elevated:    #1d1815;
+:root {
+  --ck-bg-from: #FCFAF7;
+  --ck-bg-to: #F5F0EA;
+  --ck-accent-500: #e8804a;
+  --ck-accent-600: #d97757;
+  --ck-accent-700: #c46a3c;
+  --ck-text-primary: #1c1a18;
+  --ck-text-secondary: #5a5249;
+  --ck-text-tertiary: #7a7370;
+  --ck-state-solid: #e8804a;
+  --ck-state-in-progress: #f3a875;
+  --ck-state-fragile-border: #c46a3c;
+  --ck-state-not-started: rgba(122,115,112,0.25);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: linear-gradient(135deg, var(--ck-bg-from), var(--ck-bg-to));
+  color: var(--ck-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+  min-height: 100vh;
+}
 
-    --cream-50:       #faf6f1;
-    --cream-100:      #f5ede5;
-    --cream-300:      #e0d8cf;
-    --cream-500:      #bdb6ad;
-    --cream-700:      #857e76;
+.ck-frame {
+  container-type: inline-size;
+  position: relative;
+  overflow: hidden;
+  max-width: 720px;
+  margin: 0 auto;
+  background: linear-gradient(135deg, var(--ck-bg-from) 0%, var(--ck-bg-to) 100%);
+  border-radius: 18px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(40,30,20,0.06);
+}
+.ck-frame::before {
+  content: '';
+  position: absolute; top: -120px; right: -80px;
+  width: 380px; height: 380px;
+  background: radial-gradient(circle, rgba(232,128,74,0.16), transparent 65%);
+  border-radius: 50%; pointer-events: none; z-index: 0;
+}
+.ck-frame::after {
+  content: '';
+  position: absolute; bottom: -150px; left: -100px;
+  width: 360px; height: 360px;
+  background: radial-gradient(circle, rgba(180,150,200,0.12), transparent 65%);
+  border-radius: 50%; pointer-events: none; z-index: 0;
+}
+.ck-inner { position: relative; z-index: 1; padding: 22px 24px 28px; }
 
-    --accent-300:     #f3a875;
-    --accent-500:     #e8804a;
-    --accent-700:     #da6e38;
+/* ─── Header ─── */
+.ck-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(40,30,20,0.06);
+  margin-bottom: 18px;
+}
+.ck-header-left {}
+.ck-eyebrow {
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 9.5px; letter-spacing: 1.6px;
+  color: var(--ck-text-tertiary); text-transform: uppercase;
+}
+.ck-title { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; margin-top: 2px; color: var(--ck-text-primary); }
+.ck-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ck-streak {
+  background: rgba(255,255,255,0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.8);
+  padding: 6px 11px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; color: var(--ck-accent-700);
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.ck-domain-select {
+  background: rgba(255,255,255,0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.8);
+  padding: 6px 26px 6px 11px; border-radius: 20px;
+  font-size: 11.5px; font-weight: 500; color: var(--ck-text-primary);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%237a7370' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 9px center;
+  cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.ck-fs-btn {
+  background: rgba(255,255,255,0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.8);
+  width: 30px; height: 30px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0; flex-shrink: 0;
+  color: var(--ck-text-primary);
+}
 
-    --border-subtle:  rgba(245, 237, 229, 0.08);
-    --border-default: rgba(245, 237, 229, 0.15);
-    --border-accent:  rgba(232, 128, 74, 0.45);
+/* ─── Section label ─── */
+.ck-section-label {
+  font-size: 10px; letter-spacing: 1.4px;
+  color: var(--ck-text-tertiary); text-transform: uppercase;
+  margin: 22px 0 10px;
+  font-weight: 600;
+}
 
-    --shadow-focus:   0 0 0 3px rgba(232, 128, 74, 0.25);
-    --shadow-lift:    0 4px 14px rgba(0, 0, 0, 0.4);
+/* ─── Glass card base ─── */
+.ck-card {
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(20px) saturate(140%); -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgba(255,255,255,0.85);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 8px 28px rgba(40,30,20,0.06), inset 0 1px 0 rgba(255,255,255,0.9);
+}
 
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 10px;
+/* ─── Focus card ─── */
+.ck-focus {
+  border: 1px solid rgba(232,128,74,0.32);
+  background: linear-gradient(135deg, rgba(255,236,222,0.55), rgba(255,255,255,0.55));
+  padding: 20px 22px;
+}
+.ck-focus-eyebrow {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-style: italic; font-size: 13px; color: var(--ck-accent-700); margin-bottom: 6px;
+}
+.ck-focus-name { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; line-height: 1.15; color: var(--ck-text-primary); }
+.ck-focus-why { font-size: 13px; color: var(--ck-text-secondary); margin-top: 8px; line-height: 1.5; }
+.ck-focus-meta {
+  display: flex; gap: 14px; margin-top: 14px; font-size: 11.5px; color: #6a625d;
+  flex-wrap: wrap;
+}
+.ck-focus-meta b { color: var(--ck-text-primary); font-weight: 600; }
+.ck-focus-actions { display: flex; gap: 10px; margin-top: 18px; align-items: center; flex-wrap: wrap; }
+.ck-focus-activity {
+  margin-top: 14px; padding: 10px 12px;
+  background: rgba(232,128,74,0.1); border-radius: 8px;
+  font-size: 12.5px; color: var(--ck-accent-700); font-style: italic;
+}
 
-    --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
-    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+/* ─── Buttons ─── */
+.ck-btn-primary {
+  background: linear-gradient(180deg, var(--ck-accent-500), var(--ck-accent-600));
+  color: #fff; border: none; padding: 10px 18px; font-size: 12.5px; font-weight: 600;
+  border-radius: 10px; box-shadow: 0 4px 14px rgba(232,128,74,0.32); cursor: pointer;
+}
+.ck-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.ck-btn-secondary {
+  background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.85); color: var(--ck-text-primary);
+  padding: 9px 14px; font-size: 12px; font-weight: 500; border-radius: 10px; cursor: pointer;
+}
 
-    background: var(--bg-base);
-    color: var(--cream-100);
-    font-family: system-ui, -apple-system, 'Inter Tight', sans-serif;
-    min-height: 100vh;
-  }
+/* ─── KC list ─── */
+.ck-kc-list { padding: 6px 18px; }
+.ck-kc-row {
+  display: flex; gap: 12px; align-items: center;
+  padding: 11px 0; border-top: 1px solid rgba(40,30,20,0.05); cursor: pointer;
+}
+.ck-kc-row:first-child { border-top: none; }
+.ck-kc-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.ck-kc-dot.solid { background: var(--ck-state-solid); }
+.ck-kc-dot.in_progress { background: var(--ck-state-in-progress); }
+.ck-kc-dot.fragile { background: transparent; border: 1.5px dashed var(--ck-state-fragile-border); box-shadow: none; }
+.ck-kc-dot.not_started { background: var(--ck-state-not-started); border: 1px solid rgba(122,115,112,0.3); box-shadow: none; }
+.ck-kc-dot.focus { background: var(--ck-accent-500); box-shadow: 0 0 0 3px rgba(232,128,74,0.25); }
+.ck-kc-info { flex: 1; min-width: 0; }
+.ck-kc-name { font-size: 13.5px; font-weight: 500; color: var(--ck-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-kc-why { font-size: 11.5px; color: #6a625d; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-kc-arrow { color: #b0a89f; font-size: 14px; flex-shrink: 0; }
 
-  /* ────────────────────────────────────────────────────────────
-     Animations
-     ──────────────────────────────────────────────────────────── */
-  @keyframes cv4-pulse-halo {
-    0%, 100% { transform: scale(1); opacity: 0.45; }
-    50%      { transform: scale(1.08); opacity: 0.7; }
-  }
-  @keyframes cv4-fade-up {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes cv4-fill-bar {
-    from { transform: scaleX(0); }
-    to   { transform: scaleX(1); }
-  }
-  @keyframes cv4-tab-underline {
-    from { transform: scaleX(0); }
-    to   { transform: scaleX(1); }
-  }
-  @keyframes cv4-shimmer-edge {
-    0%   { stroke-dashoffset: 0; }
-    100% { stroke-dashoffset: -18; }
-  }
+/* ─── Metacognitive signal ─── */
+.ck-signal {
+  display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px;
+  background: rgba(255,255,255,0.45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.7); border-radius: 12px; margin-top: 10px;
+}
+.ck-signal-icon {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-style: italic; font-size: 18px; color: var(--ck-accent-700); flex-shrink: 0; line-height: 1;
+}
+.ck-signal-text { font-size: 12.5px; color: #4a4540; line-height: 1.5; }
 
-  .cockpit-v4 .anim-fade-up           { animation: cv4-fade-up 0.55s var(--ease-out) both; }
-  .cockpit-v4 .anim-fade-up-1         { animation-delay: 0.05s; }
-  .cockpit-v4 .anim-fade-up-2         { animation-delay: 0.12s; }
-  .cockpit-v4 .anim-fade-up-3         { animation-delay: 0.20s; }
-  .cockpit-v4 .anim-fade-up-4         { animation-delay: 0.28s; }
-  .cockpit-v4 .focus-halo             { animation: cv4-pulse-halo 2.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
-  .cockpit-v4 .progress-segment       { transform-origin: left; animation: cv4-fill-bar 0.7s var(--ease-out) both; }
-  .cockpit-v4 .progress-segment-1     { animation-delay: 0.30s; }
-  .cockpit-v4 .progress-segment-2     { animation-delay: 0.38s; }
-  .cockpit-v4 .progress-segment-3     { animation-delay: 0.46s; }
-  .cockpit-v4 .progress-segment-4     { animation-delay: 0.54s; }
-  .cockpit-v4 .progress-segment-5     { animation-delay: 0.62s; }
-  .cockpit-v4 .tab-active::after      { animation: cv4-tab-underline 0.4s var(--ease-spring) both; transform-origin: left; }
-  .cockpit-v4 .edge-active            { stroke-dasharray: 12 6; animation: cv4-shimmer-edge 1.6s linear infinite; }
+/* ─── Stats grid ─── */
+.ck-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.ck-stat {
+  background: rgba(255,255,255,0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.7); border-radius: 12px; padding: 14px 16px;
+}
+.ck-stat-label { font-size: 10px; letter-spacing: 1.2px; color: var(--ck-text-tertiary); text-transform: uppercase; font-weight: 600; }
+.ck-stat-value { font-size: 24px; font-weight: 600; letter-spacing: -0.6px; margin-top: 4px; color: var(--ck-text-primary); }
+.ck-stat-sub { font-size: 11px; color: #6a625d; margin-top: 2px; }
+.ck-spark { display: flex; align-items: flex-end; gap: 3px; height: 24px; margin-top: 8px; }
+.ck-spark-bar { flex: 1; background: linear-gradient(180deg, var(--ck-accent-500), rgba(232,128,74,0.3)); border-radius: 2px; }
 
-  /* Hover micro-interactions */
-  .cockpit-v4 .node-interactive { cursor: pointer; transition: transform 0.18s var(--ease-spring), filter 0.18s var(--ease-out); transform-origin: center; transform-box: fill-box; }
-  .cockpit-v4 .node-interactive:hover { transform: scale(1.08); filter: brightness(1.1); }
-  .cockpit-v4 .cta { transition: background 0.15s var(--ease-out), transform 0.12s var(--ease-out), box-shadow 0.18s var(--ease-out); }
-  .cockpit-v4 .cta:hover { background: var(--accent-700); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
-  .cockpit-v4 .cta:active { transform: translateY(0); }
-  .cockpit-v4 .cta:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+/* ─── Footer hint ─── */
+.ck-footer-hint {
+  font-size: 11px; color: #8a8378; text-align: center; margin-top: 20px;
+  font-family: 'Instrument Serif', Georgia, serif; font-style: italic;
+}
 
-  .cockpit-v4 .tab-link { transition: color 0.15s var(--ease-out); }
-  .cockpit-v4 .tab-link:hover:not([aria-disabled="true"]) { color: var(--cream-100); }
-  .cockpit-v4 .tab-link[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+/* ─── Empty state ─── */
+.ck-empty {
+  font-size: 13px; color: var(--ck-text-secondary); text-align: center; padding: 20px 0;
+}
 
-  /* Reduced motion respect (WCAG 2.3.3) */
-  @media (prefers-reduced-motion: reduce) {
-    .cockpit-v4 .focus-halo,
-    .cockpit-v4 .progress-segment,
-    .cockpit-v4 .anim-fade-up,
-    .cockpit-v4 .tab-active::after,
-    .cockpit-v4 .edge-active { animation: none; }
-    .cockpit-v4 .node-interactive { transition: none; }
-  }
+/* ─── Toast region ─── */
+.ck-toast-region {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 100; min-width: 220px; max-width: 360px;
+  background: rgba(255,255,255,0.75); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(232,128,74,0.45); border-radius: 10px;
+  padding: 10px 16px; font-size: 13px; color: var(--ck-accent-700);
+  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 4px 18px rgba(40,30,20,0.12);
+  opacity: 0; pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.ck-toast-region.ck-toast-visible { opacity: 1; pointer-events: auto; }
 
-  /* Tab styles */
-  .cockpit-v4 .tabs { display: flex; gap: 28px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 22px; }
-  .cockpit-v4 .tab-link {
-    position: relative; padding: 10px 0;
-    font-family: ui-monospace, 'JetBrains Mono', monospace;
-    font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase;
-    color: var(--cream-500); text-decoration: none;
-    background: none; border: none; cursor: pointer;
-  }
-  .cockpit-v4 .tab-active { color: var(--cream-100); }
-  .cockpit-v4 .tab-active::after {
-    content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
-    background: var(--accent-500);
-  }
+/* ─── Container queries (frame width, not viewport) ─── */
+@container (max-width: 480px) {
+  .ck-inner { padding: 16px 16px 22px; }
+  .ck-header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .ck-header-right { justify-content: space-between; }
+  .ck-domain-select { flex: 1; min-width: 0; }
+  .ck-title { font-size: 16px; }
+  .ck-focus { padding: 16px 18px; }
+  .ck-focus-name { font-size: 19px; }
+  .ck-focus-meta { gap: 8px 14px; font-size: 11px; }
+  .ck-focus-actions .ck-btn-primary,
+  .ck-focus-actions .ck-btn-secondary { flex: 1; text-align: center; }
+  .ck-stats { grid-template-columns: 1fr; }
+  .ck-card { padding: 14px 14px; }
+  .ck-kc-list { padding: 4px 14px; }
+  .ck-kc-row { gap: 10px; padding: 10px 0; }
+  .ck-kc-name { font-size: 13px; }
+  .ck-kc-why { font-size: 11px; }
+}
 
-  /* Metacog signal — hidden by default until JS decides whether to show */
-  .cockpit-v4 .metacog-signal { display: none; margin-top: 18px; padding: 14px 16px; background: linear-gradient(90deg, rgba(232,128,74,0.10) 0%, transparent 60%); border-top: 1px solid rgba(232,128,74,0.28); }
+/* ─── Motion preference ─── */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
 </style>
 </head>
-<body class="cockpit-v4">
-  <div class="cockpit-v4-root" style="padding:32px 36px;position:relative;overflow:hidden;">
-
-    <!-- Grid background (banner echo) -->
-    <svg style="position:absolute;inset:0;width:100%;height:100%;opacity:0.04;pointer-events:none;" aria-hidden="true">
-      <defs><pattern id="cv4g1" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0L0 0 0 32" fill="none" stroke="#f5ede5" stroke-width="1"/></pattern></defs>
-      <rect width="100%" height="100%" fill="url(#cv4g1)"/>
-    </svg>
-
-    <!-- HEADER : title + meta + controls -->
-    <div class="anim-fade-up anim-fade-up-1" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:22px;position:relative;flex-wrap:wrap;">
-      <div style="flex:1;min-width:240px;">
-        <div style="font-family:ui-monospace,'JetBrains Mono',monospace;font-size:11px;letter-spacing:2.4px;color:var(--cream-500);text-transform:uppercase;">Carte de connaissance</div>
-        <div id="domain-name" style="font-size:26px;font-weight:600;margin-top:6px;letter-spacing:-0.6px;line-height:1.2;color:var(--cream-100);"></div>
-        <div id="personal-goal" style="font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:18px;color:var(--accent-300);margin-top:4px;line-height:1.3;"></div>
+<body>
+<div id="ck-toast-region" class="ck-toast-region" aria-live="polite"></div>
+<div class="ck-frame">
+  <div class="ck-inner">
+    <div class="ck-header" role="banner">
+      <div class="ck-header-left">
+        <div class="ck-eyebrow">Cockpit</div>
+        <h1 id="ck-domain-name" class="ck-title"></h1>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-        <div id="cockpit-controls" style="display:flex;gap:8px;align-items:center;">
-          <label for="domain-select" style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.4px;color:var(--cream-500);text-transform:uppercase;">Domaine</label>
-          <select id="domain-select" style="background:var(--bg-panel);color:var(--cream-100);border:1px solid var(--border-subtle);border-radius:var(--radius-sm,4px);padding:4px 8px;font-family:ui-monospace,monospace;font-size:12px;cursor:pointer;"></select>
-          <button id="fullscreen-toggle" type="button" title="Basculer en plein écran" aria-label="Basculer en plein écran" style="background:transparent;color:var(--cream-300);border:1px solid var(--border-subtle);border-radius:var(--radius-sm,4px);padding:4px 8px;font-family:ui-monospace,monospace;font-size:12px;cursor:pointer;display:none;">⛶ Plein écran</button>
-        </div>
-        <div id="streak" style="font-size:13px;color:var(--cream-300);"></div>
+      <div class="ck-header-right">
+        <div id="ck-streak" class="ck-streak"></div>
+        <select id="ck-domain-select" class="ck-domain-select" aria-label="Domaine"></select>
+        <button id="ck-fullscreen-btn" class="ck-fs-btn" aria-label="Plein écran" hidden>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 4V2h2M10 4V2H8M2 8v2h2M10 8v2H8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
       </div>
     </div>
-
-    <!-- TABS (premium, animated underline) -->
-    <div class="tabs anim-fade-up anim-fade-up-2" role="tablist">
-      <button id="tab-session" class="tab-link tab-active" role="tab" aria-selected="true" aria-controls="panel-session">Cette session</button>
-      <button id="tab-global" class="tab-link" role="tab" aria-selected="false" aria-controls="panel-global">Modèle global</button>
-    </div>
-
-    <div id="panel-session" role="tabpanel" aria-labelledby="tab-session">
-
-    <!-- LEGEND -->
-    <div class="anim-fade-up anim-fade-up-2" style="display:flex;gap:18px;align-items:center;margin-bottom:14px;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.3px;color:var(--cream-500);text-transform:uppercase;flex-wrap:wrap;">
-      <div style="display:flex;align-items:center;gap:6px;"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#e8804a"/></svg>solide</div>
-      <div style="display:flex;align-items:center;gap:6px;"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#f3a875"/></svg>en cours</div>
-      <div style="display:flex;align-items:center;gap:6px;"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#da6e38"/></svg>fragile</div>
-      <div style="display:flex;align-items:center;gap:6px;"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="#e8804a"/><circle cx="8" cy="8" r="7" fill="none" stroke="#f3a875" stroke-width="1.5"/></svg><span style="color:var(--accent-300);">focus</span></div>
-      <div style="display:flex;align-items:center;gap:6px;"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="#8a8378" stroke-width="1.5"/></svg>pas commencé</div>
-    </div>
-
-    <!-- KST GRAPH -->
-    <div class="anim-fade-up anim-fade-up-3" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:24px;margin-bottom:18px;position:relative;">
-      <svg id="olm-graph" viewBox="0 0 700 320" style="width:100%;height:320px;display:block;" role="img" aria-label="Graphe de connaissance"></svg>
-    </div>
-
-    <!-- BOTTOM ROW -->
-    <div class="anim-fade-up anim-fade-up-4" style="display:grid;grid-template-columns:1.5fr 1fr auto;gap:18px;align-items:stretch;">
-
-      <div style="background:var(--bg-panel);border-left:3px solid var(--accent-500);padding:16px 18px;border-radius:0 var(--radius-md) var(--radius-md) 0;">
-        <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:6px;">Le palier suivant</div>
-        <div id="focus-concept" style="font-size:16px;font-weight:600;color:var(--cream-100);line-height:1.3;"></div>
-        <div id="focus-reason" style="font-size:13px;color:var(--cream-300);margin-top:4px;"></div>
-      </div>
-
-      <div style="display:flex;flex-direction:column;justify-content:center;">
-        <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--cream-500);text-transform:uppercase;margin-bottom:8px;">Progression</div>
-        <div style="display:flex;gap:5px;margin-bottom:6px;">
-          <div class="progress-segment progress-segment-1" style="flex:1;height:6px;background:var(--cream-100);border-radius:1px;"></div>
-          <div class="progress-segment progress-segment-2" style="flex:1;height:6px;background:var(--cream-100);border-radius:1px;"></div>
-          <div class="progress-segment progress-segment-3" style="flex:1;height:6px;background:var(--cream-100);opacity:0.55;border-radius:1px;"></div>
-          <div class="progress-segment progress-segment-4" style="flex:1;height:6px;background:transparent;border:1px dashed rgba(245,237,229,0.5);border-radius:1px;"></div>
-          <div class="progress-segment progress-segment-5" style="flex:1;height:6px;background:transparent;border:1px dashed rgba(245,237,229,0.5);border-radius:1px;"></div>
-        </div>
-        <div id="progress-text" style="font-size:13px;color:var(--cream-300);"></div>
-      </div>
-
-      <button id="cta-attack" class="cta" type="button" style="background:var(--accent-500);color:var(--bg-base);border:2px solid var(--accent-500);padding:0 24px;font-family:system-ui,sans-serif;font-size:14px;font-weight:700;border-radius:var(--radius-md);cursor:pointer;display:flex;align-items:center;gap:8px;">
-        j'attaque
-        <span style="font-size:18px;" aria-hidden="true">&rarr;</span>
-      </button>
-    </div>
-
-    <!-- METACOG SIGNAL -->
-    <div id="metacog-line" class="anim-fade-up anim-fade-up-4 metacog-signal">
-      <div style="display:flex;align-items:flex-start;gap:14px;">
-        <svg width="18" height="18" style="flex-shrink:0;margin-top:2px;" viewBox="0 0 18 18" aria-hidden="true">
-          <circle cx="9" cy="9" r="7.5" fill="none" stroke="#f3a875" stroke-width="1.5"/>
-          <text x="9" y="13" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" font-weight="700" fill="#f3a875">i</text>
-        </svg>
-        <div style="flex:1;">
-          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:4px;">Signal · métacognition</div>
-          <div class="signal-text" style="font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:16px;color:var(--cream-100);line-height:1.4;"></div>
-        </div>
-      </div>
-    </div>
-
-    </div><!-- /panel-session -->
-    <div id="panel-global" role="tabpanel" aria-labelledby="tab-global" hidden>
-
-      <!-- HEADER STATS -->
-      <div class="anim-fade-up anim-fade-up-2" style="display:flex;gap:24px;margin-bottom:18px;align-items:baseline;flex-wrap:wrap;">
-        <div>
-          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--cream-500);text-transform:uppercase;margin-bottom:4px;">Série</div>
-          <div id="global-streak" style="font-size:18px;font-weight:600;color:var(--cream-100);"></div>
-        </div>
-        <div>
-          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--cream-500);text-transform:uppercase;margin-bottom:4px;">Concepts solides</div>
-          <div id="global-total-solid" style="font-size:18px;font-weight:600;color:var(--cream-100);"></div>
-        </div>
-      </div>
-
-      <!-- 3-COLUMN GRID: Savoir / Métacognition / Objectifs -->
-      <div class="anim-fade-up anim-fade-up-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:18px;">
-
-        <!-- SAVOIR -->
-        <div style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
-          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Savoir · par domaine</div>
-          <div id="savoir-list" style="display:flex;flex-direction:column;gap:10px;"></div>
-        </div>
-
-        <!-- METACOGNITION -->
-        <div style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
-          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Métacognition · 30 derniers jours</div>
-          <div style="display:flex;flex-direction:column;gap:14px;">
-            <div>
-              <div style="font-size:11px;color:var(--cream-300);margin-bottom:4px;">Calibration (auto-évaluation vs réel)</div>
-              <svg id="spark-calibration" viewBox="0 0 220 32" style="width:100%;height:32px;display:block;" role="img" aria-label="Calibration sparkline"></svg>
-            </div>
-            <div>
-              <div style="font-size:11px;color:var(--cream-300);margin-bottom:4px;">Autonomie (recours aux indices)</div>
-              <svg id="spark-autonomy" viewBox="0 0 220 32" style="width:100%;height:32px;display:block;" role="img" aria-label="Autonomy sparkline"></svg>
-            </div>
-            <div>
-              <div style="font-size:11px;color:var(--cream-300);margin-bottom:4px;">Satisfaction (1=frustré, 4=flow)</div>
-              <svg id="spark-satisfaction" viewBox="0 0 220 32" style="width:100%;height:32px;display:block;" role="img" aria-label="Satisfaction sparkline"></svg>
-            </div>
-          </div>
-        </div>
-
-        <!-- OBJECTIFS -->
-        <div style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
-          <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Objectifs personnels</div>
-          <div id="goals-list" style="display:flex;flex-direction:column;gap:12px;"></div>
-        </div>
-
-      </div>
-
-      <!-- TIMELINE -->
-      <div class="anim-fade-up anim-fade-up-4" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:18px;">
-        <div style="font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1.6px;color:var(--accent-300);text-transform:uppercase;margin-bottom:12px;">Évènements récents · 7 derniers jours</div>
-        <div id="timeline-list" style="display:flex;flex-direction:column;gap:8px;"></div>
-      </div>
-
-    </div>
-
+    <div class="ck-section-label">Le palier suivant</div>
+    <div id="ck-focus-card" class="ck-card ck-focus"></div>
+    <div class="ck-section-label">Ou choisis ce que tu veux travailler</div>
+    <div id="ck-kc-list" class="ck-card ck-kc-list" role="list"></div>
+    <div class="ck-section-label">Signal métacognitif</div>
+    <div id="ck-signal" class="ck-signal"></div>
+    <div class="ck-section-label">Vue d'ensemble · tous domaines</div>
+    <div id="ck-stats" class="ck-stats"></div>
+    <div class="ck-footer-hint">apprenant et tuteur regardent les mêmes données.</div>
   </div>
-
+</div>
 <script>
 (function() {
-  let snap = null;
+  'use strict';
 
-  // MCP Apps host messaging: we use TWO patterns.
-  //
-  //   send(method, params)    — JSON-RPC notification (no id, no response).
-  //   request(method, params) — JSON-RPC request with id; returns a Promise
-  //                             resolved with the host's response result.
-  //
-  // The handshake (ui/initialize) and Tab 2's tools/call need request().
-  // Notifications like ui/notifications/initialized use send().
+  // ─── Message protocol helpers ─────────
   let nextId = 1;
-  const pendingRequests = new Map(); // id -> resolve fn
-
+  const pending = new Map();
   function send(method, params) {
-    window.parent.postMessage({ jsonrpc: "2.0", method: method, params: params }, "*");
+    window.parent.postMessage({ jsonrpc: '2.0', method, params: params || {} }, '*');
   }
-
   function request(method, params) {
     const id = nextId++;
-    return new Promise((resolve) => {
-      pendingRequests.set(id, resolve);
-      window.parent.postMessage({ jsonrpc: "2.0", id: id, method: method, params: params }, "*");
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params: params || {} }, '*');
     });
   }
-
-  function clearChildren(el) {
-    while (el && el.firstChild) el.removeChild(el.firstChild);
+  async function pushModelContext(text, structured) {
+    try {
+      await request('ui/update-model-context', {
+        content: [{ type: 'text', text: text }],
+        structuredContent: structured || {},
+      });
+    } catch (err) { console.warn('ui/update-model-context failed:', err); }
+  }
+  async function callTool(name, args) {
+    return request('tools/call', { name: name, arguments: args || {} });
   }
 
-  function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text || "";
-  }
-
-  function svgNode(name, attrs) {
-    const el = document.createElementNS("http://www.w3.org/2000/svg", name);
-    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
-    return el;
-  }
-
-  // routeStructured: dispatch a CallToolResult.structuredContent to the right
-  // panel based on its shape. Tab 1 (OLMGraph) has concepts+edges; Tab 2
-  // (GlobalOLMSnapshot) has domains+calibration_history.
-  function routeStructured(sc) {
-    if (!sc) return;
-    if (sc.concepts && sc.edges !== undefined) {
-      snap = sc;
-      render();
-    } else if (sc.domains && sc.calibration_history !== undefined) {
-      globalData = sc;
-      renderGlobal();
-    }
-  }
-
-  // We do not check ev.origin here. The iframe is sandboxed by Claude Desktop /
-  // claude.ai with no stable parent origin, and all rendered content goes through
-  // safe DOM methods (textContent + createElement). A malicious page postMessaging
-  // the iframe could only feed bogus structuredContent — visible UI corruption,
-  // not XSS. Logical integrity is the parent client's responsibility.
-  window.addEventListener('message', (ev) => {
-    const m = ev.data;
-    if (!m || m.jsonrpc !== "2.0") return;
-
-    // (a) JSON-RPC response to one of our outbound requests (ui/initialize,
-    // tools/call, …): match by id. The CallToolResult lives in m.result;
-    // its structuredContent — when present — feeds the panels.
-    if (m.id !== undefined && pendingRequests.has(m.id)) {
-      const resolve = pendingRequests.get(m.id);
-      pendingRequests.delete(m.id);
-      resolve(m.result);
-      if (m.result && m.result.structuredContent) {
-        routeStructured(m.result.structuredContent);
+  // ─── Safe DOM helpers (textContent only, no innerHTML on dynamic data) ─────
+  function el(tag, attrs, children) {
+    const e = document.createElement(tag);
+    if (attrs) {
+      for (const k in attrs) {
+        if (k === 'class') e.className = attrs[k];
+        else if (k === 'text') e.textContent = attrs[k];
+        else if (k.startsWith('data-') || k === 'aria-label' || k === 'role' || k === 'value' || k === 'type' || k === 'disabled' || k === 'title') e.setAttribute(k, attrs[k]);
+        else e[k] = attrs[k];
       }
-      return;
     }
+    if (children) children.forEach(c => c && e.appendChild(c));
+    return e;
+  }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
-    // (b) Notification from host (no id). The initial open_cockpit
-    // CallToolResult arrives via ui/notifications/tool-result; m.params
-    // IS the CallToolResult.
-    if (m.method === "ui/notifications/tool-result" && m.params) {
-      routeStructured(m.params.structuredContent);
-      return;
-    }
+  // ─── State ──────────────
+  let state = { graph: null, hostCaps: null };
 
-    if (m.method === "ui/notifications/tool-input") {
-      // Tool input args — we render against tool-result, not input. No-op.
-      return;
-    }
-  });
-
-  function render() {
-    if (!snap) return;
-    setText("domain-name", snap.domain_name);
-    setText("personal-goal", snap.personal_goal);
-    setText("streak", snap.streak ? snap.streak + " jours d'affilée" : "");
-    setText("focus-concept", snap.focus_concept || "");
-    setText("focus-reason", snap.focus_reason || "");
-    const total = (snap.solid || 0) + (snap.in_progress || 0) + (snap.fragile || 0) + (snap.not_started || 0);
-    setText("progress-text", (snap.solid || 0) + " / " + total + " solides");
-    renderGraph(snap);
-    renderMetacog(snap);
-    syncDomainSelect(snap);
+  // ─── Render functions ──────────────
+  function renderAll(graph) {
+    state.graph = graph;
+    renderHeader(graph);
+    renderFocus(graph);
+    renderKCs(graph);
+    renderMetacog(graph);
+    renderStats(graph);
     notifySize();
   }
 
-  function renderGraph(s) {
-    const svg = document.getElementById("olm-graph");
-    if (!svg) return;
-    clearChildren(svg);
-    const layout = computeLayout(s.concepts || [], s.edges || []);
-    // Compute viewBox from actual node bounds so the graph never clips,
-    // regardless of concept count or graph depth. The label sits ~30px
-    // below each node so we pad bottom by 40, top/left/right by 30.
-    let maxX = 200, maxY = 160;
-    for (const pos of Object.values(layout)) {
-      if (pos.x + 30 > maxX) maxX = pos.x + 30;
-      if (pos.y + 40 > maxY) maxY = pos.y + 40;
-    }
-    svg.setAttribute("viewBox", "0 0 " + maxX + " " + maxY);
-    // Set the SVG height proportional to viewBox so wide graphs don't get
-    // squashed into a 320px-tall box.
-    svg.style.height = Math.max(180, Math.min(maxY, 520)) + "px";
-    for (const e of (s.edges || [])) drawEdge(svg, e, layout);
-    for (const n of (s.concepts || [])) drawNode(svg, n, layout);
-  }
-
-  // computeLayout: simple level-based layout. Compute level (longest path
-  // from a root) for each concept, then x = level * spacing, y =
-  // position-in-level * spacing.
-  function computeLayout(concepts, edges) {
-    const incoming = {};
-    for (const e of edges) {
-      (incoming[e.to] = incoming[e.to] || []).push(e.from);
-    }
-    const level = {};
-    const queue = [];
-    for (const c of concepts) {
-      if (!incoming[c.concept] || incoming[c.concept].length === 0) {
-        level[c.concept] = 0;
-        queue.push(c.concept);
-      }
-    }
-    while (queue.length) {
-      const cur = queue.shift();
-      for (const e of edges) {
-        if (e.from === cur) {
-          const candidate = (level[cur] || 0) + 1;
-          const MAX_LEVEL = 100; // hard cap against pathological cycles
-          if (candidate > MAX_LEVEL) continue;
-          if (level[e.to] === undefined || level[e.to] < candidate) {
-            level[e.to] = candidate;
-            queue.push(e.to);
-          }
-        }
-      }
-    }
-    const byLevel = {};
-    for (const c of concepts) {
-      const l = level[c.concept] || 0;
-      (byLevel[l] = byLevel[l] || []).push(c.concept);
-    }
-    const out = {};
-    const xstep = 130, ystep = 80, xoffset = 60, yoffset = 60;
-    for (const lvl of Object.keys(byLevel)) {
-      const list = byLevel[lvl];
-      list.forEach((name, idx) => {
-        out[name] = {
-          x: xoffset + parseInt(lvl, 10) * xstep,
-          y: yoffset + idx * ystep,
-        };
-      });
-    }
-    return out;
-  }
-
-  function drawNode(svg, n, layout) {
-    const pos = layout[n.concept];
-    if (!pos) return;
-    const g = svgNode("g", {
-      class: "node node-interactive node-" + n.state,
-      transform: "translate(" + pos.x + "," + pos.y + ")",
+  function renderHeader(g) {
+    document.getElementById('ck-domain-name').textContent = g.domain_name || '';
+    const streak = g.streak || 0;
+    const streakEl = document.getElementById('ck-streak');
+    streakEl.textContent = streak > 0 ? '🔥 ' + streak + 'j' : '';
+    const sel = document.getElementById('ck-domain-select');
+    clear(sel);
+    (g.available_domains || []).forEach(d => {
+      const opt = el('option', { value: d.id, text: d.name });
+      if (d.id === g.domain_id) opt.selected = true;
+      sel.appendChild(opt);
     });
-    const stateStyle = {
-      not_started: { r: 11, fill: "transparent", stroke: "#8a8378", strokeWidth: 1.5, dasharray: "3 3" },
-      fragile:     { r: 11, fill: "#da6e38",     stroke: "#da6e38", strokeWidth: 2,   dasharray: "5 3" },
-      in_progress: { r: 13, fill: "#f3a875",     stroke: "#f3a875", strokeWidth: 2,   dasharray: "" },
-      solid:       { r: 14, fill: "#e8804a",     stroke: "#e8804a", strokeWidth: 2,   dasharray: "" },
-      focus:       { r: 18, fill: "#e8804a",     stroke: "#f3a875", strokeWidth: 3,   dasharray: "" },
-    };
-    const s = stateStyle[n.state] || stateStyle.not_started;
-    const circle = svgNode("circle", {
-      r: String(s.r),
-      fill: s.fill,
-      stroke: s.stroke,
-      "stroke-width": String(s.strokeWidth),
-      class: (n.state === "focus") ? "focus-halo" : "",
-    });
-    if (s.dasharray) circle.setAttribute("stroke-dasharray", s.dasharray);
-    g.appendChild(circle);
-
-    const label = svgNode("text", {
-      x: "0",
-      y: String(s.r + 16),
-      "text-anchor": "middle",
-      fill: "#f5ede5",
-      "font-size": "12",
-      "font-family": "ui-monospace,SFMono-Regular,monospace",
-    });
-    label.textContent = n.concept;
-    g.appendChild(label);
-
-    const title = svgNode("title", {});
-    title.textContent = n.concept + " — " + String(n.state || "").replace("_", " ");
-    g.appendChild(title);
-
-    svg.appendChild(g);
   }
 
-  function drawEdge(svg, e, layout) {
-    const a = layout[e.from], b = layout[e.to];
-    if (!a || !b) return;
-    const opacityByType = { traversed: 0.5, active: 0.85, future: 0.5 };
-    const colorByType = { traversed: "#a6968a", active: "#f3a875", future: "#a6968a" };
-    const strokeWidthByType = { traversed: 1.5, active: 2.5, future: 1.5 };
-    const line = svgNode("line", {
-      x1: String(a.x), y1: String(a.y), x2: String(b.x), y2: String(b.y),
-      stroke: colorByType[e.type] || "#a6968a",
-      "stroke-width": String(strokeWidthByType[e.type] || 1.5),
-      "stroke-opacity": String(opacityByType[e.type] || 0.5),
-      class: "edge edge-" + e.type,
-    });
-    if (e.type === "future") line.setAttribute("stroke-dasharray", "6 4");
-    svg.appendChild(line);
-  }
-
-  function renderMetacog(s) {
-    const container = document.getElementById("metacog-line");
-    if (!container) return;
-    let text = "";
-    if (s.calibration_bias > 1.5) text = "Tu sur-estimes un peu tes acquis depuis 3 sessions — quelques exercices à froid t'aideront à recalibrer.";
-    else if (s.calibration_bias < -1.5) text = "Tu sous-estimes un peu tes acquis — tu en sais plus que tu crois.";
-    else if (s.autonomy_trend === "declining") text = "Tu t'appuies un peu plus sur les hints récemment — tente quelques exercices sans aide pour voir.";
-    else if (s.affect_trend === "declining") text = "Les 3 dernières sessions ont été éprouvantes — n'hésite pas à alléger ou faire une pause.";
-    container.style.display = text ? "block" : "none";
-    const txt = container.querySelector(".signal-text");
-    if (txt) txt.textContent = text;
-  }
-
-  let globalData = null;
-
-  function switchTab(name) {
-    document.querySelectorAll(".tab-link").forEach(t => {
-      const isActive = t.dataset.tab === name || t.id === "tab-" + name;
-      t.classList.toggle("tab-active", isActive);
-      t.setAttribute("aria-selected", isActive ? "true" : "false");
-    });
-    document.querySelectorAll('[role="tabpanel"]').forEach(p => {
-      const isActive = p.id === "panel-" + name;
-      if (isActive) p.removeAttribute("hidden");
-      else p.setAttribute("hidden", "");
-    });
-    if (name === "global" && !globalData) {
-      // Response is also intercepted by the message listener (which routes
-      // result.structuredContent through routeStructured), but we still
-      // resolve the Promise here for symmetry / future error handling.
-      request("tools/call", { name: "get_olm_snapshot", arguments: { scope: "global" } })
-        .then((result) => {
-          if (result && result.structuredContent) {
-            globalData = result.structuredContent;
-            renderGlobalAndNotify();
-          }
-        });
-    }
-    // Tab visibility itself can change the body height; report it.
-    if (typeof notifySize === "function") notifySize();
-  }
-
-  function renderGlobalAndNotify() { renderGlobal(); notifySize(); }
-
-  function renderGlobal() {
-    if (!globalData) return;
-    setText("global-streak", globalData.streak ? globalData.streak + " jours d'affilée" : "—");
-    setText("global-total-solid", (globalData.total_solid || 0) + " concepts solides");
-    renderSavoir(globalData.domains);
-    renderSparkline("spark-calibration", globalData.calibration_history);
-    renderSparkline("spark-autonomy", globalData.autonomy_history);
-    renderSparkline("spark-satisfaction", globalData.satisfaction_history);
-    renderGoals(globalData.goals);
-    renderTimeline(globalData.recent_events);
-  }
-
-  function renderSavoir(domains) {
-    const container = document.getElementById("savoir-list");
-    if (!container) return;
-    clearChildren(container);
-    for (const d of (domains || [])) {
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;flex-direction:column;gap:4px;";
-      const name = document.createElement("div");
-      name.style.cssText = "font-size:13px;color:var(--cream-100);font-weight:500;";
-      name.textContent = d.domain_name;
-      row.appendChild(name);
-      // 4-segment bar (Solid/InProgress/Fragile/NotStarted)
-      const total = (d.solid || 0) + (d.in_progress || 0) + (d.fragile || 0) + (d.not_started || 0);
-      const bar = document.createElement("div");
-      bar.style.cssText = "display:flex;height:6px;border-radius:1px;overflow:hidden;background:var(--bg-elevated);";
-      const segments = [
-        { val: d.solid || 0,       color: "#e8804a" },
-        { val: d.in_progress || 0, color: "#f3a875" },
-        { val: d.fragile || 0,     color: "#da6e38" },
-        { val: d.not_started || 0, color: "transparent" },
-      ];
-      for (const s of segments) {
-        if (s.val > 0 && total > 0) {
-          const seg = document.createElement("div");
-          seg.style.cssText = "background:" + s.color + ";flex:" + s.val + ";";
-          bar.appendChild(seg);
-        }
-      }
-      row.appendChild(bar);
-      const meta = document.createElement("div");
-      meta.style.cssText = "font-size:11px;color:var(--cream-500);";
-      meta.textContent = (d.solid || 0) + " / " + total + " solides · " + Math.round((d.kst_progress || 0) * 100) + "%";
-      row.appendChild(meta);
-      container.appendChild(row);
-    }
-  }
-
-  function renderSparkline(svgId, points) {
-    const svg = document.getElementById(svgId);
-    if (!svg) return;
-    clearChildren(svg);
-    if (!points || points.length === 0) return;
-    const w = 220, h = 32;
-    const xs = (i) => points.length === 1 ? w / 2 : (i / (points.length - 1)) * w;
-    const vmin = Math.min(...points.map(p => p.value));
-    const vmax = Math.max(...points.map(p => p.value));
-    const ys = (v) => h - ((v - vmin) / (vmax - vmin || 1)) * (h - 4) - 2;
-    const polyline = svgNode("polyline", {
-      fill: "none",
-      stroke: "#f3a875",
-      "stroke-width": "1.5",
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-      points: points.map((p, i) => xs(i) + "," + ys(p.value)).join(" "),
-    });
-    svg.appendChild(polyline);
-  }
-
-  function renderGoals(goals) {
-    const container = document.getElementById("goals-list");
-    if (!container) return;
-    clearChildren(container);
-    for (const g of (goals || [])) {
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;flex-direction:column;gap:4px;";
-      const txt = document.createElement("div");
-      txt.style.cssText = "font-size:13px;color:var(--cream-100);";
-      txt.textContent = g.personal_goal || "(sans objectif)";
-      row.appendChild(txt);
-      // progress bar
-      const barWrap = document.createElement("div");
-      barWrap.style.cssText = "background:var(--bg-elevated);height:4px;border-radius:1px;overflow:hidden;";
-      const bar = document.createElement("div");
-      const pct = Math.max(0, Math.min(1, g.progress || 0));
-      bar.style.cssText = "background:var(--accent-500);height:100%;width:" + (pct * 100) + "%;";
-      barWrap.appendChild(bar);
-      row.appendChild(barWrap);
-      const meta = document.createElement("div");
-      meta.style.cssText = "font-size:11px;color:var(--cream-500);";
-      meta.textContent = Math.round(pct * 100) + "%";
-      row.appendChild(meta);
-      container.appendChild(row);
-    }
-  }
-
-  function renderTimeline(events) {
-    const container = document.getElementById("timeline-list");
-    if (!container) return;
-    clearChildren(container);
-    if (!events || events.length === 0) {
-      const empty = document.createElement("div");
-      empty.style.cssText = "font-size:12px;color:var(--cream-500);font-style:italic;";
-      empty.textContent = "Pas d'évènement marquant cette semaine.";
-      container.appendChild(empty);
+  function renderFocus(g) {
+    const card = document.getElementById('ck-focus-card');
+    clear(card);
+    if (!g.focus_concept) {
+      card.appendChild(el('div', { class: 'ck-empty', text: 'Ce domaine est vide — ajoute des concepts depuis le chat.' }));
       return;
     }
-    for (const e of events) {
-      const row = document.createElement("div");
-      row.style.cssText = "display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:baseline;font-size:12px;";
-      const when = document.createElement("span");
-      when.style.cssText = "font-family:ui-monospace,monospace;color:var(--cream-500);";
+    card.appendChild(el('div', { class: 'ck-focus-eyebrow', text: g.personal_goal || '' }));
+    card.appendChild(el('div', { class: 'ck-focus-name', text: g.focus_concept }));
+    card.appendChild(el('div', { class: 'ck-focus-why', text: g.focus_reason || '' }));
+    const node = (g.concepts || []).find(c => c.concept === g.focus_concept) || {};
+    const meta = el('div', { class: 'ck-focus-meta' });
+    const pm = (node.p_mastery != null ? node.p_mastery : 0).toFixed(2);
+    const ret = Math.round(((node.retention != null ? node.retention : 0)) * 100);
+    meta.appendChild(el('span', { text: 'P(maîtrise) ' + pm }));
+    meta.appendChild(el('span', { text: 'Rétention ' + ret + ' %' }));
+    meta.appendChild(el('span', { text: (node.days_since_review || 0) + 'j sans révision' }));
+    card.appendChild(meta);
+    const actions = el('div', { class: 'ck-focus-actions' });
+    actions.appendChild(el('button', { class: 'ck-btn-primary', 'data-action': 'attack', text: "j'attaque →" }));
+    actions.appendChild(el('button', { class: 'ck-btn-secondary', 'data-action': 'later', text: 'pas maintenant' }));
+    card.appendChild(actions);
+  }
+
+  function renderKCs(g) {
+    const list = document.getElementById('ck-kc-list');
+    clear(list);
+    const focus = g.focus_concept;
+    (g.concepts || []).filter(c => c.concept !== focus).forEach(c => {
+      const row = el('div', { class: 'ck-kc-row', role: 'listitem', 'data-kc': c.concept });
+      row.appendChild(el('div', { class: 'ck-kc-dot ' + (c.state || 'not_started') }));
+      const info = el('div', { class: 'ck-kc-info' });
+      info.appendChild(el('div', { class: 'ck-kc-name', text: c.concept }));
+      info.appendChild(el('div', { class: 'ck-kc-why', text: kcWhy(c) }));
+      row.appendChild(info);
+      row.appendChild(el('div', { class: 'ck-kc-arrow', text: '→' }));
+      list.appendChild(row);
+    });
+  }
+  function kcWhy(c) {
+    const parts = [];
+    if (c.state) parts.push(String(c.state).replace('_', ' '));
+    if (c.p_mastery != null) parts.push('P ' + c.p_mastery.toFixed(2));
+    if (c.days_since_review) parts.push(c.days_since_review + 'j');
+    return parts.join(' · ');
+  }
+
+  function renderMetacog(g) {
+    const node = document.getElementById('ck-signal');
+    clear(node);
+    const lines = [];
+    if (g.calibration_bias && Math.abs(g.calibration_bias) > 1.5) {
+      lines.push((g.calibration_bias > 0 ? 'Sur-confiance' : 'Sous-confiance') + ' détectée (biais ' + g.calibration_bias.toFixed(1) + ').');
+    }
+    if (g.autonomy_trend === 'declining') lines.push("Autonomie en baisse récemment.");
+    if (g.affect_trend === 'declining') lines.push("Affect en baisse récemment.");
+    if (lines.length === 0) {
+      node.style.display = 'none';
+      return;
+    }
+    node.style.display = '';
+    node.appendChild(el('div', { class: 'ck-signal-icon', text: '↳' }));
+    const text = el('div', { class: 'ck-signal-text' });
+    lines.forEach((l, i) => {
+      if (i > 0) text.appendChild(document.createElement('br'));
+      text.appendChild(document.createTextNode(l));
+    });
+    node.appendChild(text);
+  }
+
+  function renderStats(g) {
+    const wrap = document.getElementById('ck-stats');
+    clear(wrap);
+    const total = (g.solid || 0) + (g.in_progress || 0) + (g.fragile || 0) + (g.not_started || 0);
+    const items = [
+      { label: 'Maîtrisés', value: String(g.solid || 0), sub: 'sur ' + total + ' KCs' },
+      { label: 'Calibration', value: (g.calibration_bias || 0).toFixed(2), sub: '' },
+      { label: 'Progrès KST', value: Math.round((g.kst_progress || 0) * 100) + ' %', sub: '' },
+    ];
+    items.forEach(s => {
+      const card = el('div', { class: 'ck-stat' });
+      card.appendChild(el('div', { class: 'ck-stat-label', text: s.label }));
+      card.appendChild(el('div', { class: 'ck-stat-value', text: s.value }));
+      if (s.sub) card.appendChild(el('div', { class: 'ck-stat-sub', text: s.sub }));
+      wrap.appendChild(card);
+    });
+  }
+
+  // ─── Toast ──────────────
+  let toastTimer = null;
+  function showToast(msg) {
+    const region = document.getElementById('ck-toast-region');
+    region.textContent = msg;
+    region.classList.add('ck-toast-visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => region.classList.remove('ck-toast-visible'), 3000);
+  }
+
+  // ─── Click handlers (delegation) ──────────────
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action="attack"]');
+    if (btn && state.graph && state.graph.focus_concept) {
+      btn.disabled = true;
       try {
-        when.textContent = new Date(e.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
-      } catch (_) {
-        when.textContent = e.at || "";
+        const r = await callTool('learning_negotiation', { concept: state.graph.focus_concept });
+        const sc = r && r.structuredContent;
+        const card = document.getElementById('ck-focus-card');
+        const note = el('div', { class: 'ck-focus-activity', text: (sc && sc.activity && sc.activity.title) || 'Activité transmise à Claude →' });
+        card.appendChild(note);
+        await pushModelContext(
+          "L'apprenant attaque le palier '" + state.graph.focus_concept + "'.",
+          { negotiation_result: sc }
+        );
+      } catch (err) {
+        showToast("Négociation impossible — réessaie ?");
+        btn.disabled = false;
       }
-      const kind = document.createElement("span");
-      kind.style.cssText = "font-family:ui-monospace,monospace;font-size:10px;letter-spacing:1px;color:var(--accent-300);text-transform:uppercase;";
-      kind.textContent = e.kind || "";
-      const msg = document.createElement("span");
-      msg.style.cssText = "color:var(--cream-100);";
-      msg.textContent = e.message || "";
-      row.appendChild(when);
-      row.appendChild(kind);
-      row.appendChild(msg);
-      container.appendChild(row);
-    }
-  }
-
-  document.querySelectorAll(".tab-link").forEach(t => {
-    t.addEventListener("click", () => {
-      const name = t.id.replace(/^tab-/, "");
-      switchTab(name);
-    });
-  });
-
-  const cta = document.querySelector("#cta-attack");
-  if (cta) cta.addEventListener("click", () => {
-    if (!snap) return;
-    request("tools/call", {
-      name: "learning_negotiation",
-      arguments: { focus: snap.focus_concept, domain_id: snap.domain_id }
-    });
-  });
-
-  // ----- Domain selector -----
-  // Populates the <select> from snap.available_domains; on change refetches the
-  // OLMGraph for the chosen domain via get_olm_snapshot scope=graph (which does
-  // NOT carry _meta.ui.resourceUri, so it doesn't re-trigger a new iframe).
-  function syncDomainSelect(s) {
-    const sel = document.getElementById("domain-select");
-    if (!sel) return;
-    const domains = s.available_domains || [];
-    if (domains.length <= 1) {
-      sel.style.display = "none";
-      const lbl = sel.previousElementSibling;
-      if (lbl && lbl.tagName === "LABEL") lbl.style.display = "none";
       return;
     }
-    sel.style.display = "";
-    const lbl = sel.previousElementSibling;
-    if (lbl && lbl.tagName === "LABEL") lbl.style.display = "";
-    // Only rebuild options if the list actually changed.
-    const want = domains.map(d => d.id).join(",");
-    if (sel.dataset.builtFor !== want) {
-      while (sel.firstChild) sel.removeChild(sel.firstChild);
-      for (const d of domains) {
-        const opt = document.createElement("option");
-        opt.value = d.id;
-        opt.textContent = d.name;
-        sel.appendChild(opt);
+    const row = e.target.closest('[data-kc]');
+    if (row) {
+      // row[data-kc=<concept>] identifies the KC
+      const concept = row.getAttribute('data-kc');
+      try {
+        const r = await callTool('pick_concept', { concept: concept, domain_id: state.graph.domain_id });
+        if (r && r.structuredContent) {
+          renderAll(r.structuredContent);
+          await pushModelContext(
+            "L'apprenant a choisi '" + concept + "' comme nouveau focus.",
+            { focus_changed_to: concept }
+          );
+        }
+      } catch (err) {
+        showToast("Ce concept n'existe pas dans ce domaine");
       }
-      sel.dataset.builtFor = want;
     }
-    sel.value = s.domain_id || "";
-  }
+  });
 
-  const domainSelect = document.getElementById("domain-select");
-  if (domainSelect) {
-    domainSelect.addEventListener("change", (ev) => {
-      const id = ev.target.value;
-      if (!id) return;
-      request("tools/call", {
-        name: "get_olm_snapshot",
-        arguments: { scope: "graph", domain_id: id }
-      }).then((result) => {
-        if (result && result.structuredContent) {
-          snap = result.structuredContent;
-          render();
-        }
-      });
-    });
-  }
+  document.getElementById('ck-domain-select').addEventListener('change', async (e) => {
+    const did = e.target.value;
+    try {
+      const r = await callTool('get_olm_snapshot', { scope: 'graph', domain_id: did });
+      if (r && r.structuredContent) renderAll(r.structuredContent);
+    } catch (err) {
+      showToast("Impossible de charger ce domaine");
+      e.target.value = (state.graph && state.graph.domain_id) || '';
+    }
+  });
 
-  // ----- Display mode (fullscreen) -----
-  let currentDisplayMode = "inline";
-  let availableHostModes = ["inline"];
+  document.getElementById('ck-fullscreen-btn').addEventListener('click', () => {
+    request('ui/request-display-mode', { mode: "fullscreen" }).catch(() => {});
+  });
 
-  function syncFullscreenButton() {
-    const btn = document.getElementById("fullscreen-toggle");
-    if (!btn) return;
-    const canFullscreen = availableHostModes.indexOf("fullscreen") !== -1;
-    btn.style.display = canFullscreen ? "" : "none";
-    btn.textContent = currentDisplayMode === "fullscreen" ? "⤢ Réduire" : "⛶ Plein écran";
-    btn.setAttribute("aria-label", currentDisplayMode === "fullscreen" ? "Réduire" : "Basculer en plein écran");
-  }
-
-  const fsBtn = document.getElementById("fullscreen-toggle");
-  if (fsBtn) {
-    fsBtn.addEventListener("click", () => {
-      const target = currentDisplayMode === "fullscreen" ? "inline" : "fullscreen";
-      request("ui/request-display-mode", { mode: target }).then((result) => {
-        if (result && result.mode) {
-          currentDisplayMode = result.mode;
-          syncFullscreenButton();
-          notifySize();
-        }
-      });
-    });
-  }
-
-  // ----- Size negotiation -----
-  // Spec §size-changed: the host listens for ui/notifications/size-changed and
-  // resizes the iframe to match the body's content size. Without this the
-  // iframe stays at the host's default (often very small in inline mode).
-  let lastReportedHeight = 0;
+  // ─── Size negotiation ──────────────
   function notifySize() {
-    // Defer one frame so the browser has laid out the content we just rendered.
-    requestAnimationFrame(() => {
-      const h = document.documentElement.scrollHeight || document.body.scrollHeight;
-      const w = document.documentElement.scrollWidth  || document.body.scrollWidth;
-      if (Math.abs(h - lastReportedHeight) < 4) return;
-      lastReportedHeight = h;
-      send("ui/notifications/size-changed", { width: w, height: h });
-    });
+    const h = document.documentElement.scrollHeight;
+    const w = document.documentElement.scrollWidth;
+    send('ui/notifications/size-changed', { width: w, height: h });
   }
+  window.addEventListener('resize', notifySize);
 
-  // host-context-changed: track display-mode + the host's set of available modes
-  // so we can keep the toggle button in sync with what the host actually permits.
-  function applyHostContext(ctx) {
-    if (!ctx) return;
-    if (ctx.displayMode) currentDisplayMode = ctx.displayMode;
-    if (Array.isArray(ctx.availableDisplayModes)) availableHostModes = ctx.availableDisplayModes;
-    syncFullscreenButton();
-  }
-
-  // We extend the existing message router by hooking an extra listener; the
-  // primary listener (above) already handles tool-input / tool-result and
-  // pendingRequests. This one handles host-context-changed only.
-  window.addEventListener('message', (ev) => {
-    const m = ev.data;
-    if (!m || m.jsonrpc !== "2.0") return;
-    if (m.method === "ui/notifications/host-context-changed" && m.params) {
-      applyHostContext(m.params);
+  // ─── Host messages ──────────────
+  window.addEventListener('message', (event) => {
+    const m = event.data || {};
+    if (m.id != null && pending.has(m.id)) {
+      const p = pending.get(m.id);
+      pending.delete(m.id);
+      if (m.error) p.reject(m.error); else p.resolve(m.result);
+      return;
+    }
+    if (m.method === 'ui/notifications/tool-result') {
+      const result = m.params && m.params.result;
+      const sc = result && result.structuredContent;
+      if (sc) renderAll(sc);
+      return;
+    }
+    if (m.method === 'ui/notifications/host-context-changed') {
+      state.hostCaps = m.params && m.params.context;
+      applyHostContext();
+      return;
     }
   });
+  function applyHostContext() {
+    const fsBtn = document.getElementById('ck-fullscreen-btn');
+    const modes = (state.hostCaps && state.hostCaps.availableDisplayModes) || [];
+    fsBtn.hidden = !modes.includes('fullscreen');
+  }
 
-  // MCP Apps handshake — View → Host: ui/initialize, then ui/notifications/initialized.
-  // Per spec (modelcontextprotocol/ext-apps 2026-01-26), the host MUST NOT push
-  // ui/notifications/tool-input or ui/notifications/tool-result before it
-  // receives the `initialized` notification. Without this handshake, the
-  // iframe renders empty in Claude Desktop / claude.ai.
-  request("ui/initialize", {
-    appCapabilities: {
-      availableDisplayModes: ["inline", "fullscreen"]
+  // ─── Lifecycle handshake ──────────────
+  (async () => {
+    try {
+      const init = await request('ui/initialize', {
+        appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
+      });
+      state.hostCaps = init || {};
+      applyHostContext();
+      send('ui/notifications/initialized', {});
+      notifySize();
+    } catch (err) {
+      console.error('cockpit init failed', err);
     }
-  }).then((result) => {
-    if (result && result.hostContext) applyHostContext(result.hostContext);
-    send("ui/notifications/initialized", {});
-    notifySize();
-  });
+  })();
 })();
 </script>
 </body>
