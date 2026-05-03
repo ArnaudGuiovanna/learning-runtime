@@ -17,6 +17,21 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// cockpitResourceURI is the MCP Apps resource URI for the cockpit UI.
+// Used by the registered Resource (registerCockpitResource), the open_cockpit
+// Tool's _meta.ui.resourceUri, and the CallToolResult's _meta.ui.resourceUri.
+const cockpitResourceURI = "ui://cockpit"
+
+// cockpitUIMeta returns a fresh _meta payload pointing at the cockpit
+// resource — used both on the Tool.Meta (so clients see the resource URI
+// before calling) and on CallToolResult.Meta (so the client knows which
+// resource to fetch after calling).
+func cockpitUIMeta() mcp.Meta {
+	return mcp.Meta{
+		"ui": map[string]any{"resourceUri": cockpitResourceURI},
+	}
+}
+
 type GetCockpitStateParams struct {
 	DomainID        string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Si absent, affiche tous les domaines actifs."`
 	IncludeArchived bool   `json:"include_archived,omitempty" jsonschema:"Si true, inclut les domaines archives dans la reponse."`
@@ -279,11 +294,7 @@ func registerOpenCockpit(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "open_cockpit",
 		Description: "Ouvre le cockpit d'apprentissage de l'apprenant — carte cognitive interactive avec graphe KST, focus du moment, signaux métacognitifs et progression vers le goal. Rendu nativement par les clients qui supportent MCP Apps (Claude Desktop, claude.ai) ; sinon, retourne un résumé texte.",
-		Meta: mcp.Meta{
-			"ui": map[string]any{
-				"resourceUri": "ui://cockpit",
-			},
-		},
+		Meta: cockpitUIMeta(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params OpenCockpitParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -306,9 +317,7 @@ func registerOpenCockpit(server *mcp.Server, deps *Deps) {
 		return &mcp.CallToolResult{
 			Content:           []mcp.Content{&mcp.TextContent{Text: fallback.Description}},
 			StructuredContent: graph,
-			Meta: mcp.Meta{
-				"ui": map[string]any{"resourceUri": "ui://cockpit"},
-			},
+			Meta: cockpitUIMeta(),
 		}, nil, nil
 	})
 }
@@ -317,7 +326,7 @@ func registerOpenCockpit(server *mcp.Server, deps *Deps) {
 // is embedded via assets.FS — see assets/embed.go.
 func registerCockpitResource(server *mcp.Server, deps *Deps) {
 	server.AddResource(&mcp.Resource{
-		URI:         "ui://cockpit",
+		URI:         cockpitResourceURI,
 		Name:        "cockpit",
 		Title:       "Cockpit d'apprentissage",
 		Description: "Interface MCP App rendue par le client (Claude Desktop, claude.ai). Carte cognitive interactive de l'apprenant pour la session courante et le modèle global.",
@@ -330,7 +339,7 @@ func registerCockpitResource(server *mcp.Server, deps *Deps) {
 		}
 		return &mcp.ReadResourceResult{
 			Contents: []*mcp.ResourceContents{{
-				URI:      "ui://cockpit",
+				URI:      cockpitResourceURI,
 				MIMEType: "text/html;profile=mcp-app",
 				Text:     string(body),
 			}},

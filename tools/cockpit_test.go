@@ -116,7 +116,7 @@ func TestCockpitResource_Registered(t *testing.T) {
 	}
 	defer cs.Close()
 
-	res, err := cs.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: "ui://cockpit"})
+	res, err := cs.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: cockpitResourceURI})
 	if err != nil {
 		t.Fatalf("ReadResource ui://cockpit: %v", err)
 	}
@@ -152,8 +152,8 @@ func TestOpenCockpit_ReturnsMetaAndStructuredContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("_meta.ui missing or wrong type: %+v", res.Meta)
 	}
-	if uiMeta["resourceUri"] != "ui://cockpit" {
-		t.Errorf("_meta.ui.resourceUri=%v, want ui://cockpit", uiMeta["resourceUri"])
+	if uiMeta["resourceUri"] != cockpitResourceURI {
+		t.Errorf("_meta.ui.resourceUri=%v, want %s", uiMeta["resourceUri"], cockpitResourceURI)
 	}
 	// structuredContent must marshal to OLMGraph shape — read directly off res.StructuredContent.
 	scBytes, err := json.Marshal(res.StructuredContent)
@@ -179,6 +179,9 @@ func TestOpenCockpit_ReturnsMetaAndStructuredContent(t *testing.T) {
 	// content[0].text must be non-empty fallback (FormatOLMEmbed.Description text)
 	if len(res.Content) == 0 {
 		t.Fatal("Content empty — text fallback missing")
+	}
+	if txt := resultText(res); txt == "" {
+		t.Errorf("Content[0].Text empty — fallback prose should be non-empty for any seeded domain")
 	}
 }
 

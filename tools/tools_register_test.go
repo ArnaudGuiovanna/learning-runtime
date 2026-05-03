@@ -45,6 +45,8 @@ func TestRegisterTools_Smoke(t *testing.T) {
 		"get_learner_context",
 		"get_availability_model",
 		"get_cockpit_state",
+		"open_cockpit",
+		"get_olm_snapshot",
 		"init_domain",
 		"add_concepts",
 		"update_learner_profile",
