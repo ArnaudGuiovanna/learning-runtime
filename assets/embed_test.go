@@ -18,77 +18,83 @@ func TestEmbeddedCockpitHTML_Present(t *testing.T) {
 	}
 }
 
-func TestEmbeddedCockpitHTML_HasV4Markers(t *testing.T) {
+func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 	data, err := FS.ReadFile("cockpit.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(data)
 	mustContain := []string{
-		"--bg-base:",                        // token system
-		"--accent-500:",                     // token system
-		"--cream-100:",                      // cream token namespace
-		"--border-subtle:",                  // border token namespace
-		"cv4-pulse-halo",                    // halo animation
-		"cv4-fade-up",                       // fade-up animation
-		"prefers-reduced-motion",            // a11y
-		"role=\"tablist\"",                  // ARIA
-		"id=\"olm-graph\"",                  // SVG container the JS targets
-		"window.addEventListener('message'", // postMessage handler
-		"ui/initialize",                     // MCP Apps handshake: View → Host request
-		"ui/notifications/initialized",      // MCP Apps handshake: View → Host notification
-		"ui/notifications/tool-result",      // MCP Apps inbound: Host → View tool result
+		// V2 visual tokens
+		"--ck-bg-from:",
+		"--ck-bg-to:",
+		"--ck-accent-500: #e8804a",
+		"--ck-text-primary:",
+		// V2 class hooks
+		".ck-frame",
+		".ck-focus",
+		".ck-kc-row",
+		".ck-stats",
+		".ck-signal",
+		".ck-toast-region",
+		// Responsive (mobile-first)
+		"container-type: inline-size",
+		"@container (max-width: 480px)",
+		"prefers-reduced-motion",
+		// MCP App handshake
+		"ui/initialize",
+		"ui/notifications/initialized",
+		"ui/notifications/tool-result",
+		"ui/notifications/size-changed",
+		"ui/notifications/host-context-changed",
+		"ui/request-display-mode",
+		"availableDisplayModes",
+		"\"fullscreen\"",
+		// V2 NEW: KC picker + j'attaque plumbing
+		"ui/update-model-context",
+		"pick_concept",
+		"learning_negotiation",
+		"pushModelContext",
+		// JS hooks the click delegation targets
+		"data-action=\"attack\"",
+		"data-kc=",
+		// DOM ids the JS targets
+		"id=\"ck-domain-select\"",
+		"id=\"ck-fullscreen-btn\"",
+		"id=\"ck-toast-region\"",
+		"id=\"ck-focus-card\"",
+		"id=\"ck-kc-list\"",
+		"id=\"ck-stats\"",
+		"id=\"ck-signal\"",
 	}
 	for _, m := range mustContain {
 		if !strings.Contains(body, m) {
 			t.Errorf("cockpit.html missing required marker: %q", m)
 		}
 	}
-	// Size budget: < 100 KB (per spec risk #4).
 	if len(data) > 100*1024 {
 		t.Errorf("cockpit.html size %d bytes exceeds 100 KB budget", len(data))
 	}
 }
 
-func TestEmbeddedCockpitHTML_HasTab2Markers(t *testing.T) {
-	data, err := FS.ReadFile("cockpit.html")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestEmbeddedCockpitHTML_DropsV4Markers(t *testing.T) {
+	data, _ := FS.ReadFile("cockpit.html")
 	body := string(data)
-	mustContain := []string{
-		"id=\"tab-global\"",   // Tab 2 trigger (already present, but assert it's still present after refactor)
-		"id=\"panel-global\"", // Tab 2 panel
-		"renderGlobal",        // JS function
-		"calibration_history", // structuredContent key referenced by JS
-		"recent_events",       // structuredContent key referenced by JS
+	mustNotContain := []string{
+		// V4 graph (carte cognitive) — dropped
+		"id=\"olm-graph\"",
+		"cv4-pulse-halo",
+		"cv4-fade-up",
+		"renderGraph",
+		// V4 tabs — dropped (single-scroll now)
+		"id=\"tab-global\"",
+		"id=\"panel-global\"",
+		"renderGlobal",
+		"role=\"tablist\"",
 	}
-	for _, m := range mustContain {
-		if !strings.Contains(body, m) {
-			t.Errorf("cockpit.html missing required marker: %q", m)
-		}
-	}
-}
-
-func TestEmbeddedCockpitHTML_HasResponsiveAndDomainMarkers(t *testing.T) {
-	data, err := FS.ReadFile("cockpit.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(data)
-	mustContain := []string{
-		"id=\"domain-select\"",                 // domain selector UI
-		"id=\"fullscreen-toggle\"",             // fullscreen toggle button
-		"available_domains",                    // OLMGraph payload key
-		"ui/request-display-mode",              // View → Host request
-		"ui/notifications/size-changed",        // View → Host size notification
-		"ui/notifications/host-context-changed", // Host → View context updates
-		"availableDisplayModes",                // capability advertised in ui/initialize
-		"\"fullscreen\"",                       // declared mode
-	}
-	for _, m := range mustContain {
-		if !strings.Contains(body, m) {
-			t.Errorf("cockpit.html missing required marker: %q", m)
+	for _, m := range mustNotContain {
+		if strings.Contains(body, m) {
+			t.Errorf("cockpit.html still contains V4 marker that should be removed: %q", m)
 		}
 	}
 }
