@@ -170,9 +170,6 @@ func TestOpenCockpit_ReturnsMetaAndStructuredContent(t *testing.T) {
 	if _, ok := sc["concepts"]; !ok {
 		t.Errorf("structuredContent.concepts missing: %+v", sc)
 	}
-	if _, ok := sc["edges"]; !ok {
-		t.Errorf("structuredContent.edges missing: %+v", sc)
-	}
 	if _, ok := sc["streak"]; !ok {
 		t.Errorf("structuredContent.streak missing: %+v", sc)
 	}

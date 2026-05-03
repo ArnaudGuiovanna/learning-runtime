@@ -53,16 +53,13 @@ func TestOLMGraph_TypesCompile(t *testing.T) {
 		Concepts: []GraphNode{
 			{Concept: "a", State: NodeSolid, PMastery: 0.9},
 		},
-		Edges: []GraphEdge{
-			{From: "a", To: "b", Type: EdgeFuture},
-		},
 	}
-	if g.DomainID != "d" || g.Streak != 3 || len(g.Concepts) != 1 || len(g.Edges) != 1 {
+	if g.DomainID != "d" || g.Streak != 3 || len(g.Concepts) != 1 {
 		t.Errorf("unexpected shape: %+v", g)
 	}
 }
 
-func TestBuildOLMGraph_NodeStatesAndEdges(t *testing.T) {
+func TestBuildOLMGraph_NodeStates(t *testing.T) {
 	store, raw := newOLMTestStore(t)
 	seedLearner(t, raw, "L1")
 	seedDomain(t, raw, "L1", "math",
@@ -97,54 +94,7 @@ func TestBuildOLMGraph_NodeStatesAndEdges(t *testing.T) {
 	if byName["c"].State != NodeNotStarted || byName["d"].State != NodeNotStarted {
 		t.Errorf("c/d not_started expected, got c=%q d=%q", byName["c"].State, byName["d"].State)
 	}
-	// Edges: a→b active (target b is focus), b→c future, c→d future.
-	if len(g.Edges) != 3 {
-		t.Fatalf("Edges=%d, want 3", len(g.Edges))
-	}
-	edgeFromTo := map[string]EdgeType{}
-	for _, e := range g.Edges {
-		edgeFromTo[e.From+"->"+e.To] = e.Type
-	}
-	if edgeFromTo["a->b"] != EdgeActive {
-		t.Errorf("a->b type=%q, want active (target is focus)", edgeFromTo["a->b"])
-	}
-	if edgeFromTo["b->c"] != EdgeFuture {
-		t.Errorf("b->c type=%q, want future", edgeFromTo["b->c"])
-	}
-	if edgeFromTo["c->d"] != EdgeFuture {
-		t.Errorf("c->d type=%q, want future", edgeFromTo["c->d"])
-	}
 	if g.FocusConcept != "b" {
 		t.Errorf("FocusConcept=%q, want b", g.FocusConcept)
-	}
-}
-
-func TestBuildOLMGraph_EdgeTraversed(t *testing.T) {
-	store, raw := newOLMTestStore(t)
-	seedLearner(t, raw, "L1")
-	// 3-concept chain: a→b→c. a, b, c all Solid → focus is empty (no frontier).
-	// Edge a→b: both endpoints Solid, target not focus → traversed.
-	seedDomain(t, raw, "L1", "math",
-		[]string{"a", "b", "c"},
-		map[string][]string{"b": {"a"}, "c": {"b"}},
-		false,
-	)
-	seedConceptState(t, store, "L1", "a", 0.90, "review")
-	seedConceptState(t, store, "L1", "b", 0.90, "review")
-	seedConceptState(t, store, "L1", "c", 0.90, "review")
-
-	g, err := BuildOLMGraph(store, "L1", "")
-	if err != nil {
-		t.Fatalf("BuildOLMGraph: %v", err)
-	}
-	edgeFromTo := map[string]EdgeType{}
-	for _, e := range g.Edges {
-		edgeFromTo[e.From+"->"+e.To] = e.Type
-	}
-	if edgeFromTo["a->b"] != EdgeTraversed {
-		t.Errorf("a->b type=%q, want traversed (both endpoints Solid, no focus)", edgeFromTo["a->b"])
-	}
-	if edgeFromTo["b->c"] != EdgeTraversed {
-		t.Errorf("b->c type=%q, want traversed (both endpoints Solid, no focus)", edgeFromTo["b->c"])
 	}
 }
