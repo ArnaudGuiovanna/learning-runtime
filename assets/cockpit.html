@@ -515,8 +515,8 @@ html, body {
       return;
     }
     if (m.method === 'ui/notifications/tool-result') {
-      const result = m.params && m.params.result;
-      const sc = result && result.structuredContent;
+      // Per MCP Apps spec: params is CallToolResult directly (not nested in .result).
+      const sc = m.params && m.params.structuredContent;
       if (sc) renderAll(sc);
       return;
     }
