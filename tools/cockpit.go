@@ -296,7 +296,7 @@ type OpenCockpitParams struct {
 func registerOpenCockpit(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "open_cockpit",
-		Description: "OUTIL À UTILISER quand l'apprenant demande d'ouvrir/voir/afficher/montrer son cockpit. Rend une UI MCP App native dans la conversation (Claude Desktop, claude.ai) — carte cognitive interactive avec graphe KST, focus du moment, signaux métacognitifs, progression vers le goal. NE PAS reformuler le résultat en texte : la UI s'affiche d'elle-même via _meta.ui.resourceUri. Pour les clients sans MCP Apps, le tool retourne aussi un résumé texte de fallback.",
+		Description: "OUTIL À UTILISER quand l'apprenant demande d'ouvrir/voir/afficher/montrer son cockpit. Rend une UI MCP App native dans la conversation (Claude Desktop, claude.ai) — focus card du moment, KCs alternatifs cliquables (l'apprenant peut épingler un concept comme nouveau focus via le tool pick_concept), signaux métacognitifs, progression du domaine. NE PAS reformuler le résultat en texte : la UI s'affiche d'elle-même via _meta.ui.resourceUri. Pour les clients sans MCP Apps, le tool retourne aussi un résumé texte de fallback.",
 		Meta: cockpitUIMeta(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params OpenCockpitParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
