@@ -7,6 +7,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"tutor-mcp/models"
@@ -91,6 +92,12 @@ func validWebhookKind(k string) bool {
 		models.WebhookKindDailyRecap,
 		models.WebhookKindReactivation,
 		models.WebhookKindReminder:
+		return true
+	}
+	// olm:<domain_id> — used by the OLM dispatch to allow one queued
+	// message per domain, since a learner can have multiple active domains
+	// each with its own state snapshot.
+	if strings.HasPrefix(k, "olm:") && len(k) > len("olm:") {
 		return true
 	}
 	return false

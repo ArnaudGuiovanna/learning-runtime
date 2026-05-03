@@ -146,3 +146,15 @@ func TestValidWebhookKind(t *testing.T) {
 		}
 	}
 }
+
+func TestValidWebhookKind_AcceptsOLMPrefix(t *testing.T) {
+	if !validWebhookKind("olm:abc123") {
+		t.Errorf("validWebhookKind('olm:abc123') = false, want true")
+	}
+	if validWebhookKind("olm:") {
+		t.Errorf("validWebhookKind('olm:') = true, want false (empty domain id)")
+	}
+	if validWebhookKind("olm") {
+		t.Errorf("validWebhookKind('olm') = true, want false (no colon)")
+	}
+}
