@@ -393,6 +393,24 @@ func (s *Store) UpdateDomainLastValueAxis(domainID, axis string) error {
 	return nil
 }
 
+// SetPinnedConcept sets (or clears, with concept="") the pinned focus concept
+// for a (learner, domain). Rejects mismatched learner ownership (zero rows
+// affected → error).
+func (s *Store) SetPinnedConcept(learnerID, domainID, concept string) error {
+	res, err := s.db.Exec(
+		`UPDATE domains SET pinned_concept = ? WHERE id = ? AND learner_id = ?`,
+		concept, domainID, learnerID,
+	)
+	if err != nil {
+		return fmt.Errorf("set pinned concept: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("domain not found or not owned by learner")
+	}
+	return nil
+}
+
 func (s *Store) UpdateDomainGraph(domainID string, graph models.KnowledgeSpace) error {
 	graphJSON, err := json.Marshal(graph)
 	if err != nil {
