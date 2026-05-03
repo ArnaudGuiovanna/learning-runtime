@@ -44,3 +44,24 @@ func TestGetOLMSnapshot_HappyPath(t *testing.T) {
 		t.Errorf("solid key missing in response: %+v", out)
 	}
 }
+
+func TestGetOLMSnapshot_GlobalScope(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+	makeOwnerDomain(t, store, "L_owner", "anglais")
+
+	res := callTool(t, deps, registerGetOLMSnapshot, "L_owner", "get_olm_snapshot", map[string]any{
+		"scope": "global",
+	})
+	if res.IsError {
+		t.Fatalf("error: %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	domains, ok := out["domains"].([]any)
+	if !ok {
+		t.Fatalf("structuredContent.domains missing, got %+v", out)
+	}
+	if len(domains) != 2 {
+		t.Errorf("Domains=%d, want 2", len(domains))
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 type GetOLMSnapshotParams struct {
 	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel, utilise le dernier domaine actif si absent)"`
+	Scope    string `json:"scope,omitempty" jsonschema:"'session' (defaut, snapshot d'un domaine) ou 'global' (agregation multi-domaine)"`
 }
 
 func registerGetOLMSnapshot(server *mcp.Server, deps *Deps) {
@@ -27,6 +28,18 @@ func registerGetOLMSnapshot(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		if params.Scope == "global" {
+			g, err := engine.BuildGlobalOLMSnapshot(deps.Store, learnerID)
+			if err != nil {
+				deps.Logger.Error("get_olm_snapshot global: build failed", "err", err, "learner", learnerID)
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+			r, _ := jsonResult(g)
+			return r, nil, nil
+		}
+
+		// Default — session scope (existing behavior).
 		snap, err := engine.BuildOLMSnapshot(deps.Store, learnerID, params.DomainID)
 		if err != nil {
 			deps.Logger.Error("get_olm_snapshot: build failed", "err", err, "learner", learnerID)
