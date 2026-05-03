@@ -25,6 +25,45 @@ import (
 	"tutor-mcp/models"
 )
 
+// NodeState classifies a concept's mastery for OLM rendering. The values are
+// stable JSON strings used both server-side (BuildOLMGraph) and client-side
+// (cockpit.html JS rendering).
+type NodeState string
+
+const (
+	NodeNotStarted NodeState = "not_started"
+	NodeFragile    NodeState = "fragile"
+	NodeInProgress NodeState = "in_progress"
+	NodeSolid      NodeState = "solid"
+	NodeFocus      NodeState = "focus"
+)
+
+// NodeClassify maps a concept_state to its OLM node state, matching the
+// classification logic of BuildOLMSnapshot's bucket loop. The Focus state is
+// applied separately by the caller (when this concept is the snapshot focus).
+//
+// Rules (in order):
+//   - nil OR CardState == "new"             → NotStarted
+//   - PMastery >= KSTMasteryThreshold (0.70) → Solid
+//   - PMastery < 0.30                        → Fragile
+//   - retention(elapsed, stability) < 0.50   → Fragile
+//   - otherwise                              → InProgress
+func NodeClassify(cs *models.ConceptState) NodeState {
+	if cs == nil || cs.CardState == "new" {
+		return NodeNotStarted
+	}
+	if cs.PMastery >= algorithms.KSTMasteryThreshold {
+		return NodeSolid
+	}
+	if cs.PMastery < 0.30 {
+		return NodeFragile
+	}
+	if algorithms.Retrievability(cs.ElapsedDays, cs.Stability) < 0.50 {
+		return NodeFragile
+	}
+	return NodeInProgress
+}
+
 // Calibration bias is "actionable" when |bias| exceeds this threshold.
 // Surfaced both in HasActionable and in metacogLine, so a single source
 // of truth avoids them drifting apart.
@@ -99,25 +138,17 @@ func BuildOLMSnapshot(store *db.Store, learnerID, domainID string) (*OLMSnapshot
 	}
 
 	for _, c := range domain.Graph.Concepts {
-		cs, hasState := statesByConcept[c]
-		if !hasState || cs.CardState == "new" {
+		cs := statesByConcept[c] // nil if missing — NodeClassify handles that
+		switch NodeClassify(cs) {
+		case NodeNotStarted:
 			snap.NotStarted++
-			continue
-		}
-		if cs.PMastery >= algorithms.KSTMasteryThreshold {
+		case NodeFragile:
+			snap.Fragile++
+		case NodeInProgress:
+			snap.InProgress++
+		case NodeSolid:
 			snap.Solid++
-			continue
 		}
-		if cs.PMastery < 0.30 {
-			snap.Fragile++
-			continue
-		}
-		retention := algorithms.Retrievability(cs.ElapsedDays, cs.Stability)
-		if retention < 0.50 {
-			snap.Fragile++
-			continue
-		}
-		snap.InProgress++
 	}
 
 	// Focus: alerts (forgetting, ZPD, plateau) win over frontier fallback.
