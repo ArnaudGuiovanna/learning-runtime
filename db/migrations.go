@@ -47,6 +47,7 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE domains ADD COLUMN last_value_axis TEXT DEFAULT ''`,
 		`ALTER TABLE oauth_codes ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE oauth_clients ADD COLUMN client_secret_hash TEXT DEFAULT ''`,
+		`ALTER TABLE domains ADD COLUMN pinned_concept TEXT DEFAULT ''`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors

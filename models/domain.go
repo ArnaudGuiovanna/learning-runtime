@@ -75,6 +75,7 @@ type Domain struct {
 	ValueFramingsJSON  string
 	LastValueAxis      string
 	Archived           bool
+	PinnedConcept      string
 	CreatedAt          time.Time
 }
 

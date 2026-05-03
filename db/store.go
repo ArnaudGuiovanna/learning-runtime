@@ -273,14 +273,14 @@ func (s *Store) CreateDomainWithValueFramings(learnerID, name, personalGoal stri
 	}, nil
 }
 
-const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, created_at`
+const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, pinned_concept, created_at`
 
 func scanDomainRow(row *sql.Row) (*models.Domain, error) {
 	d := &models.Domain{}
 	var graphJSON string
-	var valueFramings, lastAxis sql.NullString
+	var valueFramings, lastAxis, pinnedConcept sql.NullString
 	var archived int
-	err := row.Scan(&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON, &valueFramings, &lastAxis, &archived, &d.CreatedAt)
+	err := row.Scan(&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON, &valueFramings, &lastAxis, &archived, &pinnedConcept, &d.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -290,6 +290,9 @@ func scanDomainRow(row *sql.Row) (*models.Domain, error) {
 	}
 	if lastAxis.Valid {
 		d.LastValueAxis = lastAxis.String
+	}
+	if pinnedConcept.Valid {
+		d.PinnedConcept = pinnedConcept.String
 	}
 	if err := json.Unmarshal([]byte(graphJSON), &d.Graph); err != nil {
 		return nil, fmt.Errorf("unmarshal graph: %w", err)
@@ -300,9 +303,9 @@ func scanDomainRow(row *sql.Row) (*models.Domain, error) {
 func scanDomainRows(rows *sql.Rows) (*models.Domain, error) {
 	d := &models.Domain{}
 	var graphJSON string
-	var valueFramings, lastAxis sql.NullString
+	var valueFramings, lastAxis, pinnedConcept sql.NullString
 	var archived int
-	err := rows.Scan(&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON, &valueFramings, &lastAxis, &archived, &d.CreatedAt)
+	err := rows.Scan(&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON, &valueFramings, &lastAxis, &archived, &pinnedConcept, &d.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +315,9 @@ func scanDomainRows(rows *sql.Rows) (*models.Domain, error) {
 	}
 	if lastAxis.Valid {
 		d.LastValueAxis = lastAxis.String
+	}
+	if pinnedConcept.Valid {
+		d.PinnedConcept = pinnedConcept.String
 	}
 	if err := json.Unmarshal([]byte(graphJSON), &d.Graph); err != nil {
 		return nil, fmt.Errorf("unmarshal graph: %w", err)
