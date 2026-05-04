@@ -2,11 +2,28 @@
   <img src="docs/banner.svg" alt="tutor/mcp — Self-learning is a superpower." width="100%" />
 </p>
 
-# Tutor MCP — Server (v0.2)
+# Tutor MCP — Open-Source AI Tutor & Intelligent Tutoring System (ITS) for LLMs
+
+> Self-hosted **AI tutor** runtime that turns any LLM (Claude, ChatGPT, Le Chat, Gemini) into a true **Intelligent Tutoring System (ITS)** — grounded in 50 years of cognitive science (BKT, FSRS, IRT, PFA, KST) and exposed over the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Adaptive learning, spaced repetition, mastery tracking, misconception diagnosis and a metacognitive loop — for any subject, with no item bank to curate.
 
 **Tutor MCP is the adaptive brain behind a personalised tutor.** You tell an LLM (Claude, ChatGPT, …) what you want to learn — *Spanish for travel*, *Go for backend*, *options trading*, *medieval history* — and the runtime orchestrates the journey end-to-end: what to study next, when to review, how hard the next exercise should be, when you've mastered a concept, when you're losing motivation, when you're ready to be more autonomous. It works on **any subject the learner can describe in natural language** — no content catalog, no curation, no editorial backlog.
 
-Concretely, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
+Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
+
+> Current release: **v0.2**.
+
+## An Intelligent Tutoring System, not a chatbot
+
+For 50 years, **Intelligent Tutoring Systems (ITS)** research — Anderson, VanLehn, Koedinger and others — has converged on four pillars: a **domain model**, a **learner model**, a **pedagogical model**, and an **interface**. Generic LLM chat covers only the last one. Tutor MCP supplies the first three as a deterministic runtime, and delegates the interface and the natural-language content to the LLM:
+
+| ITS pillar | Provided by | How |
+|------------|-------------|-----|
+| **Domain model** | Tutor MCP runtime | Concept graph with prerequisites, validated by **KST** (Knowledge Space Theory) |
+| **Learner model** | Tutor MCP runtime | Mastery, ability and recall predicted by **BKT** (Bayesian Knowledge Tracing), **IRT** (Item Response Theory) and **PFA** (Performance Factor Analysis) |
+| **Pedagogical model** | Tutor MCP runtime | Spaced-repetition scheduling via **FSRS** (Free Spaced Repetition Scheduler), activity router, alert engine, motivation engine, metacognitive loop |
+| **Interface & content** | Any MCP-compatible LLM | Claude, ChatGPT, Le Chat, Gemini — generates exercises, hints, feedback and dialogue on demand |
+
+The cognitive science is rigid and measurable; the LLM is infinitely flexible. Together they make an ITS that works on day one for any topic — without an editorial team.
 
 ## Compatible MCP clients
 
@@ -22,15 +39,15 @@ Tutor MCP works out of the box with the main MCP-capable assistants — connect 
   <a href="#gemini"><img src="docs/assets/logos/gemini.svg" width="40" height="40" alt="Gemini" title="Gemini" /></a>
 </p>
 
-## Design Choice — The LLM is the Content Engine
+## Design Choice — The LLM is the Content Engine, the Runtime is the ITS
 
-Traditional learning platforms (Duolingo, Anki, Khan Academy) are bounded by their item banks: once the catalog is exhausted, the system stops. Tutor MCP takes the opposite bet.
+Traditional learning platforms (Duolingo, Anki, Khan Academy) and most "AI tutor" demos are bounded by their item banks: once the catalog is exhausted, the system stops. Tutor MCP takes the opposite bet.
 
 > The LLM is trained on humanity's knowledge. It is the most flexible content generator that has ever existed. The runtime never stores exercises — it generates them on demand, calibrated in real time to the learner's mastery, ability, affect, and personal goal.
 
 - **Domains and prerequisite graphs** are co-authored by the learner and the LLM at `init_domain` time — not pre-curated.
 - **Exercises, explanations, hints, feedback, motivational nudges** — all generated on the fly by the LLM.
-- The **runtime** brings the cognitive science: five algorithms (BKT, FSRS, IRT, PFA, KST), an alert engine, a motivation engine, a metacognitive loop.
+- The **runtime** brings the cognitive science of an ITS: five algorithms (BKT, FSRS, IRT, PFA, KST), an alert engine, a motivation engine, a metacognitive loop.
 - The **LLM** brings infinite domain breadth and on-demand calibration.
 
 This is what makes the system work on day one for any topic — and what lets it scale without an editorial team.
@@ -45,7 +62,9 @@ The server sits between a learner and an LLM. Three parallel loops run from the 
 
 **Motivation loop** (why this matters) — A brief engine selects a single motivational angle per exercise (milestone, competence value, growth mindset, affect reframe, plateau recontextualization, or utility value linked to the learner's personal goal). The LLM composes the text from structured signals; the system never emits canned pep talk.
 
-## Cognitive Algorithms
+## Cognitive Science Engine — BKT, FSRS, IRT, PFA, KST
+
+Five complementary learning-science algorithms run on every interaction and jointly inform the activity router. Together they form the learner-and-pedagogical model of the ITS.
 
 | Algorithm | Role |
 |-----------|------|
@@ -54,8 +73,6 @@ The server sits between a learner and an LLM. Three parallel loops run from the 
 | **IRT** (Item Response Theory) | Estimates learner ability (θ) from response patterns. Calibrates exercise difficulty. |
 | **PFA** (Performance Factor Analysis) | Weights success/failure history to predict performance on each concept. |
 | **KST** (Knowledge Space Theory) | Validates prerequisite graphs and gates new concepts on mastery of their ancestors. |
-
-All algorithms run on every interaction and jointly inform the activity router.
 
 ## MCP Tools (25)
 
