@@ -125,14 +125,17 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 		}
 	}
 
-	// PLATEAU: PFA probability stagnation (sigmoid saturates at extremes)
+	// PLATEAU: PFA probability stagnation (sigmoid saturates at extremes).
+	// recentInteractions arrives newest-first (DB ORDER BY created_at DESC).
+	// Iterate in reverse so PFAState evolves chronologically — PFADetectPlateau
+	// examines scores[len-minCount:] which must be the *most recent* states.
 	conceptInteractions := groupByConcept(recentInteractions)
 	for concept, interactions := range conceptInteractions {
 		if len(interactions) >= 4 {
 			var scores []float64
 			state := algorithms.PFAState{}
-			for _, i := range interactions {
-				state = algorithms.PFAUpdate(state, i.Success)
+			for idx := len(interactions) - 1; idx >= 0; idx-- {
+				state = algorithms.PFAUpdate(state, interactions[idx].Success)
 				scores = append(scores, algorithms.PFAProbability(state))
 			}
 			if algorithms.PFADetectPlateau(scores, 4) {
