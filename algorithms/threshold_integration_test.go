@@ -17,7 +17,7 @@ func TestThresholdIntegration_KSTGating(t *testing.T) {
 	mastery := map[string]float64{"A": 0.75, "B": 0.0}
 
 	t.Run("legacy: A=0.75 unlocks B (>=0.70)", func(t *testing.T) {
-		t.Setenv("REGULATION_THRESHOLD", "")
+		t.Setenv("REGULATION_THRESHOLD", "off")
 		f := ComputeFrontier(graph, mastery)
 		if len(f) != 1 || f[0] != "B" {
 			t.Errorf("legacy frontier: want [B], got %v", f)
@@ -40,7 +40,7 @@ func TestThresholdIntegration_KSTGating(t *testing.T) {
 func TestThresholdIntegration_BKTUnchanged(t *testing.T) {
 	state := BKTState{PMastery: 0.86}
 	t.Run("legacy", func(t *testing.T) {
-		t.Setenv("REGULATION_THRESHOLD", "")
+		t.Setenv("REGULATION_THRESHOLD", "off")
 		if !BKTIsMastered(state) {
 			t.Error("0.86 must be mastered in legacy")
 		}
@@ -60,7 +60,7 @@ func TestThresholdIntegration_BKTUnchanged(t *testing.T) {
 // mastery challenge.
 func TestThresholdIntegration_MidCollapse(t *testing.T) {
 	t.Run("legacy: PMastery=0.83 counts as mid-mastered (>=0.80)", func(t *testing.T) {
-		t.Setenv("REGULATION_THRESHOLD", "")
+		t.Setenv("REGULATION_THRESHOLD", "off")
 		if 0.83 < MasteryMid() {
 			t.Errorf("legacy: 0.83 must be >= MasteryMid (%v)", MasteryMid())
 		}

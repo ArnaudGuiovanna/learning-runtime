@@ -8,16 +8,17 @@
 //
 // Profiles
 //
-//   - "legacy"  (default):           BKT=0.85, KST=0.70, Mid=0.80
-//   - "unified" (REGULATION_THRESHOLD=on):  BKT=KST=Mid=0.85
+//   - "unified" (default, REGULATION_THRESHOLD!="off"): BKT=KST=Mid=0.85
+//   - "legacy"  (REGULATION_THRESHOLD=off):             BKT=0.85, KST=0.70, Mid=0.80
 //
 // The bascule is the runtime expression of audit findings F-1.8, F-2.3
 // and F-3.10 (multiple incompatible mastery thresholds — see
 // docs/audit-report.md and docs/regulation-design/07-threshold-resolver.md).
 //
-// Promotion of "unified" to default is gated on a fresh
-// eval/VERDICT_THRESHOLD_<date>.md matching or exceeding the baseline
-// eval/VERDICT.md on V1, V3 and V4.
+// Promoted to default after eval/VERDICT_THRESHOLD_2026-05-04.md showed
+// V3 and V4 cross their pass bars under unified (V3 +0.0544 vs +0.05
+// bar, V4 0.7011 vs 0.70 bar) without degrading V1 or V1'. Operator
+// opt-out remains available via REGULATION_THRESHOLD=off for rollback.
 
 package algorithms
 
@@ -58,10 +59,15 @@ func MasteryMid() float64 {
 }
 
 // isUnifiedThreshold reads the REGULATION_THRESHOLD env at every call.
-// Strict equality "on" only — "ON", "true", "1" are ignored. Lookup-each-call
-// keeps the API testable via t.Setenv with no global reset helper. Cost is
-// a single os.Getenv per accessor invocation, negligible at the call rate
-// of get_next_activity. Replace with sync.OnceValue if profiling shows hot.
+// Default is unified; only the strict literal "off" opts out to legacy.
+// Typos like "Off", "OFF", " off" are treated as unified — operators
+// must type the canonical opt-out exactly, which prevents accidental
+// rollback while preserving an explicit escape hatch.
+//
+// Lookup-each-call keeps the API testable via t.Setenv with no global
+// reset helper. Cost is a single os.Getenv per accessor invocation,
+// negligible at the call rate of get_next_activity. Replace with
+// sync.OnceValue if profiling shows hot.
 func isUnifiedThreshold() bool {
-	return os.Getenv("REGULATION_THRESHOLD") == "on"
+	return os.Getenv("REGULATION_THRESHOLD") != "off"
 }

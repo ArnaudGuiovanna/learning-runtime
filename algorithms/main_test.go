@@ -10,16 +10,20 @@ import (
 )
 
 // TestMain anchors the algorithms package's test suite to the legacy
-// threshold profile by default, regardless of the parent environment.
-// Tests that explicitly need the unified profile call
-// t.Setenv("REGULATION_THRESHOLD", "on"), which overrides this for the
-// duration of the test only.
+// threshold profile by setting REGULATION_THRESHOLD=off. This preserves
+// the existing fixtures (e.g., TestComputeFrontier with mastery=0.75
+// expecting the unlock at KST=0.70) without mutating their values.
 //
-// Without this guard, running the suite under REGULATION_THRESHOLD=on
-// (e.g., when CI dispatches the unified validation pass) would make
-// legacy-fixtured tests like TestComputeFrontier fail by design — see
+// Tests that explicitly need the unified profile call
+// t.Setenv("REGULATION_THRESHOLD", "on") (or any non-"off" value),
+// which overrides this for the duration of the test only.
+//
+// Note: production default has been promoted to "unified" — only "off"
+// opts back to legacy. The test suite locks to legacy by design here so
+// that legacy fixtures keep documenting the legacy semantic; new tests
+// in *_unified_test.go assert the unified semantic explicitly. See
 // docs/regulation-design/07-threshold-resolver.md §6.5.
 func TestMain(m *testing.M) {
-	_ = os.Unsetenv("REGULATION_THRESHOLD")
+	_ = os.Setenv("REGULATION_THRESHOLD", "off")
 	os.Exit(m.Run())
 }
