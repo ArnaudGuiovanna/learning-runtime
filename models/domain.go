@@ -6,6 +6,7 @@ package models
 
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 )
 
@@ -98,14 +99,18 @@ type GoalRelevance struct {
 // ParseGoalRelevance returns the structured GoalRelevance parsed from
 // d.GoalRelevanceJSON. Returns nil (no error) when the JSON is empty or
 // unparseable — callers treat nil as "no relevance set, use uniform
-// fallback". Silent fallback is intentional: corrupt JSON should never
-// block a session.
+// fallback". Silent fallback is intentional from the *session's* point
+// of view: a corrupt vector must never block an exercise. A WARN is
+// emitted via slog.Default() so a systematic corruption surfaces in
+// logs without disrupting the running session.
 func (d *Domain) ParseGoalRelevance() *GoalRelevance {
 	if d.GoalRelevanceJSON == "" {
 		return nil
 	}
 	var gr GoalRelevance
 	if err := json.Unmarshal([]byte(d.GoalRelevanceJSON), &gr); err != nil {
+		slog.Warn("goal_relevance JSON corrupt, falling back to nil",
+			"domain_id", d.ID, "err", err)
 		return nil
 	}
 	return &gr

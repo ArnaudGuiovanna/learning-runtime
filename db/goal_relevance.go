@@ -7,6 +7,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"tutor-mcp/models"
@@ -54,10 +55,14 @@ func (s *Store) MergeDomainGoalRelevance(domainID string, relevance map[string]f
 		var prior models.GoalRelevance
 		if err := json.Unmarshal([]byte(existingJSON), &prior); err == nil && prior.Relevance != nil {
 			merged = prior.Relevance
+		} else if err != nil {
+			// Silent fallback on parse error: corrupt JSON is treated as
+			// "no prior data" rather than blocking. Logged at WARN so
+			// systematic corruption surfaces without disrupting the
+			// merge — the new entries will still be persisted.
+			slog.Warn("goal_relevance JSON corrupt during merge, treating as empty",
+				"domain_id", domainID, "err", err)
 		}
-		// Silent fallback on parse error: corrupt JSON is treated as
-		// "no prior data" rather than blocking. Cohérent avec le
-		// fallback uniforme côté lecture.
 	}
 	for k, v := range relevance {
 		merged[k] = v
@@ -108,7 +113,11 @@ func (s *Store) GetDomainGoalRelevance(domainID string) (*models.GoalRelevance, 
 	var gr models.GoalRelevance
 	if err := json.Unmarshal([]byte(raw), &gr); err != nil {
 		// Silent fallback per design (corrupt JSON ≡ no vector). Logged
-		// at the tool layer where the caller has a logger.
+		// at WARN so systematic corruption surfaces in logs without
+		// blocking the session — the caller will use the uniform
+		// fallback (1.0 everywhere).
+		slog.Warn("goal_relevance JSON corrupt on read, falling back to nil",
+			"domain_id", domainID, "err", err)
 		return nil, nil
 	}
 	return &gr, nil
