@@ -286,6 +286,65 @@ func TestOrchestrate_NoTransition_PhasePersists(t *testing.T) {
 	}
 }
 
+// ─── Pinned-concept short-circuit (#14) ───────────────────────────────────
+
+func TestOrchestrate_PinnedConcept_HonouredWhenInAllowedPool(t *testing.T) {
+	store := setupOrchStore(t)
+	// Three concepts, all eligible (no prereqs, no misconceptions).
+	domainID := seedOrchDomain(t, store, []string{"A", "B", "C"}, nil, models.PhaseInstruction)
+	setGoalRelevance(t, store, domainID, map[string]float64{"A": 0.9, "B": 0.5, "C": 0.7})
+	// Without a pin, [4] would pick "A" (highest relevance × (1-mastery) at default mastery 0.1).
+	// With a pin on "C", we should get "C" instead.
+	if err := store.SetPinnedConcept("L1", domainID, "C"); err != nil {
+		t.Fatal(err)
+	}
+
+	activity, err := Orchestrate(store, defaultInput(domainID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if activity.Concept != "C" {
+		t.Errorf("expected pinned concept C, got %q", activity.Concept)
+	}
+}
+
+func TestOrchestrate_PinnedConcept_FallsThroughWhenGateExcludes(t *testing.T) {
+	store := setupOrchStore(t)
+	// "B" depends on "A" not yet satisfied → Gate filters "B" out via prereqs.
+	prereqs := map[string][]string{"B": {"A"}}
+	domainID := seedOrchDomain(t, store, []string{"A", "B"}, prereqs, models.PhaseInstruction)
+	setGoalRelevance(t, store, domainID, map[string]float64{"A": 0.9, "B": 0.5})
+	// Pin "B" — Gate will exclude it (prereq "A" not mastered).
+	if err := store.SetPinnedConcept("L1", domainID, "B"); err != nil {
+		t.Fatal(err)
+	}
+
+	activity, err := Orchestrate(store, defaultInput(domainID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Pin silently ignored, normal selection picks "A" (the only eligible one).
+	if activity.Concept != "A" {
+		t.Errorf("expected fallthrough to A, got %q", activity.Concept)
+	}
+}
+
+func TestOrchestrate_PinnedConcept_EmptyPinNoBehaviourChange(t *testing.T) {
+	store := setupOrchStore(t)
+	domainID := seedOrchDomain(t, store, []string{"A", "B"}, nil, models.PhaseInstruction)
+	setGoalRelevance(t, store, domainID, map[string]float64{"A": 0.9, "B": 0.5})
+	// No pin set — orchestrator's normal scoring applies.
+
+	activity, err := Orchestrate(store, defaultInput(domainID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// At default mastery 0.1, A wins with rel=0.9 × (1-0.1)=0.81 vs B at 0.5 × 0.9 = 0.45.
+	if activity.Concept != "A" {
+		t.Errorf("expected A by argmax, got %q", activity.Concept)
+	}
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 // recordSyntheticInteraction inserts a minimal interaction row so the
