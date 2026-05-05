@@ -12,8 +12,13 @@ package models
 // Callers must pass an explicit phase — there is no implicit default
 // at the SelectConcept boundary, by design (an unrecognised phase
 // returns an explicit error rather than silently degrading; cf.
-// OQ-4.1). When the orchestrator first sees a domain whose phase is
-// NULL in the DB, it bootstraps as PhaseDiagnostic.
+// OQ-4.1). Bootstrap differs by entry point:
+//   - New domains created via init_domain are written with phase
+//     PhaseDiagnostic explicitly (tools/domain.go).
+//   - Pre-existing domains with NULL phase (created before the phase
+//     column existed) are treated by the orchestrator as
+//     PhaseInstruction in-memory (engine/orchestrator.go:75-77) until
+//     a transition causes UpdateDomainPhase to persist a value.
 type Phase string
 
 const (
