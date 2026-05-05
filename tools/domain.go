@@ -161,11 +161,27 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		r, _ := jsonResult(map[string]interface{}{
+		response := map[string]interface{}{
 			"domain_id":     domain.ID,
 			"concept_count": len(params.Concepts),
 			"message":       fmt.Sprintf("Domaine '%s' cree avec %d concepts. La progression existante est preservee.", params.Name, len(params.Concepts)),
-		})
+		}
+		// [1] GoalDecomposer — instruct the LLM (versioned, structured,
+		// non-blocking per Q2). Only emitted when REGULATION_GOAL=on so
+		// pre-flag clients see no behavioural change.
+		if regulationGoalEnabled() {
+			reason := fmt.Sprintf("Décompose le personal_goal contre les %d concepts via set_goal_relevance pour activer le goal-aware routing.", len(params.Concepts))
+			if params.PersonalGoal == "" {
+				reason = "personal_goal vide — set_goal_relevance reste optionnel ; appelle-le si tu veux annoter manuellement la pertinence par concept."
+			}
+			response["next_action"] = map[string]any{
+				"version":  1,
+				"tool":     "set_goal_relevance",
+				"reason":   reason,
+				"required": false,
+			}
+		}
+		r, _ := jsonResult(response)
 		return r, nil, nil
 	})
 }
@@ -255,12 +271,24 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		r, _ := jsonResult(map[string]interface{}{
-			"domain_id":     domain.ID,
-			"added":         added,
+		response := map[string]interface{}{
+			"domain_id":      domain.ID,
+			"added":          added,
 			"total_concepts": len(domain.Graph.Concepts),
-			"message":       fmt.Sprintf("%d nouveaux concepts ajoutes. Total: %d. Progression existante preservee.", added, len(domain.Graph.Concepts)),
-		})
+			"message":        fmt.Sprintf("%d nouveaux concepts ajoutes. Total: %d. Progression existante preservee.", added, len(domain.Graph.Concepts)),
+		}
+		// [1] GoalDecomposer — after add_concepts the graph_version has
+		// advanced; per OQ-1.1 existing relevance entries remain valid but
+		// the new concepts are uncovered. The LLM is invited to top-up.
+		if regulationGoalEnabled() && added > 0 {
+			response["next_action"] = map[string]any{
+				"version":  1,
+				"tool":     "set_goal_relevance",
+				"reason":   fmt.Sprintf("%d nouveaux concepts ajoutés ; appelle set_goal_relevance avec leurs scores pour conserver le routage goal-aware (la sémantique est incrémentale, les concepts existants ne sont pas effacés).", added),
+				"required": false,
+			}
+		}
+		r, _ := jsonResult(response)
 		return r, nil, nil
 	})
 }

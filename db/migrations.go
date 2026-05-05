@@ -48,6 +48,12 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE oauth_codes ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE oauth_clients ADD COLUMN client_secret_hash TEXT DEFAULT ''`,
 		`ALTER TABLE domains ADD COLUMN pinned_concept TEXT DEFAULT ''`,
+		// [1] GoalDecomposer — graph version + goal relevance vector storage.
+		// graph_version starts at 1 for existing rows so the next add_concepts
+		// makes IsGoalRelevanceStale() true vs goal_relevance_version=0.
+		`ALTER TABLE domains ADD COLUMN graph_version INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE domains ADD COLUMN goal_relevance_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE domains ADD COLUMN goal_relevance_version INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors

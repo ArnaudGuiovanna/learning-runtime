@@ -17,16 +17,19 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE TABLE IF NOT EXISTS domains (
-    id                   TEXT PRIMARY KEY,
-    learner_id           TEXT NOT NULL REFERENCES learners(id),
-    name                 TEXT NOT NULL,
-    personal_goal        TEXT DEFAULT '',
-    graph_json           TEXT NOT NULL,
-    value_framings_json  TEXT DEFAULT '',
-    last_value_axis      TEXT DEFAULT '',
-    archived             INTEGER DEFAULT 0,
-    pinned_concept       TEXT DEFAULT '',
-    created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+    id                       TEXT PRIMARY KEY,
+    learner_id               TEXT NOT NULL REFERENCES learners(id),
+    name                     TEXT NOT NULL,
+    personal_goal            TEXT DEFAULT '',
+    graph_json               TEXT NOT NULL,
+    value_framings_json      TEXT DEFAULT '',
+    last_value_axis          TEXT DEFAULT '',
+    archived                 INTEGER DEFAULT 0,
+    pinned_concept           TEXT DEFAULT '',
+    graph_version            INTEGER NOT NULL DEFAULT 1,
+    goal_relevance_json      TEXT NOT NULL DEFAULT '',
+    goal_relevance_version   INTEGER NOT NULL DEFAULT 0,
+    created_at               DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS concept_states (

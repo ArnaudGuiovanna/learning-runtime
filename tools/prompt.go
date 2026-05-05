@@ -117,6 +117,32 @@ REGLES ABSOLUES — a chaque reponse, dans cet ordre :
     → Tu ne poses jamais plus d'une question a la fois
     → Tu vises a te rendre progressivement inutile`
 
+// goalDecomposerAppendix is appended to systemPrompt when REGULATION_GOAL=on.
+// It documents the two new MCP tools surfaced by component [1] of the
+// regulation pipeline so the LLM knows when and how to call them.
+const goalDecomposerAppendix = `
+
+OUTILS GOAL-AWARE (REGULATION_GOAL=on) :
+- set_goal_relevance(domain_id?, relevance) : décompose le personal_goal contre les concepts. Map concept_id → score [0,1] (1.0 = central, 0.0 = orthogonal). Sémantique INCREMENTALE : seuls les concepts fournis sont mis à jour, les autres conservent leur score. Concept inconnu → erreur explicite.
+- get_goal_relevance(domain_id?) : lit le vecteur stocké et la liste des concepts encore sans score. À utiliser pour observer ce qui est manquant après add_concepts.
+
+Quand appeler set_goal_relevance :
+- Après init_domain (la réponse contient un next_action structuré qui te le rappelle).
+- Après add_concepts si tu veux maintenir le routage goal-aware sur les nouveaux concepts.
+- Tu peux appeler partiellement (un sous-ensemble des concepts) — c'est INCREMENTAL.`
+
+// buildSystemPrompt assembles the prompt at request time so that flag-gated
+// sections (goal-aware tools, future regulation components) appear only
+// when their feature flag is on. Each gated section lives in its own const
+// to keep the diff localised when a future component lands.
+func buildSystemPrompt() string {
+	out := systemPrompt
+	if regulationGoalEnabled() {
+		out += goalDecomposerAppendix
+	}
+	return out
+}
+
 // RegisterPrompt registers the tutor_mcp system prompt.
 func RegisterPrompt(server *mcp.Server) {
 	server.AddPrompt(&mcp.Prompt{
@@ -126,7 +152,7 @@ func RegisterPrompt(server *mcp.Server) {
 		return &mcp.GetPromptResult{
 			Description: "Tutor MCP system instructions",
 			Messages: []*mcp.PromptMessage{
-				{Role: "user", Content: &mcp.TextContent{Text: systemPrompt}},
+				{Role: "user", Content: &mcp.TextContent{Text: buildSystemPrompt()}},
 			},
 		}, nil
 	})

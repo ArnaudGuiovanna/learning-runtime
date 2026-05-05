@@ -256,8 +256,8 @@ func (s *Store) CreateDomainWithValueFramings(learnerID, name, personalGoal stri
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO domains (id, learner_id, name, personal_goal, graph_json, value_framings_json, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO domains (id, learner_id, name, personal_goal, graph_json, value_framings_json, graph_version, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
 		id, learnerID, name, personalGoal, string(graphJSON), valueFramingsJSON, now,
 	)
 	if err != nil {
@@ -270,18 +270,32 @@ func (s *Store) CreateDomainWithValueFramings(learnerID, name, personalGoal stri
 		PersonalGoal:      personalGoal,
 		Graph:             graph,
 		ValueFramingsJSON: valueFramingsJSON,
+		GraphVersion:      1,
 		CreatedAt:         now,
 	}, nil
 }
 
-const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, pinned_concept, created_at`
+const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, pinned_concept, graph_version, goal_relevance_json, goal_relevance_version, created_at`
 
-func scanDomainRow(row *sql.Row) (*models.Domain, error) {
+// scanDomainFields is the shared row decoder for both *sql.Row and *sql.Rows
+// callers — Scan has the same signature on both so we factor through a small
+// interface to avoid duplicating the column ordering between scanDomainRow
+// and scanDomainRows.
+type domainScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanDomainFields(s domainScanner) (*models.Domain, error) {
 	d := &models.Domain{}
-	var graphJSON string
+	var graphJSON, goalRelevanceJSON string
 	var valueFramings, lastAxis, pinnedConcept sql.NullString
 	var archived int
-	err := row.Scan(&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON, &valueFramings, &lastAxis, &archived, &pinnedConcept, &d.CreatedAt)
+	err := s.Scan(
+		&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON,
+		&valueFramings, &lastAxis, &archived, &pinnedConcept,
+		&d.GraphVersion, &goalRelevanceJSON, &d.GoalRelevanceVersion,
+		&d.CreatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -295,35 +309,19 @@ func scanDomainRow(row *sql.Row) (*models.Domain, error) {
 	if pinnedConcept.Valid {
 		d.PinnedConcept = pinnedConcept.String
 	}
+	d.GoalRelevanceJSON = goalRelevanceJSON
 	if err := json.Unmarshal([]byte(graphJSON), &d.Graph); err != nil {
 		return nil, fmt.Errorf("unmarshal graph: %w", err)
 	}
 	return d, nil
 }
 
+func scanDomainRow(row *sql.Row) (*models.Domain, error) {
+	return scanDomainFields(row)
+}
+
 func scanDomainRows(rows *sql.Rows) (*models.Domain, error) {
-	d := &models.Domain{}
-	var graphJSON string
-	var valueFramings, lastAxis, pinnedConcept sql.NullString
-	var archived int
-	err := rows.Scan(&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON, &valueFramings, &lastAxis, &archived, &pinnedConcept, &d.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	d.Archived = archived != 0
-	if valueFramings.Valid {
-		d.ValueFramingsJSON = valueFramings.String
-	}
-	if lastAxis.Valid {
-		d.LastValueAxis = lastAxis.String
-	}
-	if pinnedConcept.Valid {
-		d.PinnedConcept = pinnedConcept.String
-	}
-	if err := json.Unmarshal([]byte(graphJSON), &d.Graph); err != nil {
-		return nil, fmt.Errorf("unmarshal graph: %w", err)
-	}
-	return d, nil
+	return scanDomainFields(rows)
 }
 
 func (s *Store) GetDomainByLearner(learnerID string) (*models.Domain, error) {
@@ -417,8 +415,12 @@ func (s *Store) UpdateDomainGraph(domainID string, graph models.KnowledgeSpace) 
 	if err != nil {
 		return fmt.Errorf("marshal graph: %w", err)
 	}
+	// Bumping graph_version makes any prior goal_relevance vector stale
+	// per OQ-1.1 / IsGoalRelevanceStale(). Existing entries remain valid;
+	// only the new concepts will appear in UncoveredConcepts() until a
+	// new set_goal_relevance call covers them.
 	_, err = s.db.Exec(
-		`UPDATE domains SET graph_json = ? WHERE id = ?`,
+		`UPDATE domains SET graph_json = ?, graph_version = graph_version + 1 WHERE id = ?`,
 		string(graphJSON), domainID,
 	)
 	if err != nil {

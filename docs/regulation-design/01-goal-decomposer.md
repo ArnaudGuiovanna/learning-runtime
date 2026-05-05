@@ -110,49 +110,73 @@ type SetGoalRelevanceParams struct {
 {
   "domain_id": "dom_abc",
   "for_graph_version": 3,
-  "concepts_set": 14,
-  "concepts_clamped": 1,        // valeurs hors [0,1] ramenées à la borne
-  "concepts_unknown_ignored": 0, // valeurs pour des concepts hors graph (silencieusement ignorées)
-  "stale_after_set": false       // true si le graph_version a entre-temps avancé
+  "concepts_updated": 5,         // concepts touchés par cet appel (créés ou écrasés)
+  "concepts_clamped": 1,         // valeurs hors [0,1] ramenées à la borne (avec log)
+  "uncovered_concepts": ["C12"], // concepts du graph encore sans entry après ce merge
+  "covered_concepts_count": 13,  // concepts avec entry dans le merge final
+  "all_concepts_count": 14,      // taille de Domain.Graph.Concepts
+  "stale_after_set": false       // true si graph_version a entre-temps avancé (race rare)
 }
 ```
 
-### Algorithme du handler
+### Algorithme du handler — sémantique incrémentale (merge)
 
 ```
 1. Auth → learner_id
-2. Resolve domain (`resolveDomain`, comme tous les autres tools)
+2. Resolve domain (resolveDomain, comme tous les autres tools)
 3. Si REGULATION_GOAL != "on" → return error "feature flag disabled"
 4. Validate input :
+   - Relevance non-nil, len ≥ 1 (set vide rejeté)
    - len(Relevance) ≤ 500 (cap concepts)
    - Pour chaque (k, v) : k non-vide, len(k) ≤ 200
-5. Filter + clamp :
-   - Concepts non présents dans Domain.Graph.Concepts → ignorer (compté)
-   - Valeurs hors [0,1] → clamp (compté)
-6. Persist :
+5. Validate ownership (OQ-1.4 strictness) :
+   - Pour chaque k dans Relevance : k DOIT être présent dans
+     Domain.Graph.Concepts. Sinon → error "unknown concept: <k>"
+     citant le premier nom inconnu rencontré, sans persister.
+   - Sécurise contre l'hallucination LLM (concept inventé).
+6. Clamp valeurs hors [0,1] :
+   - score < 0 → 0, score > 1 → 1, NaN → erreur "NaN score for <k>".
+   - Compteur concepts_clamped pour observabilité.
+7. Merge incrémental + persist :
    - tx := store.Begin()
-   - Construire JSON {for_graph_version: domain.GraphVersion,
-     relevance: filtered_clamped, set_at: now}
+   - existing, _ := GetDomainGoalRelevance(domainID)
+   - merged := existing.Relevance ?? {}
+   - for k, v := range Relevance { merged[k] = v }
+   - newJSON := {for_graph_version: domain.GraphVersion,
+                 relevance: merged, set_at: now}
    - UPDATE domains SET goal_relevance_json = ?, goal_relevance_version =
      goal_relevance_version + 1 WHERE id = ?
    - tx.Commit()
-7. Return response payload (avec stale_after_set calculé : si
-   pendant la tx un autre client a appelé add_concepts, GraphVersion a
-   pu avancer — peu probable mais possible)
+8. Compute uncovered :
+   - uncovered := Domain.Graph.Concepts \ keys(merged)
+9. Return response payload (incl. uncovered_concepts list).
 ```
+
+**Sémantique merge importante.** `set_goal_relevance({"C5": 0.4})` sur
+un domaine ayant déjà `{C1: 0.9, C2: 0.4}` produit `{C1: 0.9, C2: 0.4,
+C5: 0.4}`. Aucune entrée existante n'est effacée. Pour « effacer » une
+relevance (revenir au fallback uniforme), le LLM peut envoyer
+`score = 1.0` (équivalent sémantique au fallback). Pas de syntaxe
+"delete" — on garde simple.
 
 ### Description outil (system prompt)
 
-À ajouter dans `tools/prompt.go` :
+À ajouter dans `tools/prompt.go` quand `REGULATION_GOAL=on` :
 
-> `set_goal_relevance(domain_id, relevance)` — **Appelle ce tool une
-> fois après `init_domain` ou `add_concepts`** pour décomposer le
-> `personal_goal` du learner contre la liste des concepts du domaine.
-> Pour chaque concept, fournis un score ∈ [0,1] : 1.0 si le concept
-> est central au goal de l'apprenant, 0.0 s'il est orthogonal. Le
-> runtime utilisera ce vecteur pour prioriser les concepts goal-relevants
-> dans le routage. Si tu n'appelles pas ce tool, le système supposera
-> tous les concepts également pertinents.
+> `set_goal_relevance(domain_id, relevance)` — **Appelle ce tool après
+> `init_domain` ou `add_concepts`** pour décomposer le `personal_goal`
+> du learner contre la liste des concepts du domaine. Pour chaque
+> concept, fournis un score ∈ [0,1] : 1.0 = central au goal, 0.0 =
+> orthogonal. Sémantique **incrémentale** : seuls les concepts fournis
+> sont mis à jour, les autres conservent leur score précédent. Concept
+> inconnu (non présent dans le graph) → erreur explicite. Si tu
+> n'appelles pas ce tool, le système suppose tous les concepts
+> également pertinents.
+>
+> `get_goal_relevance(domain_id)` — Lis le vecteur stocké et la
+> liste des concepts encore sans relevance. Outil d'observation : à
+> utiliser pour décider s'il faut compléter avec un nouveau
+> `set_goal_relevance` (e.g. après `add_concepts`).
 
 ---
 
@@ -267,8 +291,9 @@ le comportement actuel (concepts indifférenciés). Pas de régression.
 | `personal_goal` vide à `init_domain` | `next_action.reason` adapté : « Goal vide — décomposition optionnelle, ignorer ce tool ». Tool reste appelable mais traité comme ON noop. | Pas d'instruction ambiguë au LLM. |
 | LLM n'appelle jamais `set_goal_relevance` | `goal_relevance_json` reste vide → fallback uniforme indéfini → comportement identique à pré-PR. | Aucune dégradation. |
 | LLM envoie un score = -0.3 ou 1.7 | Server clamp à [0,1], compté dans `concepts_clamped`. | Pas de NaN propagé. |
-| LLM envoie un concept qui n'existe pas dans `Domain.Graph.Concepts` | Silencieusement ignoré, compté dans `concepts_unknown_ignored`. | Robustesse à la dérive LLM. |
-| LLM envoie un score pour seulement 3 concepts sur 14 | Les 3 sont stockés, les 11 autres absents → fallback 1.0 à la lecture. | Pas de règle « tout ou rien ». |
+| LLM envoie un concept qui n'existe pas dans `Domain.Graph.Concepts` | **Erreur explicite** citant le concept inconnu, transaction abandonnée, aucune persistance partielle. (OQ-1.4) | Sécurise contre l'hallucination LLM. |
+| LLM envoie un score pour seulement 3 concepts sur 14 | Les 3 sont mergés dans le vecteur existant, les 11 autres absents → `uncovered_concepts` les liste, fallback 1.0 à la lecture. | Pas de règle « tout ou rien ». Incrémental. |
+| LLM envoie un score pour C5 alors que C5 a déjà un score | Écrasement : nouvelle valeur prend la place de l'ancienne. Les autres concepts ne sont pas touchés. (OQ-1.2) | Per-concept update sans collateral. |
 | LLM envoie 1000 concepts (synthèse fictive) | Validation len ≤ 500 → erreur. | Cap respecté (cohérent `tools/domain.go`). |
 | Domain avec 500 concepts, JSON ~10 KB | OK, sous le cap. | Pas de pression schema. |
 | 2 appels `set_goal_relevance` simultanés | Last-writer-wins via UPDATE atomique. | Acceptable, idempotent jusqu'au bruit de race. |
@@ -302,21 +327,34 @@ TestDomain_GoalRelevance_NilOnMalformedJSON  // silent fallback
 TestDomain_IsGoalRelevanceStale_VersionComparison
 ```
 
-### 8.3 Integration — MCP tool
+### 8.3 Integration — MCP tool `set_goal_relevance`
 
 ```go
-// tools/goal_relevance_test.go
+// tools/goal_relevance_test.go (set side)
 TestSetGoalRelevance_Roundtrip
 TestSetGoalRelevance_ClampsOutOfRange
-TestSetGoalRelevance_IgnoresUnknownConcepts
-TestSetGoalRelevance_PartialOverridesFallback
+TestSetGoalRelevance_UnknownConceptReturnsError    // OQ-1.4 strictness
+TestSetGoalRelevance_IncrementalMergeKeepsExisting // OQ-1.2 per-concept
+TestSetGoalRelevance_OverwritesSameConcept         // OQ-1.2 update C5 alone
+TestSetGoalRelevance_PartialLeavesOthersUncovered  // returns uncovered_concepts list
 TestSetGoalRelevance_FlagOff_RejectsCall
 TestSetGoalRelevance_EmptyMapRejected
-TestSetGoalRelevance_OverwritesPriorVector
-TestSetGoalRelevance_ConcurrentLastWriterWins
+TestSetGoalRelevance_NaNScoreRejected
+TestSetGoalRelevance_AddConceptsAfterDoesNotInvalidatePrior // OQ-1.1 contract
 ```
 
-### 8.4 Integration — init_domain interaction
+### 8.4 Integration — MCP tool `get_goal_relevance`
+
+```go
+// tools/goal_relevance_test.go (get side)
+TestGetGoalRelevance_EmptyDomainReturnsAllUncovered
+TestGetGoalRelevance_ReturnsStoredVector
+TestGetGoalRelevance_StaleFlagAfterAddConcepts     // OQ-1.1 visibility
+TestGetGoalRelevance_FlagOff_RejectsCall
+TestGetGoalRelevance_OwnershipEnforced              // ne lit pas le domaine d'un autre learner
+```
+
+### 8.5 Integration — init_domain interaction
 
 ```go
 TestInitDomain_ResponseIncludesNextActionWhenFlagOn
@@ -325,14 +363,14 @@ TestInitDomain_NextActionEmptyGoalIsOptionalHint
 TestAddConcepts_BumpsGraphVersion
 ```
 
-### 8.5 Régression — fallback uniforme avant `[4]`
+### 8.6 Régression — fallback uniforme avant `[4]`
 
 Aucun test runtime n'utilise `goal_relevance` aujourd'hui (pas de
 consommateur). La PR ne doit pas casser de test existant. Vérification :
 `go test ./...` PASS sans flag (le tool `set_goal_relevance` n'est pas
 enregistré → invisible aux tests qui n'en parlent pas).
 
-### 8.6 Pas de fixture-shift sur les tests existants
+### 8.7 Pas de fixture-shift sur les tests existants
 
 Comme pour `[7]` : on n'altère pas les fixtures de tests existants.
 Toutes les nouvelles assertions vivent dans des fichiers `*_test.go`
@@ -368,63 +406,58 @@ Les seuils et la pertinence-au-goal sont des dimensions orthogonales.
 
 ---
 
-## 10. Décisions ouvertes spécifiques au composant
+## 10. Décisions arbitrées (Phase 1 close)
 
-### OQ-1.1 — Doit-on bloquer `add_concepts` quand `goal_relevance` est non-vide ?
+| # | Question | Décision | Conséquence |
+|---|----------|----------|-------------|
+| **OQ-1.1** | `add_concepts` bloquant si goal_relevance non-vide ? | **Non bloquant.** Contrat : nouveaux concepts arrivent avec relevance absent (= null à la lecture, fallback uniforme), traitement à trancher en `[4] ConceptSelector`. | `add_concepts` incrémente `graph_version` mais ne touche pas au JSON. La réponse de `add_concepts` indique en `next_action` les concepts désormais découverts (cf. revision OQ-1.3 ci-dessous). |
+| **OQ-1.2** | Signal de staleness ? | **Oui, par-concept** (pas global). Une mise à jour de C5 ne marque pas C6 stale. La staleness = « concept présent dans `Domain.Graph.Concepts` ET absent de la map `relevance` ». | La sémantique de `set_goal_relevance` devient **incrémentale** (merge), pas remplacement. Réponses retournent `uncovered_concepts: []string`. |
+| **OQ-1.3** | `next_action` structuré ou texte ? | **Structuré, avec champ de version.** `next_action: {version: 1, tool: "set_goal_relevance", reason: "...", required: false}`. | Le `version: 1` permet d'évoluer le payload sans casser les clients qui parseraient strictement. Les versions futures peuvent ajouter des champs ; les clients qui ignorent v>1 retombent sur le legacy. |
+| **OQ-1.4** | Map vs liste ? | **Map**, avec **validation explicite** côté serveur : concept inconnu → erreur explicite citant le nom, **pas d'ignore silencieux**. | Sécurise contre les hallucinations LLM (synthétise un concept inexistant). L'erreur précise quel concept est inconnu, ce qui permet au LLM de corriger ou de demander à l'utilisateur. |
 
-**A.** Permettre `add_concepts` librement ; le vecteur devient stale, le
-LLM peut re-set quand il veut. État stale documenté via
-`IsGoalRelevanceStale()` et exposé en cockpit (futur).
+### Ajout demandé — outil de lecture `get_goal_relevance`
 
-**B.** Refuser `add_concepts` tant que `set_goal_relevance` n'a pas été
-re-appelé pour le nouveau graphe. Force le LLM à toujours maintenir le
-vecteur synchronisé.
+**Motif** : sans surface de lecture, on découvre la qualité des
+vecteurs LLM seulement au moment où `[4] ConceptSelector` les consomme.
+Un endpoint read-only permet l'**observation empirique** de ce que le
+LLM produit, en amont de toute décision pédagogique. Évite la classe
+de bug « hallucination de relevance détectée trop tard ».
 
-**Mon défaut** : A. Cohérent avec Q2 (async, non bloquant). Refuser une
-opération sur un état périphérique est trop strict. Le coût d'un vecteur
-stale est limité au fallback uniforme sur les nouveaux concepts —
-acceptable.
+**Spec** :
 
-### OQ-1.2 — Le tool retourne-t-il un signal de staleness ?
+```go
+type GetGoalRelevanceParams struct {
+    DomainID string `json:"domain_id,omitempty"`
+}
+```
 
-**A.** `set_goal_relevance` retourne `stale_after_set: false` (ou true
-en cas de race rare). Le cockpit/context expose `goal_relevance_stale`
-sur lecture. Visible mais pas obtrusif.
+Réponse :
 
-**B.** Pas de signal. Le LLM doit lire le cockpit ou la doc pour
-comprendre la staleness.
+```json
+{
+  "domain_id": "dom_abc",
+  "graph_version": 3,
+  "for_graph_version": 2,
+  "stale": true,
+  "all_concepts_count": 14,
+  "covered_concepts_count": 11,
+  "uncovered_concepts": ["C12", "C13", "C14"],
+  "relevance": {
+    "Goroutines": 0.9,
+    "Channels": 0.7,
+    "...": ...
+  },
+  "set_at": "2026-05-04T22:00:00Z"
+}
+```
 
-**Mon défaut** : A. Coût implementation minime, valeur observabilité
-forte. Le LLM peut décider de re-set sur un signal explicit plutôt
-que de faire de la magie.
-
-### OQ-1.3 — `next_action` dans la réponse de `init_domain` : structuré ou texte libre ?
-
-**A.** Champ structuré `next_action: {tool: "set_goal_relevance",
-reason: "...", required: false}`. Lisible programmatiquement, le LLM
-peut le parser.
-
-**B.** Texte libre dans `message: "Domaine créé. Pense à appeler
-set_goal_relevance pour activer le goal-aware routing."` Simple, mais
-fragile si on traduit ou si on ajoute d'autres next-actions plus tard.
-
-**Mon défaut** : A. Le champ structuré scale (on peut imaginer
-`next_action: [{...}, {...}]` plus tard pour multi-actions). Et c'est
-plus testable.
-
-### OQ-1.4 — Format input map vs liste ?
-
-**A.** `Relevance map[string]float64 {"concept_a": 0.9, ...}`. JSON map
-naturelle, compacte.
-
-**B.** `Relevance []struct{Concept string; Score float64}`. Plus
-verbeux mais ordre préservé, et permet de futures extensions
-(`Concept, Score, Confidence float64` par exemple).
-
-**Mon défaut** : A. Map = simple à générer pour le LLM, simple à
-parser côté serveur. Si on veut plus tard ajouter des champs (genre
-`confidence`), on changera la valeur en struct (`map[string]struct{Score float64; Confidence float64}`)
-sans changer la forme map.
+- Read-only, ownership check (le learner doit posséder le domaine).
+- Pas de logique de décision : retourne ce qui est stocké, point.
+- `stale = true` si `for_graph_version < graph_version`.
+- Visible côté outils MCP même quand `REGULATION_GOAL=off` ? **Non** :
+  même flag-gating que `set_goal_relevance`. Cohérent : si la couche
+  goal n'est pas active, l'outil de lecture est silencieux. Sinon
+  on observerait une surface inutile.
 
 ---
 
@@ -434,16 +467,16 @@ sans changer la forme map.
 
 | Action | Fichier | Notes |
 |--------|---------|-------|
-| **Création** | `tools/goal_relevance.go` | handler MCP `set_goal_relevance` |
-| **Création** | `tools/goal_relevance_test.go` | ~150 lignes |
-| **Création** | `db/goal_relevance.go` | `UpdateDomainGoalRelevance`, `GetDomainGoalRelevance` |
-| **Création** | `db/goal_relevance_test.go` | round-trip, version, stale |
-| **Modif** | `models/domain.go` | ajouter 3 champs + `GoalRelevance()`, `IsGoalRelevanceStale()` |
+| **Création** | `tools/goal_relevance.go` | handlers MCP `set_goal_relevance` + `get_goal_relevance` |
+| **Création** | `tools/goal_relevance_test.go` | ~250 lignes (set + get + flag-gating) |
+| **Création** | `db/goal_relevance.go` | `UpdateDomainGoalRelevance` (merge), `GetDomainGoalRelevance` |
+| **Création** | `db/goal_relevance_test.go` | round-trip, merge, version, stale |
+| **Modif** | `models/domain.go` | ajouter 3 champs + `GoalRelevance()` parsé, `IsGoalRelevanceStale()`, `UncoveredConcepts(graph)` |
 | **Modif** | `db/migrations.go` | 3 ALTER TABLE idempotents |
 | **Modif** | `db/store.go` | `CreateDomain`, `UpdateDomainGraph` incrémentent `graph_version` |
-| **Modif** | `tools/domain.go` | `init_domain` + `add_concepts` retournent `next_action` quand `REGULATION_GOAL=on` |
-| **Modif** | `tools/tools.go` | enregistrer `set_goal_relevance` (gated par flag) |
-| **Modif** | `tools/prompt.go` | documenter l'outil quand le flag est on |
+| **Modif** | `tools/domain.go` | `init_domain` + `add_concepts` retournent `next_action` (versionné, OQ-1.3) quand `REGULATION_GOAL=on` |
+| **Modif** | `tools/tools.go` | enregistrer `set_goal_relevance` + `get_goal_relevance` (gated par flag) |
+| **Modif** | `tools/prompt.go` | documenter les deux outils quand le flag est on |
 | **Modif** | `db/schema.sql` | ajouter colonnes au CREATE TABLE pour les fresh installs |
 
 ### 11.2 Critères de merge

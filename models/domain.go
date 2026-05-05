@@ -4,7 +4,10 @@
 
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type AlertType string
 
@@ -67,16 +70,78 @@ type KnowledgeSpace struct {
 }
 
 type Domain struct {
-	ID                 string
-	LearnerID          string
-	Name               string
-	PersonalGoal       string
-	Graph              KnowledgeSpace
-	ValueFramingsJSON  string
-	LastValueAxis      string
-	Archived           bool
-	PinnedConcept      string
-	CreatedAt          time.Time
+	ID                     string
+	LearnerID              string
+	Name                   string
+	PersonalGoal           string
+	Graph                  KnowledgeSpace
+	ValueFramingsJSON      string
+	LastValueAxis          string
+	Archived               bool
+	PinnedConcept          string
+	GraphVersion           int
+	GoalRelevanceJSON      string
+	GoalRelevanceVersion   int
+	CreatedAt              time.Time
+}
+
+// GoalRelevance is the parsed payload of Domain.GoalRelevanceJSON. It maps
+// concept ids to a relevance score in [0,1] (1 = goal-critical, 0 =
+// orthogonal). Only concepts that appear in Domain.Graph.Concepts are
+// stored — unknown concepts are rejected at write time (cf. tools/goal_relevance.go).
+type GoalRelevance struct {
+	ForGraphVersion int                `json:"for_graph_version"`
+	Relevance       map[string]float64 `json:"relevance"`
+	SetAt           time.Time          `json:"set_at"`
+}
+
+// ParseGoalRelevance returns the structured GoalRelevance parsed from
+// d.GoalRelevanceJSON. Returns nil (no error) when the JSON is empty or
+// unparseable — callers treat nil as "no relevance set, use uniform
+// fallback". Silent fallback is intentional: corrupt JSON should never
+// block a session.
+func (d *Domain) ParseGoalRelevance() *GoalRelevance {
+	if d.GoalRelevanceJSON == "" {
+		return nil
+	}
+	var gr GoalRelevance
+	if err := json.Unmarshal([]byte(d.GoalRelevanceJSON), &gr); err != nil {
+		return nil
+	}
+	return &gr
+}
+
+// IsGoalRelevanceStale reports whether the stored vector was last set
+// against an older graph version than the current one. Per OQ-1.1, this
+// does NOT block any operation — it is observable via get_goal_relevance
+// so the LLM can choose to re-decompose for the new concepts.
+func (d *Domain) IsGoalRelevanceStale() bool {
+	gr := d.ParseGoalRelevance()
+	if gr == nil {
+		return d.GraphVersion > 0
+	}
+	return gr.ForGraphVersion < d.GraphVersion
+}
+
+// UncoveredConcepts returns the concepts present in d.Graph.Concepts that
+// have no entry in the stored relevance vector. Per OQ-1.2 these are the
+// "per-concept stale" concepts: visible to the LLM via get_goal_relevance,
+// not auto-flagged on the rest of the vector.
+func (d *Domain) UncoveredConcepts() []string {
+	gr := d.ParseGoalRelevance()
+	covered := map[string]bool{}
+	if gr != nil {
+		for c := range gr.Relevance {
+			covered[c] = true
+		}
+	}
+	var uncovered []string
+	for _, c := range d.Graph.Concepts {
+		if !covered[c] {
+			uncovered = append(uncovered, c)
+		}
+	}
+	return uncovered
 }
 
 type TimeWindow struct {
