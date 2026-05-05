@@ -444,6 +444,10 @@ The figures below include a safety buffer (~50%) against the theoretical limits.
 - **robfig/cron** for background scheduling
 - Wide test coverage across the five algorithms, the regulation pipeline (action / concept / gate / phase-FSM / orchestrator), legacy router and alert engine, motivation selection, misconception aggregation, OLM snapshots, goal-relevance staleness, and schema migrations
 
+## Operations
+
+For database backup, restore, off-host copy and service control recipes, see [OPERATIONS.md](./OPERATIONS.md). Single-user systemd-user setup is documented end-to-end.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

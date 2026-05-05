@@ -1,0 +1,150 @@
+# Operations runbook — tutor-mcp
+
+Practical recipes for running the server. Companion to the README, which describes *what* the project does. This file describes *how* to keep it alive.
+
+## Database backup
+
+The server stores everything (interactions, OLM, BKT/FSRS/IRT state, refresh tokens, calibration history) in a single SQLite file at `${DB_PATH:-./data/runtime.db}`. Loss of that file resets every learner to `PMastery=0.1` and erases trend windows. Backup posture is part of the product premise, not an afterthought.
+
+### What ships in the repo
+
+- `scripts/backup.sh` — online backup using `sqlite3 .backup`. Safe to run while the server is writing (the SQLite engine acquires the appropriate locks). Writes a date-stamped file then prunes anything older than `BACKUP_RETENTION_DAYS` (default 14).
+
+### Recommended setup — user-level systemd timer
+
+The unit files in this repo ship as inline examples. On a single-user VPS, install them under `~/.config/systemd/user/` so they run without root.
+
+`~/.config/systemd/user/tutor-mcp-backup.service`:
+
+```ini
+[Unit]
+Description=tutor-mcp — daily SQLite online backup
+After=tutor-mcp.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/mcp/scripts/backup.sh
+Environment=DB_PATH=/home/ubuntu/mcp/data/runtime.db
+Environment=BACKUP_DIR=/home/ubuntu/backups/tutor-mcp
+Environment=BACKUP_RETENTION_DAYS=14
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+```
+
+`~/.config/systemd/user/tutor-mcp-backup.timer`:
+
+```ini
+[Unit]
+Description=tutor-mcp — schedule daily SQLite backup at 03:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now tutor-mcp-backup.timer
+```
+
+Verify the next run:
+
+```bash
+systemctl --user list-timers tutor-mcp-backup.timer
+```
+
+Force a backup now (useful before risky operations):
+
+```bash
+systemctl --user start tutor-mcp-backup.service
+journalctl --user -u tutor-mcp-backup.service --since "1 minute ago"
+```
+
+### Off-host copy
+
+The setup above keeps backups on the same VPS. A disk failure loses both the live DB and the backups. Pick at least one of:
+
+- **Tailscale + rsync** to a second machine you control:
+  ```bash
+  rsync -a --delete /home/ubuntu/backups/tutor-mcp/ user@other-host:/var/backups/tutor-mcp/
+  ```
+  Add this as a second `ExecStartPost` line in the backup service, or as a separate timer that runs 5 min after the local backup.
+
+- **Object storage** (S3-compatible). Add `aws s3 sync` or `rclone sync` after the local write. Document the bucket and IAM scope in your private notes.
+
+- **A nightly tarball pulled by another machine over SSH**. Lowest friction if you have a homelab.
+
+Whichever you pick, verify the off-host copy *every quarter* by performing a test restore from it (see below).
+
+### Restore procedure
+
+Given a backup file `runtime-2026-05-05T03-30-00Z.db`:
+
+1. Stop the service:
+   ```bash
+   systemctl --user stop tutor-mcp
+   ```
+2. Move the current DB aside (don't delete — you may want it for forensic comparison):
+   ```bash
+   mv /home/ubuntu/mcp/data/runtime.db /home/ubuntu/mcp/data/runtime.db.broken-$(date -u +%FT%TZ)
+   rm -f /home/ubuntu/mcp/data/runtime.db-shm /home/ubuntu/mcp/data/runtime.db-wal
+   ```
+3. Copy the backup into place:
+   ```bash
+   cp /home/ubuntu/backups/tutor-mcp/runtime-2026-05-05T03-30-00Z.db /home/ubuntu/mcp/data/runtime.db
+   ```
+4. Restart:
+   ```bash
+   systemctl --user start tutor-mcp
+   journalctl --user -u tutor-mcp --since "30 seconds ago"
+   ```
+
+Expect the migration runner to log *"database ready"* with no migration applied (the backup is post-migration).
+
+### Pre-migration safety
+
+The migration runner in `db/migrations.go` is forward-only and does not snapshot before applying. Until that gets a built-in pre-migration backup, follow this manual recipe before deploying a binary that ships new migrations:
+
+```bash
+systemctl --user start tutor-mcp-backup.service           # snapshot now
+systemctl --user stop tutor-mcp                           # stop server
+go build -o /home/ubuntu/mcp/tutor-mcp                    # build new binary
+systemctl --user start tutor-mcp                          # restart, migrations run on boot
+```
+
+If the migration corrupts something, the on-demand backup taken in step 1 is your rollback target via the restore procedure above.
+
+### Verification — what to check periodically
+
+- **Size sanity**: a daily backup that suddenly drops below 50% of the previous size suggests data loss. Add a log-watch alert if you care.
+- **Open the backup**: every quarter, run `sqlite3 <backup> 'SELECT COUNT(*) FROM interactions;'` against the latest off-host copy. Compare to live. Mismatch = the off-host pipeline is broken.
+- **Practice restore**: every six months, run the restore procedure into a scratch directory (`DB_PATH=/tmp/test-restore.db`) and boot a second instance on a different port. If it doesn't come up clean, your backups are theatre.
+
+## Service control quick reference
+
+```bash
+# State
+systemctl --user status tutor-mcp
+systemctl --user list-timers
+
+# Logs
+journalctl --user -u tutor-mcp -f                 # live tail
+journalctl --user -u tutor-mcp --since "1 hour ago"
+journalctl --user -u tutor-mcp-backup --since "today"
+
+# Restart after binary change
+go build -o tutor-mcp .
+systemctl --user restart tutor-mcp
+
+# Kill switch — disable the v0.3 regulation pipeline at the next boot
+echo 'Environment=REGULATION_PHASE=off' >> ~/.config/systemd/user/tutor-mcp.service
+systemctl --user daemon-reload
+systemctl --user restart tutor-mcp
+```
