@@ -127,6 +127,60 @@ If the migration corrupts something, the on-demand backup taken in step 1 is you
 - **Open the backup**: every quarter, run `sqlite3 <backup> 'SELECT COUNT(*) FROM interactions;'` against the latest off-host copy. Compare to live. Mismatch = the off-host pipeline is broken.
 - **Practice restore**: every six months, run the restore procedure into a scratch directory (`DB_PATH=/tmp/test-restore.db`) and boot a second instance on a different port. If it doesn't come up clean, your backups are theatre.
 
+## Pipeline observability
+
+The regulation pipeline emits structured `level=INFO` log lines so each `get_next_activity` call leaves a trace. The four key event types:
+
+| Event | Source | Fields |
+|-------|--------|--------|
+| `pipeline decision` | `tools/activity.go` | `route` (`orchestrator` \| `legacy_fallback` \| `legacy`), `phase`, `activity_type`, `concept`, `rationale`, `learner`, `domain` |
+| `phase transition (FSM)` | `engine/orchestrator.go` | `from`, `to`, `entry_entropy`, `rationale`, `domain` |
+| `phase fallback (NoFringe)` | `engine/orchestrator.go` | `from`, `to`, `retry`, `domain` — FSM-disjoint phase override when no candidate is eligible |
+| `goal_relevance updated` | `tools/goal_relevance.go` | `concepts_updated`, `covered_total`, `all_concepts`, `uncovered`, `version`, `stale_after_set` |
+| `interaction recorded` | `tools/interaction.go` | `concept`, `activity_type`, `success`, `hints_requested`, `self_initiated`, `new_mastery`, `new_theta`, `reps` |
+
+### Live tail — full pipeline narrative
+
+```bash
+journalctl --user -u tutor-mcp -f \
+  | grep -E "pipeline decision|phase transition|phase fallback|goal_relevance updated|interaction recorded|gate:"
+```
+
+### Single-session forensic — by `session_id`
+
+```bash
+journalctl --user -u tutor-mcp --since "1 hour ago" \
+  | grep -E "pipeline decision|interaction recorded" \
+  | grep "session=sess_<your_session_id>"
+```
+
+(currently the `session_id` is not in the pipeline-decision log — add it if you need cross-event correlation; see `tools/activity.go` and the `record_interaction` params).
+
+### Aggregations (last hour)
+
+```bash
+# Count decisions by route
+journalctl --user -u tutor-mcp --since "1 hour ago" \
+  | grep "pipeline decision" \
+  | grep -oE 'route=[a-z_]+' | sort | uniq -c
+
+# Count phase transitions
+journalctl --user -u tutor-mcp --since "1 hour ago" \
+  | grep "phase transition (FSM)" | wc -l
+
+# Activity-type distribution
+journalctl --user -u tutor-mcp --since "1 hour ago" \
+  | grep "pipeline decision" \
+  | grep -oE 'activity_type=[A-Z_]+' | sort | uniq -c
+```
+
+### Health signals to watch
+
+- **`route=legacy_fallback` count > 0** — the orchestrator is throwing errors. Look for the preceding `level=ERROR` line for the cause.
+- **No `pipeline decision` logs after a session starts** — the LLM isn't calling `get_next_activity`. Drift in the system prompt likely.
+- **No `interaction recorded` logs while exercises are happening** — the LLM is generating activities but not closing the loop with `record_interaction`. Cohérence-of-rule-3 problem in the system prompt.
+- **Repeated `phase fallback (NoFringe)` for the same domain** — the candidate pool is empty. Likely cause: missing `goal_relevance` on a domain where the strict contract is enforced (partial vector). Run `set_goal_relevance` to repair.
+
 ## Service control quick reference
 
 ```bash

@@ -92,6 +92,9 @@ func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, err
 		if eval.To == models.PhaseDiagnostic {
 			entryEntropy = obs.MeanEntropy
 		}
+		slog.Info("phase transition (FSM)",
+			"domain", domain.ID, "from", eval.From, "to", eval.To,
+			"entry_entropy", entryEntropy, "rationale", eval.Rationale)
 		if persistErr := store.UpdateDomainPhase(domain.ID, eval.To, entryEntropy, input.Now); persistErr != nil {
 			slog.Error("orchestrator: failed to persist phase transition",
 				"domain", domain.ID, "from", eval.From, "to", eval.To, "err", persistErr)
@@ -127,6 +130,8 @@ func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, err
 		if next == currentPhase {
 			break
 		}
+		slog.Info("phase fallback (NoFringe)",
+			"domain", domain.ID, "from", currentPhase, "to", next, "retry", retry)
 		if persistErr := store.UpdateDomainPhase(domain.ID, next, 0, input.Now); persistErr != nil {
 			slog.Error("orchestrator: failed to persist NoFringe fallback transition",
 				"domain", domain.ID, "from", currentPhase, "to", next, "err", persistErr)

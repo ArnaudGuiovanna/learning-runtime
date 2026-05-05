@@ -133,6 +133,16 @@ func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
 			staleAfterSet = fresh.GraphVersion > merged.ForGraphVersion
 		}
 
+		deps.Logger.Info("goal_relevance updated",
+			"learner", learnerID,
+			"domain", domain.ID,
+			"concepts_updated", len(params.Relevance),
+			"covered_total", len(merged.Relevance),
+			"all_concepts", len(domain.Graph.Concepts),
+			"uncovered", len(uncovered),
+			"version", merged.ForGraphVersion,
+			"stale_after_set", staleAfterSet,
+		)
 		r, _ := jsonResult(map[string]any{
 			"domain_id":              domain.ID,
 			"for_graph_version":      merged.ForGraphVersion,

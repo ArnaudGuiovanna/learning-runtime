@@ -160,6 +160,18 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 		// Update last active
 		_ = deps.Store.UpdateLastActive(learnerID)
 
+		deps.Logger.Info("interaction recorded",
+			"learner", learnerID,
+			"concept", params.Concept,
+			"activity_type", params.ActivityType,
+			"success", params.Success,
+			"hints_requested", params.HintsRequested,
+			"self_initiated", params.SelfInitiated,
+			"new_mastery", cs.PMastery,
+			"new_theta", cs.Theta,
+			"reps", cs.Reps,
+		)
+
 		// Compute engagement signal
 		engagementSignal := "stable"
 		if params.Confidence >= 0.8 && params.Success {

@@ -103,6 +103,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		// legacy reste en place (cohérent avec OQ-2.4 = no cache, le
 		// flag est lu à chaque appel).
 		var activity models.Activity
+		var routePath string
 		if regulationPhaseEnabled() {
 			orchActivity, orchErr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
 				LearnerID: learnerID,
@@ -115,12 +116,38 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				// la session sur une erreur orchestrateur.
 				deps.Logger.Error("orchestrator failed, falling back to legacy router", "err", orchErr)
 				activity = engine.Route(alerts, frontier, domainStates, domainInteractions, sessionConcepts)
+				routePath = "legacy_fallback"
 			} else {
 				activity = orchActivity
+				routePath = "orchestrator"
 			}
 		} else {
 			activity = engine.Route(alerts, frontier, domainStates, domainInteractions, sessionConcepts)
+			routePath = "legacy"
 		}
+		// Pipeline decision audit — one line per get_next_activity call.
+		// Re-read domain to surface any phase transition the orchestrator
+		// just persisted (cheap; same DB connection).
+		var loggedPhase string
+		if regulationPhaseEnabled() {
+			if d, _ := deps.Store.GetDomainByID(domain.ID); d != nil {
+				loggedPhase = string(d.Phase)
+			}
+			if loggedPhase == "" {
+				loggedPhase = "INSTRUCTION" // orchestrator's NULL fallback
+			}
+		} else {
+			loggedPhase = "n/a"
+		}
+		deps.Logger.Info("pipeline decision",
+			"route", routePath,
+			"learner", learnerID,
+			"domain", domain.ID,
+			"phase", loggedPhase,
+			"activity_type", activity.Type,
+			"concept", activity.Concept,
+			"rationale", activity.Rationale,
+		)
 
 		// Metacognitive mirror
 		since := time.Now().UTC().Add(-7 * 24 * time.Hour)
