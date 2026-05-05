@@ -10,7 +10,7 @@
 
 Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
-> Current release: **v0.2**.
+> Current release: **v0.3** — adds the regulation pipeline (BKT-aware action selector, KST-aware concept selector, gate controller, and a pure-FSM phase orchestrator), all behind opt-in feature flags. The legacy router remains the default.
 
 ## An Intelligent Tutoring System, not a chatbot
 
@@ -74,7 +74,36 @@ Five complementary learning-science algorithms run on every interaction and join
 | **PFA** (Performance Factor Analysis) | Weights success/failure history to predict performance on each concept. |
 | **KST** (Knowledge Space Theory) | Validates prerequisite graphs and gates new concepts on mastery of their ancestors. |
 
-## MCP Tools (25)
+## Regulation Pipeline (v0.3, behind feature flags)
+
+On top of the legacy alert-and-router engine, v0.3 introduces a seven-stage **regulation pipeline** — pure functions composed by an impure orchestrator — that lifts activity selection from a priority-ladder of alerts to an explicit **phase FSM** (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE) with information-theoretic concept selection and a hygiene gate. Each stage is opt-in via its own environment variable; with all flags off, behaviour is byte-identical to v0.2.
+
+| # | Stage | Status | What it does |
+|---|-------|--------|--------------|
+| **[7]** | Threshold Resolver (`algorithms/thresholds.go`) | **Shipped** (default-on) | Unifies the three historical mastery thresholds (BKT, KST gating, mid-curriculum) at 0.85. Opt-out: `REGULATION_THRESHOLD=off`. |
+| **[1]** | Goal Decomposer (`tools/goal_relevance.go`) | **Shipped** (opt-in) | LLM-authored relevance vector over the concept graph; biases [4] toward goal-critical concepts. Flag: `REGULATION_GOAL=on`. |
+| **[5]** | Action Selector (`engine/action_selector.go`) | **Shipped** (opt-in) | Picks the activity *type* for a chosen concept from BKT/IRT signals: `PRACTICE`, `DEBUG_MISCONCEPTION`, `FEYNMAN_PROMPT`, `TRANSFER_PROBE`, `RECALL_EXERCISE`, `MASTERY_CHALLENGE`. ZPD anchored at `IRT_θ + 0.847`. Flag: `REGULATION_ACTION=on`. |
+| **[4]** | Concept Selector (`engine/concept_selector.go`) | **Shipped** (opt-in) | Phase-aware concept choice: max-info-gain on the KST fringe (INSTRUCTION), most-overdue under FSRS (MAINTENANCE), max-binary-entropy untouched concept (DIAGNOSTIC). Flag: `REGULATION_CONCEPT=on`. |
+| **[3]** | Gate Controller (`engine/gate.go`) | **Shipped** (opt-in) | Hygiene gate that may override the selection: anti-repeat window (no concept repeated within last *N*=3 activities), 45-min session-budget escape (`CLOSE_SESSION`), no-fringe escape (`REST`). Flag: `REGULATION_GATE=on`. |
+| **[2]** | Phase Controller (`engine/orchestrator.go` + `engine/phase_fsm.go`) | **Shipped** (opt-in) | Pure-FSM orchestrator wiring [4]→[5]→[3]. Transitions are observation-driven: DIAGNOSTIC→INSTRUCTION on entropy reduction *ΔH ≥ 0.2 bits* or *N ≥ 8* diagnostic items; INSTRUCTION→MAINTENANCE on full-graph mastery; MAINTENANCE→INSTRUCTION on FSRS retention drop. Flag: `REGULATION_PHASE=on`. |
+| **[6]** | Fade Controller | **Pending** | Gradual handover of pacing decisions to the learner once autonomy thresholds are met. Not implemented yet. |
+
+The pure functions (`SelectAction`, `SelectConcept`, `ApplyGate`, `EvaluatePhase`) are individually unit-tested (~110 dedicated tests). The orchestrator is exercised by SQLite in-memory tests, three end-to-end scenarios with JSON+Markdown evidence artifacts in [`eval/orchestrator_e2e_*`](./eval/), and migration safety tests for the new `domains.phase`, `domains.phase_changed_at`, `domains.phase_entry_entropy` columns.
+
+### Feature flags — strict-equality opt-in
+
+All regulation flags default OFF and use **strict literal equality** (`"on"`) to enable, except `REGULATION_THRESHOLD` which is on by default and uses `"off"` to opt out. Typos (`On`, `ON`, ` on`) are treated as the safe default — operators must type the canonical value exactly. This prevents accidental enablement and makes rollback unambiguous.
+
+| Flag | Default | Effect when set |
+|------|---------|-----------------|
+| `REGULATION_THRESHOLD` | **on** (opt-out: `=off`) | Unified 0.85 mastery threshold across BKT/KST/mid-curriculum. |
+| `REGULATION_GOAL=on` | off | Exposes `set_goal_relevance` / `get_goal_relevance` and appends the goal-aware system-prompt section. |
+| `REGULATION_ACTION=on` | off | Appends the action-selector system-prompt section (LLM is told the new activity types may appear). |
+| `REGULATION_CONCEPT=on` | off | Appends the concept-selector system-prompt section. |
+| `REGULATION_GATE=on` | off | Appends the gate system-prompt section (documents `CLOSE_SESSION` semantics). |
+| `REGULATION_PHASE=on` | off | Routes `get_next_activity` through the orchestrator; falls back to legacy `engine.Route` on orchestrator error. |
+
+## MCP Tools (30)
 
 ### Core Learning
 
@@ -86,6 +115,9 @@ Five complementary learning-science algorithms run on every interaction and join
 | `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA; tracks hints, initiative, proactive reviews, error type, misconception type/detail |
 | `check_mastery` | Check if a concept is eligible for a mastery challenge |
 | `get_cockpit_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
+| `open_cockpit` | Returns an MCP resource link that opens the cockpit UI inside compatible clients (Claude Desktop, claude.ai) |
+| `pick_concept` | Pin a specific concept as the next focus, overriding the router for one activity |
+| `get_olm_snapshot` | Open Learner Model snapshot: per-concept mastery, retention, last-seen, fringe membership, anti-repeat status |
 | `get_availability_model` | Learner's time windows and session frequency |
 | `update_learner_profile` | Persist learner metadata (device, background, level, calibration bias, autonomy score) |
 
@@ -98,6 +130,8 @@ Five complementary learning-science algorithms run on every interaction and join
 | `archive_domain` | Hide a domain from cockpit/routing while preserving progress |
 | `unarchive_domain` | Reactivate an archived domain |
 | `delete_domain` | Permanently remove a domain and all its data |
+| `set_goal_relevance` *(flag-gated, `REGULATION_GOAL=on`)* | LLM-decomposed goal-relevance vector over the concept graph (0 = orthogonal, 1 = goal-critical) — biases the concept selector toward what matters for the learner's stated objective |
+| `get_goal_relevance` *(flag-gated, `REGULATION_GOAL=on`)* | Read current goal-relevance vector with staleness flags (graph-version drift, uncovered concepts) |
 
 ### Metacognitive Loop
 
@@ -205,18 +239,29 @@ OAuth 2.1 with PKCE. Learners register and authenticate through a built-in flow:
 ```
 main.go              HTTP server, MCP handler, OAuth, scheduler startup
 ├── auth/            OAuth 2.1 server, JWT middleware, PKCE, rate limiter
-├── algorithms/      BKT, FSRS, IRT, KST, PFA (all with tests)
+├── algorithms/      BKT, FSRS, IRT, KST, PFA + thresholds + BKT info-gain (all with tests)
+│   ├── bkt.go / fsrs.go / irt.go / kst.go / pfa.go   Five core learning-science algorithms
+│   ├── thresholds.go                                  Unified 0.85 mastery threshold (REGULATION_THRESHOLD)
+│   └── bkt_info_gain.go                               Binary entropy + info-gain helpers for [4] concept selector
 ├── engine/
-│   ├── alert.go              Learning + metacognitive alert computation
-│   ├── router.go             Activity routing with priority-based alert handling
-│   ├── metacognition.go      Autonomy score, mirror detection, tutor mode
-│   ├── motivation.go         Brief selection + composition (6 kinds, Hidi-Renninger phase)
-│   └── scheduler.go          Cron jobs: critical alerts, reviews, queued nudges, cleanup
+│   ├── alert.go                Learning + metacognitive alert computation
+│   ├── router.go               Legacy activity routing with priority-based alert handling
+│   ├── metacognition.go        Autonomy score, mirror detection, tutor mode
+│   ├── motivation.go           Brief selection + composition (6 kinds, Hidi-Renninger phase)
+│   ├── scheduler.go            Cron jobs: critical alerts, reviews, queued nudges, cleanup
+│   ├── olm.go / olm_graph.go   Open Learner Model snapshot (per-concept + global)
+│   ├── action_selector.go      [5] Pure activity-type selection (PRACTICE / DEBUG_MISCONCEPTION / …)
+│   ├── concept_selector.go     [4] Pure phase-aware concept selection (info-gain, FSRS overdue, max-entropy)
+│   ├── gate.go                 [3] Pure hygiene gate (anti-repeat, session-budget, no-fringe escape)
+│   ├── phase_fsm.go            [2] Pure phase FSM (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE)
+│   ├── phase_config.go         [2] Tunable thresholds (ΔH, N_diagnostic_max, anti-repeat window, …)
+│   └── orchestrator.go         [2] Impure coordinator wiring [4]→[5]→[3] with FSM transitions
 ├── models/
-│   ├── learner.go            Learner, ConceptState, Interaction, RefreshToken
-│   ├── domain.go             AlertType, Activity, KnowledgeSpace, Domain (+ value framings)
-│   ├── metacognition.go      AffectState, CalibrationRecord, MirrorMessage, AutonomyMetrics
-│   └── motivation.go         MotivationBrief, RecapBrief, WebhookQueueItem, interest phases
+│   ├── learner.go              Learner, ConceptState, Interaction, RefreshToken
+│   ├── domain.go               AlertType, Activity, KnowledgeSpace, Domain (+ phase fields, value framings)
+│   ├── metacognition.go        AffectState, CalibrationRecord, MirrorMessage, AutonomyMetrics
+│   ├── motivation.go           MotivationBrief, RecapBrief, WebhookQueueItem, interest phases
+│   └── regulation.go           Phase enum (DIAGNOSTIC / INSTRUCTION / MAINTENANCE)
 ├── db/
 │   ├── store.go                     SQLite persistence: learners, domains, concepts, interactions
 │   ├── metacognition.go             Affect, calibration, transfer, autonomy queries
@@ -224,9 +269,12 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   ├── motivation_queries.go        Brief-engine signals (failures, session counts, self-init ratio)
 │   ├── implementation_intentions.go If-then commitments (Gollwitzer)
 │   ├── webhook_queue.go             LLM-authored nudge queue with dequeue/dedup/expire
+│   ├── goal_relevance.go            Goal-relevance vector storage + staleness checks
+│   ├── phase.go                     Phase transitions, action history, anti-repeat queries
 │   ├── schema.sql                   Table definitions (embedded)
 │   └── migrations.go                Idempotent migrations for existing databases
-└── tools/               25 MCP tool handlers + system prompt
+├── tools/                30 MCP tool handlers + system prompt + flag-gated appendices
+└── eval/                 Synthetic-learner harness (V1–V4) + orchestrator E2E scenarios
 ```
 
 ## Running
@@ -393,14 +441,14 @@ The figures below include a safety buffer (~50%) against the theoretical limits.
 - **SQLite** (via modernc.org/sqlite — pure Go, no CGO)
 - **JWT** for access tokens, bcrypt for passwords
 - **robfig/cron** for background scheduling
-- **70 tests** covering algorithms, engine logic, motivation selection, misconception aggregation, and active-domain filtering
+- **640+ tests** covering the five algorithms, the regulation pipeline (action / concept / gate / phase-FSM / orchestrator), legacy router and alert engine, motivation selection, misconception aggregation, OLM snapshots, goal-relevance staleness, schema migrations, and end-to-end orchestrator scenarios
 
 ## Pedagogical Validity — Current Status
 
 Tutor MCP ships a **synthetic-learner harness** (`eval/`) that replays
 each release against four pedagogical viability properties (V1–V4 :
 BKT calibration, ranking, routing-vs-random uplift, FSRS scheduling).
-The latest run is recorded in [`eval/VERDICT.md`](./eval/VERDICT.md).
+The latest harness run is recorded in [`eval/VERDICT.md`](./eval/VERDICT.md).
 
 As of v0.2 (run 2026-05-03), the synthetic harness reports
 **NOT VIABLE — V1, V2, V3, V4 fail** at the bars set by the project
@@ -411,10 +459,20 @@ super-oracle on V3 (mean snapshot mastery uplift). Caveats from
 borderline verdicts deserve bootstrap CI before being treated as
 final.
 
+For the v0.3 regulation pipeline, three end-to-end orchestrator
+scenarios (full-cycle, restrictive-goal, broad-goal) have been
+recorded as JSON+Markdown artifacts in
+[`eval/orchestrator_e2e_*_2026-05-05.{json,md}`](./eval/) — they
+exercise the complete `init_domain` → DIAGNOSTIC → INSTRUCTION →
+MAINTENANCE arc against an in-memory SQLite store with a deterministic
+synthetic learner, and stand as evidence that the FSM transitions and
+gate escapes behave as specified. They are *not* a substitute for the
+V1–V4 harness rerun, which remains the next chantier alongside
+real-human data.
+
 This honest status is part of the project. The runtime is published
 as an open instrument — the methodology is reproducible, the bars are
-explicit, and the gap to viability is measurable. Real-human
-validation is the next chantier.
+explicit, and the gap to viability is measurable.
 
 ## License
 
