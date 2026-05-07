@@ -334,6 +334,20 @@ html, body {
 (function() {
   'use strict';
 
+  // Version banner — printed at iframe boot so we can confirm which
+  // build is actually rendered (cache-busting diagnosis).
+  const TUTOR_APP_VERSION = 'v3-direct-http-2026-05-07';
+  console.log('[tutor-mcp] iframe version', TUTOR_APP_VERSION);
+  // Visible badge in the bottom-right corner (sober, low-contrast).
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      const b = document.createElement('div');
+      b.textContent = TUTOR_APP_VERSION;
+      b.style.cssText = 'position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.4;color:var(--ck-text-secondary);z-index:9999;pointer-events:none;font-family:ui-monospace,monospace;';
+      document.body.appendChild(b);
+    } catch (e) { /* no-op */ }
+  });
+
   // ─── Message protocol helpers ─────────
   let nextId = 1;
   const pending = new Map();
