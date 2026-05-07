@@ -41,6 +41,26 @@ func registerRecordAffect(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Likert-scale guards (1..4 per AffectState model docs). Each field
+		// uses omitempty so 0 means "not provided" and is allowed through;
+		// any other out-of-range value would silently corrupt downstream
+		// calibration_bias_delta and tutor_mode_override logic.
+		for _, c := range []struct {
+			field string
+			value int
+		}{
+			{"energy", params.Energy},
+			{"confidence", params.Confidence},
+			{"satisfaction", params.Satisfaction},
+			{"perceived_difficulty", params.PerceivedDifficulty},
+			{"next_session_intent", params.NextSessionIntent},
+		} {
+			if err := validateLikertInt(c.field, c.value, 1, 4); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		affect := &models.AffectState{
 			LearnerID:           learnerID,
 			SessionID:           params.SessionID,
