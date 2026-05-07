@@ -6,7 +6,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 
 	"tutor-mcp/assets"
 	"tutor-mcp/auth"
@@ -14,6 +13,18 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// openAppOutput inlines the OLMGraph and adds two iframe-only fields:
+// _session_token (short-lived JWT for /api/v1/* requests) and _api_base
+// (absolute URL prefix for fetch). Embedding the OLMGraph pointer keeps
+// the wire shape byte-equivalent to the typed-struct version that worked
+// before — the Anthropic Proxy validates structuredContent strictly and
+// rejected the previous map[string]any round-trip with -32600.
+type openAppOutput struct {
+	*engine.OLMGraph
+	SessionToken string `json:"_session_token,omitempty"`
+	APIBase      string `json:"_api_base,omitempty"`
+}
 
 // OpenAppParams is the input shape for open_app and its legacy alias open_cockpit.
 type OpenAppParams struct {
@@ -80,30 +91,23 @@ func openAppHandler(deps *Deps) func(context.Context, *mcp.CallToolRequest, Open
 		sessionToken, jwtErr := auth.GenerateJWT(deps.BaseURL, learnerID)
 		if jwtErr != nil {
 			deps.Logger.Error("open_app: jwt issue", "err", jwtErr)
-			// Continue without — iframe will show "auth missing" and fall
-			// back gracefully.
+			// Continue without — iframe will degrade gracefully.
 		}
-
-		// Merge token + api_base into the graph payload as extra top-level
-		// fields. Marshal the OLMGraph to a map, inject, then pass to
-		// structuredContent.
-		out := map[string]any{}
-		if b, err2 := json.Marshal(graph); err2 == nil {
-			_ = json.Unmarshal(b, &out)
+		out := &openAppOutput{
+			OLMGraph:     graph,
+			SessionToken: sessionToken,
+			APIBase:      deps.BaseURL,
 		}
-		if sessionToken != "" {
-			out["_session_token"] = sessionToken
-		}
-		out["_api_base"] = deps.BaseURL
 
 		// Text fallback for clients without MCP Apps support — reuses the
 		// webhook formatter so cockpit and webhook show the same prose.
 		fallback := engine.FormatOLMEmbed(graph.OLMSnapshot)
 
-		r, _ := jsonResult(out)
-		r.Content = []mcp.Content{&mcp.TextContent{Text: fallback.Description}}
-		r.Meta = appUIMeta()
-		return r, nil, nil
+		return &mcp.CallToolResult{
+			Content:           []mcp.Content{&mcp.TextContent{Text: fallback.Description}},
+			StructuredContent: out,
+			Meta:              appUIMeta(),
+		}, nil, nil
 	}
 }
 
