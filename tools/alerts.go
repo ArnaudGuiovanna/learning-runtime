@@ -33,27 +33,50 @@ func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, 20)
 		sessionStart, _ := deps.Store.GetSessionStart(learnerID)
 
-		// Filter to domain concepts if domain specified
-		domain, domainErr := resolveDomain(deps.Store, learnerID, params.DomainID)
-		if domainErr == nil && domain != nil {
-			domainConcepts := make(map[string]bool)
+		// Resolve which domain(s) constrain this alert computation. The
+		// README contract for the Alert Engine is that orphan concept
+		// history (states/interactions on concepts no longer in any
+		// active domain — e.g. survivors of a deleted domain) must NEVER
+		// surface as alerts. Mirrors the multi-domain filter pattern in
+		// get_cockpit_state.
+		if params.DomainID != "" {
+			// Single-domain branch: explicit domain_id given, scope to
+			// that domain's concepts (or refuse if the lookup fails or
+			// the domain doesn't belong to this learner).
+			domain, domainErr := resolveDomain(deps.Store, learnerID, params.DomainID)
+			if domainErr != nil || domain == nil {
+				deps.Logger.Error("get_pending_alerts: domain not found", "err", domainErr, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			domainConcepts := make(map[string]bool, len(domain.Graph.Concepts))
 			for _, c := range domain.Graph.Concepts {
 				domainConcepts[c] = true
 			}
-			var filteredStates []*models.ConceptState
-			for _, cs := range states {
-				if domainConcepts[cs.Concept] {
-					filteredStates = append(filteredStates, cs)
+			states = filterStatesByConcepts(states, domainConcepts)
+			interactions = filterInteractionsByConcepts(interactions, domainConcepts)
+		} else {
+			// No domain_id given: compute alerts over the union of
+			// concepts across all non-archived domains. If the learner
+			// has zero active domains, return a clean empty payload with
+			// needs_domain_setup so the LLM can self-correct.
+			activeDomains, _ := deps.Store.GetDomainsByLearner(learnerID, false)
+			if len(activeDomains) == 0 {
+				r, _ := jsonResult(map[string]interface{}{
+					"alerts":             []models.Alert{},
+					"has_critical":       false,
+					"needs_domain_setup": true,
+				})
+				return r, nil, nil
+			}
+			activeConcepts := make(map[string]bool)
+			for _, d := range activeDomains {
+				for _, c := range d.Graph.Concepts {
+					activeConcepts[c] = true
 				}
 			}
-			var filteredInteractions []*models.Interaction
-			for _, i := range interactions {
-				if domainConcepts[i.Concept] {
-					filteredInteractions = append(filteredInteractions, i)
-				}
-			}
-			states = filteredStates
-			interactions = filteredInteractions
+			states = filterStatesByConcepts(states, activeConcepts)
+			interactions = filterInteractionsByConcepts(interactions, activeConcepts)
 		}
 
 		alerts := engine.ComputeAlerts(states, interactions, sessionStart)
@@ -70,8 +93,9 @@ func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 		}
 
 		r, _ := jsonResult(map[string]interface{}{
-			"alerts":       alerts,
-			"has_critical": hasCritical,
+			"alerts":             alerts,
+			"has_critical":       hasCritical,
+			"needs_domain_setup": false,
 		})
 		return r, nil, nil
 	})
