@@ -41,6 +41,13 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Validate concept membership before any sampling / persistence —
+		// rejects hallucinated or stale concept names early (issue #23).
+		if err := validateConceptInDomain(domain, params.Concept); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
 		chatMode, _ := deps.Store.GetChatModeEnabled(learnerID)
 
 		evalSystem := "Tu évalues une réponse d'apprenant. Retourne strictement un JSON: {\"correct\": bool, \"explanation\": string, \"error_type\"?: string}. Pas de texte hors JSON."
