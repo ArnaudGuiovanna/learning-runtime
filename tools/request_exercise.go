@@ -36,6 +36,8 @@ func registerRequestExercise(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		chatMode, _ := deps.Store.GetChatModeEnabled(learnerID)
+
 		activity, err := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
 			LearnerID: learnerID,
 			DomainID:  domain.ID,
@@ -74,6 +76,18 @@ func registerRequestExercise(server *mcp.Server, deps *Deps) {
 		}
 		if isFallback {
 			out["mode"] = "fallback_b"
+		}
+
+		if chatMode {
+			// Chat-mode: return text-only payload. Host has no UI shape to
+			// render; the LLM speaks the exercise in chat using activity.PromptForLLM.
+			textOut := map[string]any{
+				"chat_mode": true,
+				"activity":  activity, // includes prompt_for_llm
+				"domain_id": domain.ID,
+			}
+			r, _ := textOnlyResult(textOut)
+			return r, nil, nil // nil structuredContent on purpose
 		}
 
 		r, _ := jsonResult(out)

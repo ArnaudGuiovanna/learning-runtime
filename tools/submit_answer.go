@@ -41,6 +41,8 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		chatMode, _ := deps.Store.GetChatModeEnabled(learnerID)
+
 		evalSystem := "Tu évalues une réponse d'apprenant. Retourne strictement un JSON: {\"correct\": bool, \"explanation\": string, \"error_type\"?: string}. Pas de texte hors JSON."
 		evalUser := fmt.Sprintf("Concept: %s. Type d'activité: %s. Réponse de l'apprenant: %s", params.Concept, params.ActivityType, params.Answer)
 
@@ -54,6 +56,11 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 		if evalErr != nil {
 			out["mode"] = "fallback_b"
 			out["parsed_failed"] = true
+			if chatMode {
+				out["chat_mode"] = true
+				r, _ := textOnlyResult(out)
+				return r, nil, nil // nil structuredContent on purpose
+			}
 			r, _ := jsonResult(out)
 			return r, out, nil
 		}
@@ -85,6 +92,12 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 		out["explanation"] = eval.Explanation
 		if eval.ErrorType != "" {
 			out["error_type"] = eval.ErrorType
+		}
+
+		if chatMode {
+			out["chat_mode"] = true
+			r, _ := textOnlyResult(out)
+			return r, nil, nil // nil structuredContent on purpose
 		}
 
 		r, _ := jsonResult(out)

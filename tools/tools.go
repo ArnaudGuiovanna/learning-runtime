@@ -92,6 +92,15 @@ func errorResult(msg string) (*mcp.CallToolResult, error) {
 	}, nil
 }
 
+// textOnlyResult marshals v to JSON and returns a result with no StructuredContent.
+// Use this in chat-mode paths where the host should not render an iframe UI shape.
+func textOnlyResult(v interface{}) (*mcp.CallToolResult, error) {
+	data, _ := json.MarshalIndent(v, "", "  ")
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil
+}
+
 // RegisterTools registers all MCP tools and prompts on the given server.
 func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerGetPendingAlerts(server, deps)
@@ -127,6 +136,7 @@ func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerQueueWebhookMessage(server, deps)
 	registerRequestExercise(server, deps)
 	registerSubmitAnswer(server, deps)
+	registerSetChatMode(server, deps)
 	// [1] GoalDecomposer — gated by REGULATION_GOAL=on. When off, neither
 	// tool is registered, so the surface is invisible to the LLM and the
 	// system prompt has no instruction to call them.

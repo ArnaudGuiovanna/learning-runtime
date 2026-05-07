@@ -121,3 +121,29 @@ func TestSubmitAnswer_MalformedTwice_FallbackB(t *testing.T) {
 		t.Fatalf("expected parsed_failed=true, got %v", out["parsed_failed"])
 	}
 }
+
+func TestSubmitAnswer_ChatMode_TextOnly(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.30
+	_ = store.InsertConceptStateIfNotExists(cs)
+	_ = store.UpsertConceptState(cs)
+	_ = store.SetChatModeEnabled("L_owner", true)
+
+	res := callToolWithSampling(t, deps, registerSubmitAnswer, "L_owner",
+		"submit_answer",
+		map[string]any{"answer": "42", "concept": "a", "activity_type": "PRACTICE", "domain_id": d.ID},
+		`{"correct": true, "explanation": "ok"}`,
+	)
+	if res.IsError {
+		t.Fatalf("errored: %s", resultText(res))
+	}
+	if res.StructuredContent != nil {
+		t.Fatalf("expected nil StructuredContent in chat mode, got %v", res.StructuredContent)
+	}
+	out := decodeResult(t, res)
+	if out["chat_mode"] != true {
+		t.Fatalf("expected chat_mode=true, got %v", out["chat_mode"])
+	}
+}

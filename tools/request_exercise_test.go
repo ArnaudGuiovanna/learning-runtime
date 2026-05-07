@@ -75,3 +75,34 @@ func TestRequestExercise_SamplingUnsupported_FallbackB(t *testing.T) {
 		t.Fatalf("did not expect text field in fallback, got %v", ex["text"])
 	}
 }
+
+func TestRequestExercise_ChatMode_TextOnly(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.30
+	_ = store.InsertConceptStateIfNotExists(cs)
+	_ = store.UpsertConceptState(cs)
+
+	if err := store.SetChatModeEnabled("L_owner", true); err != nil {
+		t.Fatalf("SetChatModeEnabled: %v", err)
+	}
+
+	res := callToolWithSampling(t, deps, registerRequestExercise, "L_owner",
+		"request_exercise",
+		map[string]any{"domain_id": d.ID},
+		"Voici un exercice.",
+	)
+	if res.IsError {
+		t.Fatalf("request_exercise errored: %s", resultText(res))
+	}
+	// In chat mode, structuredContent must NOT be set — the host should
+	// not render the iframe; the LLM speaks the exercise in chat.
+	if res.StructuredContent != nil {
+		t.Fatalf("expected nil StructuredContent in chat mode, got %v", res.StructuredContent)
+	}
+	out := decodeResult(t, res) // text-content JSON
+	if out["chat_mode"] != true {
+		t.Fatalf("expected chat_mode=true in text payload, got %v", out["chat_mode"])
+	}
+}
