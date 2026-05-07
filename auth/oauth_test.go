@@ -320,3 +320,40 @@ func TestAuthorizePost_CSRFMatch_InvalidCreds(t *testing.T) {
 		t.Fatalf("status = %d, want 401 for invalid creds", rec.Code)
 	}
 }
+
+// ─── refresh_token grant: client authentication required (issue #30) ────────
+
+// TestRefreshTokenGrant_RejectsMissingClientID locks down the RFC 6749 §6
+// requirement: a refresh_token grant must authenticate the client. A POST to
+// /token with a valid refresh_token but no client_id (and no Basic auth) must
+// be rejected with 401 invalid_client. Previously the handler bypassed
+// verifyClientAuth when client_id was empty, allowing any holder of a stolen
+// refresh token to mint new access/refresh tokens with no client identity.
+func TestRefreshTokenGrant_RejectsMissingClientID(t *testing.T) {
+	s, store := newTestServer(t)
+	learnerID := seedLearner(t, store, "rt-noclient@example.com", "pw")
+	rt, err := store.CreateRefreshToken(learnerID)
+	if err != nil {
+		t.Fatalf("seed refresh token: %v", err)
+	}
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {rt.Token},
+	}
+	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.HandleToken(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 invalid_client when client_id is omitted, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_client") {
+		t.Fatalf("body missing invalid_client: %q", rec.Body.String())
+	}
+	// And the refresh token must NOT have been rotated/consumed.
+	if _, err := store.GetRefreshToken(rt.Token); err != nil {
+		t.Fatalf("refresh token must remain valid after rejected request: %v", err)
+	}
+}
