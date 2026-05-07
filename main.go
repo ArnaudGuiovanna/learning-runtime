@@ -132,8 +132,14 @@ func main() {
 
 	// Wrap with recovery + request logging + security headers + CORS.
 	// Order: recovery outermost so panics in any inner middleware are caught.
+	// CORS: allow chat-side origins (claude.ai, baseURL) by exact match, AND
+	// MCP App iframe sandbox origins (https://<hex>.claudemcpcontent.com,
+	// https://*.anthropic.com) by suffix match — the iframe gets a unique
+	// per-conversation subdomain on those hosts. JWT auth is the security
+	// boundary on /api/v1/* so opening CORS to those iframe origins is safe.
 	handler := recoveryMiddleware(logger, requestLogger(logger, securityHeaders(baseURL, corsMiddleware(
 		[]string{"https://claude.ai", baseURL},
+		[]string{".claudemcpcontent.com", ".anthropic.com"},
 		mux,
 	))))
 
@@ -189,15 +195,27 @@ func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
+func corsMiddleware(allowedOrigins []string, allowedSuffixes []string, next http.Handler) http.Handler {
 	allowed := make(map[string]bool)
 	for _, o := range allowedOrigins {
 		allowed[o] = true
 	}
+	originAllowed := func(origin string) bool {
+		if allowed[origin] {
+			return true
+		}
+		for _, s := range allowedSuffixes {
+			if strings.HasSuffix(origin, s) {
+				return true
+			}
+		}
+		return false
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if allowed[origin] {
+		if originAllowed(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id")
