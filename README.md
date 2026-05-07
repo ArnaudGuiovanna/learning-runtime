@@ -10,7 +10,7 @@
 
 Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
-> Current release: **v0.3** — adds the regulation pipeline (BKT-aware action selector, KST-aware concept selector, gate controller, and a pure-FSM phase orchestrator). Active by default; the legacy router remains available as a kill switch via `REGULATION_PHASE=off`.
+> Current release: **v0.3** — the regulation pipeline (BKT-aware action selector, KST-aware concept selector, gate controller, and a pure-FSM phase orchestrator) is the single runtime engine; the legacy alert-and-router cascade has been retired.
 
 ## An Intelligent Tutoring System, not a chatbot
 
@@ -74,18 +74,18 @@ Five complementary learning-science algorithms run on every interaction and join
 | **PFA** (Performance Factor Analysis) | Weights success/failure history to predict performance on each concept. |
 | **KST** (Knowledge Space Theory) | Validates prerequisite graphs and gates new concepts on mastery of their ancestors. |
 
-## Regulation Pipeline (v0.3, behind feature flags)
+## Regulation Pipeline (v0.3)
 
-On top of the legacy alert-and-router engine, v0.3 introduces a seven-stage **regulation pipeline** — pure functions composed by an impure orchestrator — that lifts activity selection from a priority-ladder of alerts to an explicit **phase FSM** (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE) with information-theoretic concept selection and a hygiene gate. The pipeline is active by default; each stage exposes an opt-out flag for surgical rollback.
+The seven-stage **regulation pipeline** — pure functions composed by an impure orchestrator — drives activity selection through an explicit **phase FSM** (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE) with information-theoretic concept selection and a hygiene gate. It is the single runtime engine.
 
 | # | Stage | Status | What it does |
 |---|-------|--------|--------------|
 | **[7]** | Threshold Resolver (`algorithms/thresholds.go`) | **Shipped** (default-on) | Unifies the three historical mastery thresholds (BKT, KST gating, mid-curriculum) at 0.85. Kill switch: `REGULATION_THRESHOLD=off`. |
 | **[1]** | Goal Decomposer (`tools/goal_relevance.go`) | **Shipped** (default-on) | LLM-authored relevance vector over the concept graph; biases [4] toward goal-critical concepts. Kill switch: `REGULATION_GOAL=off`. |
-| **[5]** | Action Selector (`engine/action_selector.go`) | **Shipped** (default-on) | Picks the activity *type* for a chosen concept from BKT/IRT signals: `PRACTICE`, `DEBUG_MISCONCEPTION`, `FEYNMAN_PROMPT`, `TRANSFER_PROBE`, `RECALL_EXERCISE`, `MASTERY_CHALLENGE`. ZPD anchored at `IRT_θ + 0.847`. Kill switch: `REGULATION_ACTION=off` (drops only the system-prompt appendix; `REGULATION_PHASE=off` is what disables the runtime). |
+| **[5]** | Action Selector (`engine/action_selector.go`) | **Shipped** | Picks the activity *type* for a chosen concept from BKT/IRT signals: `PRACTICE`, `DEBUG_MISCONCEPTION`, `FEYNMAN_PROMPT`, `TRANSFER_PROBE`, `RECALL_EXERCISE`, `MASTERY_CHALLENGE`. ZPD anchored at `IRT_θ + 0.847`. The `REGULATION_ACTION=off` flag drops only the system-prompt appendix — the selector itself always runs. |
 | **[4]** | Concept Selector (`engine/concept_selector.go`) | **Shipped** (default-on) | Phase-aware concept choice: max-info-gain on the KST fringe (INSTRUCTION), most-overdue under FSRS (MAINTENANCE), max-binary-entropy untouched concept (DIAGNOSTIC). Kill switch: `REGULATION_CONCEPT=off` (prompt appendix only; same caveat). |
 | **[3]** | Gate Controller (`engine/gate.go`) | **Shipped** (default-on) | Hygiene gate that may override the selection: anti-repeat window (no concept repeated within last *N*=3 activities), 45-min session-budget escape (`CLOSE_SESSION`), no-fringe escape (`REST`). Kill switch: `REGULATION_GATE=off` (prompt appendix only). |
-| **[2]** | Phase Controller (`engine/orchestrator.go` + `engine/phase_fsm.go`) | **Shipped** (default-on) | Pure-FSM orchestrator wiring [4]→[5]→[3]. Transitions are observation-driven: DIAGNOSTIC→INSTRUCTION on entropy reduction *ΔH ≥ 0.2 bits* or *N ≥ 8* diagnostic items; INSTRUCTION→MAINTENANCE on full-graph mastery; MAINTENANCE→INSTRUCTION on FSRS retention drop. Kill switch: `REGULATION_PHASE=off` falls back to legacy `engine.Route`. |
+| **[2]** | Phase Controller (`engine/orchestrator.go` + `engine/phase_fsm.go`) | **Shipped** | Pure-FSM orchestrator wiring [4]→[5]→[3]. Transitions are observation-driven: DIAGNOSTIC→INSTRUCTION on entropy reduction *ΔH ≥ 0.2 bits* or *N ≥ 8* diagnostic items; INSTRUCTION→MAINTENANCE on full-graph mastery; MAINTENANCE→INSTRUCTION on FSRS retention drop. |
 | **[6]** | Fade Controller (`engine/fade_controller.go`) | **Shipped** (opt-in) | Pure post-decision module. Maps `autonomy_score` × `autonomy.Trend` to a 4-field handover bundle (`hint_level` ∈ {full, partial, none}, `webhook_frequency` ∈ {daily, weekly, off}, `zpd_aggressiveness` ∈ {gentle, normal, push}, `proactive_review_enabled` bool). Wired into the motivation brief to fade verbosity as autonomy rises. Opt-in via `REGULATION_FADE=on` (strict literal) — default OFF. Integration with the webhook scheduler and action selector is follow-up work tracked from `docs/regulation-design/06-fade-controller.md` §9. |
 
 The pure functions (`SelectAction`, `SelectConcept`, `ApplyGate`, `EvaluatePhase`) are individually unit-tested (~90 dedicated tests). The orchestrator is exercised by SQLite in-memory tests and migration safety tests for the new `domains.phase`, `domains.phase_changed_at`, `domains.phase_entry_entropy` columns.
@@ -96,14 +96,13 @@ The first six regulation flags are **active by default**. Setting any of them to
 
 `REGULATION_FADE` is the exception: it is the youngest pipeline component and its visible effects (verbosity reduction, webhook suppression) interact directly with the learner, so it ships **opt-in** — set the strict literal `on` to enable; any other value (unset, `ON`, `true`, `1`) leaves the fader off.
 
-Only three flags change the runtime (`REGULATION_THRESHOLD`, `REGULATION_PHASE`, `REGULATION_FADE`); the rest control the system-prompt appendix only. The appendix tells the LLM about the new activity types and routing semantics, but the actual selection logic ships behind `REGULATION_PHASE`.
+Two flags change the runtime (`REGULATION_THRESHOLD`, `REGULATION_FADE`); the rest control the system-prompt appendix only. The appendix tells the LLM about the new activity types and routing semantics, but the actual selection logic always runs.
 
 | Flag | Default | Effect when toggled away from default | Touches |
 |------|---------|---------------------------------------|---------|
 | `REGULATION_THRESHOLD` | on | Reverts to legacy split thresholds (BKT 0.85, KST 0.70, Mid 0.80). | runtime |
-| `REGULATION_PHASE` | on | Routes `get_next_activity` through the legacy `engine.Route` priority cascade instead of `engine.Orchestrate`. The orchestrator already auto-falls-back to legacy on internal error; this flag is the explicit operator override. | runtime |
 | `REGULATION_GOAL` | on | Hides `set_goal_relevance` / `get_goal_relevance` from the MCP tool list and drops the goal-aware system-prompt section. | runtime + prompt |
-| `REGULATION_ACTION` | on | Drops the action-selector appendix (the LLM no longer sees the new activity types documented). The selector itself keeps running under `REGULATION_PHASE`. | prompt only |
+| `REGULATION_ACTION` | on | Drops the action-selector appendix (the LLM no longer sees the new activity types documented). The selector itself keeps running. | prompt only |
 | `REGULATION_CONCEPT` | on | Drops the concept-selector appendix. Selector keeps running. | prompt only |
 | `REGULATION_GATE` | on | Drops the gate appendix. Gate keeps running. | prompt only |
 | `REGULATION_FADE` | **off** | **Opt-in** (the only opt-in flag). Set to the literal `on` to enable [6] FadeController: maps `autonomy_score` × trend to fade params (hint verbosity, webhook frequency, ZPD aggressiveness, proactive review). When on, the fader modulates the `motivation_brief` so that the more autonomous the learner, the terser (and ultimately silent) the brief becomes; the resulting `fade_params` are also surfaced in the `get_next_activity` JSON for downstream consumers. Strict equality with `on` — any other value (including `ON`, `true`, `1`) keeps the fader off. See `docs/regulation-design/06-fade-controller.md`. | runtime |
@@ -471,7 +470,7 @@ The figures below include a safety buffer (~50%) against the theoretical limits.
 - **SQLite** (via modernc.org/sqlite — pure Go, no CGO)
 - **JWT** for access tokens, bcrypt for passwords
 - **robfig/cron** for background scheduling
-- Wide test coverage across the five algorithms, the regulation pipeline (action / concept / gate / phase-FSM / orchestrator), legacy router and alert engine, motivation selection, misconception aggregation, OLM snapshots, goal-relevance staleness, and schema migrations
+- Wide test coverage across the five algorithms, the regulation pipeline (action / concept / gate / phase-FSM / orchestrator), the alert engine, motivation selection, misconception aggregation, OLM snapshots, goal-relevance staleness, and schema migrations
 
 ## Operations
 

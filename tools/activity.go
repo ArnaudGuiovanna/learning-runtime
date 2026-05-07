@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"tutor-mcp/algorithms"
 	"tutor-mcp/engine"
 	"tutor-mcp/models"
 
@@ -76,18 +75,11 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		// Compute alerts (only for domain concepts)
 		alerts := engine.ComputeAlerts(domainStates, domainInteractions, sessionStart)
 
-		// Build mastery map for KST frontier
+		// Mastery map for downstream consumers (motivation brief, etc.).
 		mastery := make(map[string]float64)
 		for _, cs := range domainStates {
 			mastery[cs.Concept] = cs.PMastery
 		}
-
-		// Compute frontier
-		graph := algorithms.KSTGraph{
-			Concepts:      domain.Graph.Concepts,
-			Prerequisites: domain.Graph.Prerequisites,
-		}
-		frontier := algorithms.ComputeFrontier(graph, mastery)
 
 		// Build set of concepts already practiced in this session
 		sessionConcepts := make(map[string]int)
@@ -97,50 +89,27 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		// Route to next activity (session-aware).
-		// Branchement [2] PhaseController : si REGULATION_PHASE=on,
-		// l'orchestrateur regulation prend la main ; sinon le router
-		// legacy reste en place (cohérent avec OQ-2.4 = no cache, le
-		// flag est lu à chaque appel).
-		var activity models.Activity
-		var routePath string
-		if regulationPhaseEnabled() {
-			orchActivity, orchErr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
-				LearnerID: learnerID,
-				DomainID:  domain.ID,
-				Now:       time.Now().UTC(),
-				Config:    engine.NewDefaultPhaseConfig(),
-			})
-			if orchErr != nil {
-				// Fallback gracieux : log + legacy. Évite de casser
-				// la session sur une erreur orchestrateur.
-				deps.Logger.Error("orchestrator failed, falling back to legacy router", "err", orchErr)
-				activity = engine.Route(alerts, frontier, domainStates, domainInteractions, sessionConcepts)
-				routePath = "legacy_fallback"
-			} else {
-				activity = orchActivity
-				routePath = "orchestrator"
-			}
-		} else {
-			activity = engine.Route(alerts, frontier, domainStates, domainInteractions, sessionConcepts)
-			routePath = "legacy"
+		// Route to next activity through the regulation pipeline.
+		activity, orchErr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
+			LearnerID: learnerID,
+			DomainID:  domain.ID,
+			Now:       time.Now().UTC(),
+			Config:    engine.NewDefaultPhaseConfig(),
+		})
+		if orchErr != nil {
+			deps.Logger.Error("orchestrator failed", "err", orchErr, "learner", learnerID, "domain", domain.ID)
+			r, _ := errorResult("could not compute next activity")
+			return r, nil, nil
 		}
+
 		// Pipeline decision audit — one line per get_next_activity call.
 		// Re-read domain to surface any phase transition the orchestrator
 		// just persisted (cheap; same DB connection).
-		var loggedPhase string
-		if regulationPhaseEnabled() {
-			if d, _ := deps.Store.GetDomainByID(domain.ID); d != nil {
-				loggedPhase = string(d.Phase)
-			}
-			if loggedPhase == "" {
-				loggedPhase = "INSTRUCTION" // orchestrator's NULL fallback
-			}
-		} else {
-			loggedPhase = "n/a"
+		loggedPhase := "INSTRUCTION" // orchestrator's NULL fallback
+		if d, _ := deps.Store.GetDomainByID(domain.ID); d != nil && d.Phase != "" {
+			loggedPhase = string(d.Phase)
 		}
 		deps.Logger.Info("pipeline decision",
-			"route", routePath,
 			"learner", learnerID,
 			"domain", domain.ID,
 			"phase", loggedPhase,

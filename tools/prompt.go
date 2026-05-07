@@ -31,18 +31,6 @@ func regulationGateEnabled() bool {
 	return os.Getenv("REGULATION_GATE") != "off"
 }
 
-// regulationPhaseEnabled toggles the [2] PhaseController orchestrator
-// in tools/activity.go. Default-on: get_next_activity routes through
-// engine.Orchestrate (FSM + Gate → ConceptSelector → ActionSelector).
-// Opt-out via REGULATION_PHASE=off — the legacy engine.Route remains
-// available as a kill switch for rollback. The orchestrator already
-// falls back to the legacy router automatically when it returns an
-// error (tools/activity.go); the flag is for explicit operator
-// override.
-func regulationPhaseEnabled() bool {
-	return os.Getenv("REGULATION_PHASE") != "off"
-}
-
 // regulationFadeEnabled toggles the [6] FadeController post-decision
 // module in tools/activity.go. Default-OFF — the fade controller is
 // the youngest pipeline component and its visible effects (verbosity

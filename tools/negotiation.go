@@ -50,9 +50,6 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 		}
 
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
-		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, 20)
-		sessionStart, _ := deps.Store.GetSessionStart(learnerID)
-		sessionInteractions, _ := deps.Store.GetSessionInteractions(learnerID)
 
 		domainConcepts := make(map[string]bool)
 		for _, c := range domain.Graph.Concepts {
@@ -64,32 +61,26 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 				domainStates = append(domainStates, cs)
 			}
 		}
-		var domainInteractions []*models.Interaction
-		for _, i := range interactions {
-			if domainConcepts[i.Concept] {
-				domainInteractions = append(domainInteractions, i)
-			}
-		}
 
-		alerts := engine.ComputeAlerts(domainStates, domainInteractions, sessionStart)
 		mastery := make(map[string]float64)
 		for _, cs := range domainStates {
 			mastery[cs.Concept] = cs.PMastery
 		}
-		graph := algorithms.KSTGraph{
-			Concepts:      domain.Graph.Concepts,
-			Prerequisites: domain.Graph.Prerequisites,
-		}
-		frontier := algorithms.ComputeFrontier(graph, mastery)
 
-		sessionConcepts := make(map[string]int)
-		for _, i := range sessionInteractions {
-			if domainConcepts[i.Concept] {
-				sessionConcepts[i.Concept]++
-			}
+		// Same orchestrator path as get_next_activity, so the system_plan
+		// shown to the learner during negotiation matches what would be
+		// served on the next activity request.
+		systemActivity, orchErr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
+			LearnerID: learnerID,
+			DomainID:  domain.ID,
+			Now:       time.Now().UTC(),
+			Config:    engine.NewDefaultPhaseConfig(),
+		})
+		if orchErr != nil {
+			deps.Logger.Error("learning_negotiation: orchestrator failed", "err", orchErr, "learner", learnerID)
+			r, _ := errorResult("could not compute system plan")
+			return r, nil, nil
 		}
-
-		systemActivity := engine.Route(alerts, frontier, domainStates, domainInteractions, sessionConcepts)
 
 		result := map[string]interface{}{
 			"system_plan": map[string]interface{}{

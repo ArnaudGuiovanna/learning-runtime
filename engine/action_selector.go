@@ -14,15 +14,10 @@
 // and [3] respectively. This isolation is contractual: SelectConcept
 // can change without affecting SelectAction.
 //
-// Wired into the runtime by engine.Orchestrate (see orchestrator.go),
-// which is the path taken by tools/activity.go when REGULATION_PHASE
-// is not "off" (default-on). The standalone REGULATION_ACTION flag
-// only toggles the system-prompt documentation appendix in
-// tools/prompt.go — the selector itself runs as part of the
-// orchestrator regardless. The legacy engine.Route does NOT call
-// SelectAction; it only runs when REGULATION_PHASE=off or when the
-// orchestrator returns an error and the auto-fallback in
-// tools/activity.go kicks in.
+// Wired into the runtime by engine.Orchestrate (see orchestrator.go).
+// The standalone REGULATION_ACTION flag only toggles the system-prompt
+// documentation appendix in tools/prompt.go — the selector itself runs
+// as part of the orchestrator regardless.
 package engine
 
 import (
@@ -292,8 +287,7 @@ func selectHighMasteryAction(history ActionHistory) Action {
 // zpdDifficultyFromTheta maps IRT theta to a DifficultyTarget that
 // targets pCorrect ≈ 0.70 in a 2PL model with discrimination a=1, then
 // maps the latent difficulty to [0,1] via the logistic and clamps to
-// the [0.30, 0.85] envelope (consistent with the legacy router's
-// difficulty range).
+// the [0.30, 0.85] envelope.
 //
 // The clamp prevents two failure modes:
 //   - very low θ producing a near-zero target (boredom / floor effect)

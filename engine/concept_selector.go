@@ -15,12 +15,10 @@
 // LLM-driven decomposition contract. If the LLM's decomposition is
 // wrong (or absent), [4] reveals it: routing is observably degraded.
 //
-// Wired into the runtime by engine.Orchestrate (see orchestrator.go),
-// which is the path taken by tools/activity.go when REGULATION_PHASE
-// is not "off" (default-on). The standalone REGULATION_CONCEPT flag
-// only toggles the system-prompt documentation appendix in
-// tools/prompt.go — the selector itself runs as part of the
-// orchestrator regardless.
+// Wired into the runtime by engine.Orchestrate (see orchestrator.go).
+// The standalone REGULATION_CONCEPT flag only toggles the system-prompt
+// documentation appendix in tools/prompt.go — the selector itself runs
+// as part of the orchestrator regardless.
 package engine
 
 import (

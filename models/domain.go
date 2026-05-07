@@ -55,17 +55,14 @@ const (
 	ActivitySetupDomain      ActivityType = "SETUP_DOMAIN"
 
 	// Activity types emitted by [5] ActionSelector (engine/action_selector.go).
-	// Available in the enum unconditionally so the type system stays sound;
-	// they are only produced at runtime once REGULATION_ACTION wires
-	// SelectAction into the legacy router (deferred to PR [2]).
 	//
 	// ActivityDebugMisconception is intentionally distinct from
 	// ActivityDebuggingCase: the latter is a *plateau-breaking* rotation
 	// of varied formats ("debugging" / "real_world_case" /
-	// "teaching_exercise" / "creative_application" — engine/router.go),
-	// while DebugMisconception is a *targeted* confrontation of one
-	// specific active misconception detected on the concept. Different
-	// pedagogical intent, different downstream LLM handling.
+	// "teaching_exercise" / "creative_application"), while
+	// DebugMisconception is a *targeted* confrontation of one specific
+	// active misconception detected on the concept. Different pedagogical
+	// intent, different downstream LLM handling.
 	ActivityPractice           ActivityType = "PRACTICE"
 	ActivityDebugMisconception ActivityType = "DEBUG_MISCONCEPTION"
 	ActivityFeynmanPrompt      ActivityType = "FEYNMAN_PROMPT"
@@ -77,17 +74,11 @@ const (
 	//
 	//   - ActivityRest        = pause INTRA-session. The learner will
 	//                            continue the same session afterwards.
-	//                            Used by the legacy router on OVERLOAD
-	//                            today, but only as a soft suggestion.
 	//   - ActivityCloseSession = forced END of session. The pipeline
 	//                            short-circuits — no further activity
 	//                            is selected. The LLM is expected to
 	//                            emit recap_brief and call
 	//                            record_session_close.
-	//
-	// Available in the enum unconditionally so the type system stays
-	// sound; only produced at runtime once REGULATION_GATE wires
-	// ApplyGate into the legacy router (deferred to PR [2]).
 	ActivityCloseSession ActivityType = "CLOSE_SESSION"
 )
 

@@ -643,3 +643,92 @@ func TestApplyGate_RespectsMasteryKSTAccessor_Legacy(t *testing.T) {
 	r, _ := ApplyGate(in)
 	containsAll(t, r.AllowedConcepts, []string{"Basics", "Adv"})
 }
+
+// ─── Issue #16 — FORGETTING-Critical priority filter ───────────────────────
+//
+// When at least one AlertForgetting with Urgency=Critical references a
+// concept that survives prereq+anti-rep, the gate restricts AllowedConcepts
+// to those critical-forgetting concepts only. [4]/[5] keep their normal
+// contracts; [5]'s retention branch naturally produces RECALL_EXERCISE.
+
+func TestApplyGate_ForgettingCritical_RestrictsPoolToForgettingConcepts(t *testing.T) {
+	// Reproduces issue #16 scenario: phase=INSTRUCTION, concept X has
+	// retention<0.30 and goal_relevance high but mastery=0.55 (lower
+	// (1-mastery) score than newer concept A). Without the fix, [4]
+	// argmax(rel × (1-mastery)) picks A. With the fix, the gate
+	// restricts the pool to {X} so [4] is forced to pick it.
+	in := GateInput{
+		Phase:    models.PhaseInstruction,
+		Concepts: []string{"A", "X"},
+		States:   statesMap(gateCS("A", 0.10), gateCS("X", 0.55)),
+		Graph:    graph([]string{"A", "X"}, nil),
+		Alerts: []models.Alert{
+			{Type: models.AlertForgetting, Concept: "X", Urgency: models.UrgencyCritical, Retention: 0.20},
+		},
+	}
+	r, err := ApplyGate(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.EscapeAction != nil {
+		t.Fatalf("expected allow result, got escape %+v", r.EscapeAction)
+	}
+	if r.NoCandidate {
+		t.Fatalf("expected allow result, got NoCandidate")
+	}
+	containsAll(t, r.AllowedConcepts, []string{"X"})
+	containsNone(t, r.AllowedConcepts, []string{"A"})
+}
+
+func TestApplyGate_ForgettingWarning_DoesNotRestrictPool(t *testing.T) {
+	// Only Critical urgency triggers the restriction; Warning leaves
+	// the normal pool semantics in place.
+	in := GateInput{
+		Phase:    models.PhaseInstruction,
+		Concepts: []string{"A", "X"},
+		States:   statesMap(gateCS("A", 0.10), gateCS("X", 0.55)),
+		Graph:    graph([]string{"A", "X"}, nil),
+		Alerts: []models.Alert{
+			{Type: models.AlertForgetting, Concept: "X", Urgency: models.UrgencyWarning, Retention: 0.40},
+		},
+	}
+	r, _ := ApplyGate(in)
+	containsAll(t, r.AllowedConcepts, []string{"A", "X"})
+}
+
+func TestApplyGate_ForgettingCritical_FilteredByPrereq_NoRestriction(t *testing.T) {
+	// X has unsatisfied prereq → filtered out by rule 2. No critical
+	// concept survives, so the restriction does not kick in and A
+	// remains in the pool.
+	g := graph([]string{"A", "Basics", "X"}, map[string][]string{"X": {"Basics"}})
+	in := GateInput{
+		Phase:    models.PhaseInstruction,
+		Concepts: g.Concepts,
+		States:   statesMap(gateCS("A", 0.10), gateCS("Basics", 0.10), gateCS("X", 0.55)),
+		Graph:    g,
+		Alerts: []models.Alert{
+			{Type: models.AlertForgetting, Concept: "X", Urgency: models.UrgencyCritical, Retention: 0.20},
+		},
+	}
+	r, _ := ApplyGate(in)
+	containsAll(t, r.AllowedConcepts, []string{"A", "Basics"})
+	containsNone(t, r.AllowedConcepts, []string{"X"})
+}
+
+func TestApplyGate_ForgettingCritical_OverloadStillWins(t *testing.T) {
+	// OVERLOAD escape priority is preserved (rule 3 stays at priority 1).
+	in := GateInput{
+		Phase:    models.PhaseInstruction,
+		Concepts: []string{"A", "X"},
+		States:   statesMap(gateCS("A", 0.10), gateCS("X", 0.55)),
+		Graph:    graph([]string{"A", "X"}, nil),
+		Alerts: []models.Alert{
+			{Type: models.AlertOverload},
+			{Type: models.AlertForgetting, Concept: "X", Urgency: models.UrgencyCritical, Retention: 0.20},
+		},
+	}
+	r, _ := ApplyGate(in)
+	if r.EscapeAction == nil {
+		t.Fatalf("expected OVERLOAD escape, got allow %+v", r.AllowedConcepts)
+	}
+}

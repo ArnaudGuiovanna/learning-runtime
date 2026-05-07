@@ -13,12 +13,12 @@ import (
 
 // TestMigration_PreExistingDomain_StaysInInstruction confirms the
 // backward-compat invariant of OQ-2.1.b : a domain created before
-// REGULATION_PHASE was activated has phase=NULL in the DB ; after
-// the flag is promoted, Orchestrate must read it as PhaseInstruction
-// (no rétroactive bascule to DIAGNOSTIC).
+// the regulation pipeline existed has phase=NULL in the DB and must
+// be read by Orchestrate as PhaseInstruction (no retroactive bascule
+// to DIAGNOSTIC).
 func TestMigration_PreExistingDomain_StaysInInstruction(t *testing.T) {
 	store := setupOrchStore(t)
-	// Simulate "pre-flag" creation : seed without setting a phase.
+	// Simulate "pre-pipeline" creation : seed without setting a phase.
 	domainID := seedOrchDomain(t, store, []string{"A", "B"}, nil, "" /* phase NULL */)
 	setGoalRelevance(t, store, domainID, map[string]float64{"A": 0.5, "B": 0.5})
 

@@ -196,9 +196,4 @@ journalctl --user -u tutor-mcp-backup --since "today"
 # Restart after binary change
 go build -o tutor-mcp .
 systemctl --user restart tutor-mcp
-
-# Kill switch — disable the v0.3 regulation pipeline at the next boot
-echo 'Environment=REGULATION_PHASE=off' >> ~/.config/systemd/user/tutor-mcp.service
-systemctl --user daemon-reload
-systemctl --user restart tutor-mcp
 ```

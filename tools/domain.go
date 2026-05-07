@@ -163,24 +163,20 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		// [2] PhaseController — initialise le domaine en DIAGNOSTIC quand
-		// REGULATION_PHASE=on (OQ-2.1.b). Les concept_states viennent
-		// d'être créés à PMastery=0.1 — l'entropie d'entrée est
-		// calculable maintenant. Domaines créés flag-off restent en
-		// phase NULL → INSTRUCTION fallback.
-		if regulationPhaseEnabled() {
-			states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
-			stateMap := map[string]*models.ConceptState{}
-			for _, cs := range states {
-				stateMap[cs.Concept] = cs
-			}
-			entryEntropy := engine.MeanBinaryEntropyOverGraph(domain.Graph, stateMap)
-			if err := deps.Store.UpdateDomainPhase(domain.ID, models.PhaseDiagnostic, entryEntropy, time.Now().UTC()); err != nil {
-				deps.Logger.Error("init_domain: failed to set initial phase",
-					"err", err, "domain", domain.ID)
-				// Non-fatal: domain reste en phase NULL → INSTRUCTION
-				// fallback. La régulation continue à fonctionner.
-			}
+		// [2] PhaseController — initialise le domaine en DIAGNOSTIC.
+		// Les concept_states viennent d'être créés à PMastery=0.1 —
+		// l'entropie d'entrée est calculable maintenant.
+		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
+		stateMap := map[string]*models.ConceptState{}
+		for _, cs := range states {
+			stateMap[cs.Concept] = cs
+		}
+		entryEntropy := engine.MeanBinaryEntropyOverGraph(domain.Graph, stateMap)
+		if err := deps.Store.UpdateDomainPhase(domain.ID, models.PhaseDiagnostic, entryEntropy, time.Now().UTC()); err != nil {
+			deps.Logger.Error("init_domain: failed to set initial phase",
+				"err", err, "domain", domain.ID)
+			// Non-fatal: domain reste en phase NULL → INSTRUCTION
+			// fallback. La régulation continue à fonctionner.
 		}
 
 		response := map[string]interface{}{

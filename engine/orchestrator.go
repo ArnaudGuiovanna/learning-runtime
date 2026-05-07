@@ -4,8 +4,8 @@
 
 // Package engine — [2] PhaseController orchestrator (runtime).
 //
-// Orchestrate is the runtime entry point for the regulation pipeline
-// when REGULATION_PHASE=on. It :
+// Orchestrate is the runtime entry point for the regulation pipeline.
+// It :
 //
 //  1. Reads the current phase from the store (NULL → INSTRUCTION
 //     fallback per OQ-2.1.b).

@@ -16,11 +16,10 @@
 // slog.Info on the misconception+unsatisfied-prereqs pathological case
 // (cf. OQ-3.5 sub-b — surfaced for statistical analysis, not blocked).
 //
-// Wired into the runtime by engine.Orchestrate (see orchestrator.go),
-// which is the path taken by tools/activity.go when REGULATION_PHASE
-// is not "off" (default-on). The standalone REGULATION_GATE flag only
-// toggles the system-prompt documentation appendix in tools/prompt.go;
-// the gate itself runs as part of the orchestrator regardless.
+// Wired into the runtime by engine.Orchestrate (see orchestrator.go).
+// The standalone REGULATION_GATE flag only toggles the system-prompt
+// documentation appendix in tools/prompt.go; the gate itself runs as
+// part of the orchestrator regardless.
 package engine
 
 import (
@@ -285,6 +284,42 @@ func ApplyGate(input GateInput) (GateResult, error) {
 		return newNoCandidateResult("tous candidats filtres par prereq/anti-rep"), nil
 	}
 
+	// ── Rule 5 — FORGETTING-Critical priority filter (issue #16) ───────
+	//
+	// If at least one AlertForgetting with Urgency=Critical references
+	// a concept that survived prereq+anti-rep, restrict the pool to
+	// those critical-forgetting concepts only. Mirrors the legacy
+	// router's priority-1 RECALL bypass at the pool level: [4] and [5]
+	// keep their normal contracts ([5]'s retention branch will produce
+	// RECALL_EXERCISE naturally for these concepts).
+	//
+	// Conceptual priority: between OVERLOAD (rule 3) and the per-concept
+	// misconception action lock (rule 1). Executed here because the
+	// "survives" condition needs the post-prereq+anti-rep pool.
+	//
+	// If no critical-forgetting concept survived (all were filtered by
+	// prereq or none was alerted Critical), the rule is a no-op and the
+	// normal pool semantics apply.
+	criticalForgettingSet := map[string]bool{}
+	for _, a := range input.Alerts {
+		if a.Type == models.AlertForgetting && a.Urgency == models.UrgencyCritical {
+			criticalForgettingSet[a.Concept] = true
+		}
+	}
+	forgettingRestrictionFired := false
+	if len(criticalForgettingSet) > 0 {
+		var restricted []string
+		for _, c := range finalCandidates {
+			if criticalForgettingSet[c] {
+				restricted = append(restricted, c)
+			}
+		}
+		if len(restricted) > 0 {
+			finalCandidates = restricted
+			forgettingRestrictionFired = true
+		}
+	}
+
 	// ── Rule 1 — misconception action lock ─────────────────────────────
 	//
 	// Per concept with an active misconception in the final pool,
@@ -302,6 +337,9 @@ func ApplyGate(input GateInput) (GateResult, error) {
 	rationale := fmt.Sprintf(
 		"%d candidats apres prereq+anti-rep (window effective=%d) ; %d sous restriction misconception",
 		len(finalCandidates), n, len(restrictions))
+	if forgettingRestrictionFired {
+		rationale += " ; pool restreint aux concepts FORGETTING-Critical (issue #16)"
+	}
 	return newAllowResult(finalCandidates, restrictions, rationale), nil
 }
 
