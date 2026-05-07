@@ -21,8 +21,7 @@ type RequestExerciseParams struct {
 func registerRequestExercise(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "request_exercise",
-		Description: "Génère et présente le prochain exercice dans l'iframe du Tutor MCP. Appelle l'orchestrateur pour choisir un concept + un type d'activité, puis demande au LLM hôte (sampling) l'énoncé. Retourne un payload structuredContent {screen:'exercise', ...}.",
-		Meta:        appUIMeta(),
+		Description: "Génère le prochain exercice. Appelle l'orchestrateur pour choisir un concept + un type d'activité, puis demande au LLM hôte (sampling) l'énoncé. Retourne un payload structuredContent {screen:'exercise', ...}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RequestExerciseParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -35,8 +34,6 @@ func registerRequestExercise(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult("domain not found")
 			return r, nil, nil
 		}
-
-		chatMode, _ := deps.Store.GetChatModeEnabled(learnerID)
 
 		activity, err := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
 			LearnerID: learnerID,
@@ -76,18 +73,6 @@ func registerRequestExercise(server *mcp.Server, deps *Deps) {
 		}
 		if isFallback {
 			out["mode"] = "fallback_b"
-		}
-
-		if chatMode {
-			// Chat-mode: return text-only payload. Host has no UI shape to
-			// render; the LLM speaks the exercise in chat using activity.PromptForLLM.
-			textOut := map[string]any{
-				"chat_mode": true,
-				"activity":  activity, // includes prompt_for_llm
-				"domain_id": domain.ID,
-			}
-			r, _ := textOnlyResult(textOut)
-			return r, nil, nil // nil structuredContent on purpose
 		}
 
 		r, _ := jsonResult(out)

@@ -49,7 +49,7 @@ const (
 //
 // Rules (in order):
 //   - nil OR CardState == "new"             → NotStarted
-//   - PMastery >= MasteryKST() (0.70 legacy / 0.85 unified) → Solid
+//   - PMastery >= MasteryKST() (unified 0.85 threshold) → Solid
 //   - PMastery < 0.30                        → Fragile
 //   - retention(elapsed, stability) < 0.50   → Fragile
 //   - otherwise                              → InProgress

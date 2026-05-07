@@ -290,16 +290,16 @@ func TestSelectAction_NilState_FallsBackToRest(t *testing.T) {
 
 // ─── MasteryBKT accessor (no literal 0.85 in code) ─────────────────────────
 
-func TestSelectAction_RespectsMasteryBKTAccessor_Legacy(t *testing.T) {
+func TestSelectAction_RespectsMasteryBKTAccessor(t *testing.T) {
 	t.Setenv("REGULATION_THRESHOLD", "off")
-	// Legacy still resolves MasteryBKT()=0.85 (unification picked the same
-	// value); this test asserts the accessor is invoked, not the literal.
-	// p=0.84 sits in the practice_zpd branch under both profiles.
+	// MasteryBKT() resolves to the unified 0.85 threshold; this test asserts
+	// the accessor is invoked, not the literal. p=0.84 sits in the
+	// practice_zpd branch.
 	cs := reviewedConceptState("Concept", 0.84)
 	cs.Theta = 1.0
 	a := SelectAction("Concept", cs, nil, ActionHistory{InteractionsAboveBKT: 5})
 	if a.Type != models.ActivityPractice || a.Format != "practice_zpd" {
-		t.Errorf("expected practice_zpd at p=0.84 (legacy), got %s/%s", a.Type, a.Format)
+		t.Errorf("expected practice_zpd at p=0.84, got %s/%s", a.Type, a.Format)
 	}
 }
 
