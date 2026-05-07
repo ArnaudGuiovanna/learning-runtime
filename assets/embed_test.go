@@ -50,14 +50,18 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 		"ui/request-display-mode",
 		"availableDisplayModes",
 		"\"fullscreen\"",
-		// KC picker + j'attaque plumbing — clicks fire MCP tools directly
-		// from the iframe (per MCP Apps spec) and j'attaque additionally
-		// nudges the LLM via update-model-context.
+		// KC picker + j'attaque plumbing — clicks go via sendChatMessage
+		// (ui/message) to trigger an immediate LLM turn per MCP Apps spec.
+		// pushModelContext/ui/update-model-context remain as fallback path.
 		"ui/update-model-context",
 		"pick_concept",
 		"pushModelContext",
 		"fireTool",
 		"tools/call",
+		"sendChatMessage",
+		"ui/message",
+		"data-action=\"expand-kcs\"",
+		"ck-kc-more",
 		// V3 dispatch + 3 renderers
 		"\"screen\"",
 		"renderCockpit",

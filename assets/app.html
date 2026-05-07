@@ -269,6 +269,24 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0s !important; transition-duration: 0s !important; }
 }
+
+/* ─── KC expand button ─── */
+.ck-kc-more {
+  display: block;
+  margin: 12px auto 0;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--ck-text-secondary);
+  color: var(--ck-text-secondary);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ck-kc-more:hover {
+  border-color: var(--ck-text-primary);
+  color: var(--ck-text-primary);
+}
 </style>
 </head>
 <body>
@@ -336,6 +354,24 @@ html, body {
         structuredContent: structured || {},
       });
     } catch (err) { console.warn('ui/update-model-context failed:', err); }
+  }
+  // sendChatMessage — adds a user-role message to the chat. Per the
+  // MCP Apps 2026-01-26 spec (§ ui/message), the host SHOULD add the
+  // message and the spec lists ui/message as triggering follow-ups —
+  // i.e. the LLM acts on it on the same turn instead of deferring like
+  // ui/update-model-context does. Use this for click intents that need
+  // immediate LLM action (j'attaque, KC pick, domain switch, submit).
+  async function sendChatMessage(text) {
+    try {
+      await request('ui/message', {
+        role: 'user',
+        content: { type: 'text', text: text },
+      });
+    } catch (err) {
+      console.warn('ui/message failed:', err);
+      // Last-resort fallback: model-context (deferred but better than nothing).
+      pushModelContext(text, {});
+    }
   }
   // fireTool sends tools/call as a request (with id, per JSON-RPC spec) but
   // does NOT track it in `pending`. Per MCP Apps spec §Interactive Phase,
@@ -446,20 +482,34 @@ html, body {
     card.appendChild(actions);
   }
 
+  function renderKCRow(c, g) {
+    const row = el('div', { class: 'ck-kc-row', role: 'listitem', 'data-kc': c.concept });
+    row.appendChild(el('div', { class: 'ck-kc-dot ' + (c.state || 'not_started') }));
+    const info = el('div', { class: 'ck-kc-info' });
+    info.appendChild(el('div', { class: 'ck-kc-name', text: c.concept }));
+    info.appendChild(el('div', { class: 'ck-kc-why', text: kcWhy(c) }));
+    row.appendChild(info);
+    row.appendChild(el('div', { class: 'ck-kc-arrow', text: '→' }));
+    return row;
+  }
   function renderKCs(g) {
     const list = document.getElementById('ck-kc-list');
     clear(list);
-    const focus = g.focus_concept;
-    (g.concepts || []).filter(c => c.concept !== focus).forEach(c => {
-      const row = el('div', { class: 'ck-kc-row', role: 'listitem', 'data-kc': c.concept });
-      row.appendChild(el('div', { class: 'ck-kc-dot ' + (c.state || 'not_started') }));
-      const info = el('div', { class: 'ck-kc-info' });
-      info.appendChild(el('div', { class: 'ck-kc-name', text: c.concept }));
-      info.appendChild(el('div', { class: 'ck-kc-why', text: kcWhy(c) }));
-      row.appendChild(info);
-      row.appendChild(el('div', { class: 'ck-kc-arrow', text: '→' }));
-      list.appendChild(row);
-    });
+    const concepts = (g.concepts || []).filter(c => c.concept !== g.focus_concept);
+    const VISIBLE_DEFAULT = 5;
+    const visible = concepts.slice(0, VISIBLE_DEFAULT);
+    const hidden  = concepts.slice(VISIBLE_DEFAULT);
+
+    visible.forEach(c => list.appendChild(renderKCRow(c, g)));
+
+    if (hidden.length > 0) {
+      const moreBtn = el('button', {
+        class: 'ck-kc-more',
+        text: 'Voir ' + hidden.length + ' concepts de plus',
+        'data-action': 'expand-kcs',
+      });
+      list.appendChild(moreBtn);
+    }
   }
   function kcWhy(c) {
     const parts = [];
@@ -595,18 +645,13 @@ html, body {
   }
 
   // ─── Click handlers (delegation) ──────────────
-  // KC clicks and domain switches fire the corresponding MCP tool directly
-  // from the iframe via fireTool (per the MCP Apps spec, blog 2026-01-26):
-  // pick_concept and open_cockpit return OLMGraph-shaped results that the
-  // host re-delivers via ui/notifications/tool-result, which the message
-  // handler renders. The iframe refreshes without requiring the learner to
-  // type a chat message first.
-  //
-  // For the "j'attaque" button, we additionally push model context so
-  // Claude knows to present the exercise in the chat on the next turn —
-  // get_next_activity computes the activity (its result is observable to
-  // the LLM via tool-call history), and the context cue tells Claude to
-  // surface it as a question to the learner rather than a tool re-call.
+  // All user-facing click intents go through sendChatMessage (ui/message),
+  // which per the MCP Apps 2026-01-26 spec triggers an immediate LLM turn.
+  // The LLM reads its tool list and calls the appropriate tool (request_exercise,
+  // submit_answer, pick_concept, open_app) server-side. The host re-delivers
+  // the result via ui/notifications/tool-result, which dispatchScreen renders.
+  // This replaces the direct fireTool (tools/call) path which returns 405 on
+  // claude.ai web.
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action="attack"]');
     if (btn && state.graph && state.graph.focus_concept) {
@@ -619,8 +664,7 @@ html, body {
       state._attackTimeout = setTimeout(() => { btn.disabled = false; }, 10000);
 
       const concept = state.graph.focus_concept;
-      const did = state.graph.domain_id || undefined;
-      fireTool('request_exercise', did ? { concept: concept, domain_id: did } : { concept: concept });
+      sendChatMessage("Lance maintenant un exercice sur le concept « " + concept + " ». Appelle l'outil request_exercise et présente le résultat dans l'iframe.");
       return;
     }
     const submitBtn = e.target.closest('[data-action="submit"]');
@@ -632,14 +676,12 @@ html, body {
 
       const answer = (document.getElementById('ck-answer') || {}).value || '';
       const calEl  = document.getElementById('ck-calibration');
-      const args = {
-        answer: answer,
-        concept: state.exercise.concept,
-        activity_type: state.exercise.activity_type,
-      };
-      if (state.exercise.domain_id) args.domain_id = state.exercise.domain_id;
-      if (calEl) args.predicted_mastery = parseInt(calEl.value || '3', 10);
-      fireTool('submit_answer', args);
+      const cal = calEl ? calEl.value : '3';
+      // Pass the exercise context inline so the LLM has everything to call submit_answer.
+      sendChatMessage(
+        "Je soumets ma réponse à l'exercice sur « " + state.exercise.concept + " » : « " + answer + " ». " +
+        "Calibration: " + cal + "/5. Appelle submit_answer et présente le feedback dans l'iframe."
+      );
       return;
     }
     const cont = e.target.closest('[data-action="continue"]');
@@ -649,24 +691,30 @@ html, body {
       if (state._continueTimeout) clearTimeout(state._continueTimeout);
       state._continueTimeout = setTimeout(() => { cont.disabled = false; }, 10000);
 
-      const did = (state.graph && state.graph.domain_id) ||
-                  (state.exercise && state.exercise.domain_id) || undefined;
-      fireTool('request_exercise', did ? { domain_id: did } : {});
+      sendChatMessage("Continue avec le prochain exercice. Appelle request_exercise.");
+      return;
+    }
+    const expand = e.target.closest('[data-action="expand-kcs"]');
+    if (expand && state.graph) {
+      // Re-render the full list inline.
+      const list = document.getElementById('ck-kc-list');
+      clear(list);
+      (state.graph.concepts || []).filter(c => c.concept !== state.graph.focus_concept).forEach(c => list.appendChild(renderKCRow(c, state.graph)));
+      notifySize();
       return;
     }
     const row = e.target.closest('[data-kc]');
     if (row) {
       const concept = row.getAttribute('data-kc');
-      const did = (state.graph && state.graph.domain_id) || undefined;
       showToast("Focus → '" + concept + "'");
-      fireTool('pick_concept', did ? { concept: concept, domain_id: did } : { concept: concept });
+      sendChatMessage("Bascule mon focus sur le concept « " + concept + " ». Appelle pick_concept puis re-affiche le cockpit.");
     }
   });
 
   document.getElementById('ck-domain-select').addEventListener('change', (e) => {
     const did = e.target.value;
     showToast("Changement de domaine…");
-    fireTool('open_cockpit', { domain_id: did });
+    sendChatMessage("Bascule sur le domaine d'ID « " + did + " ». Appelle open_app(domain_id) pour rafraîchir le cockpit.");
   });
 
   document.getElementById('ck-fullscreen-btn').addEventListener('click', () => {
