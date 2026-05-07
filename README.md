@@ -341,7 +341,7 @@ The setup has two phases: **deploy the server**, then **connect a client**.
 
 ```bash
 # Required
-export JWT_SECRET="your-secret-key"
+export JWT_SECRET="$(openssl rand -base64 32)"
 
 # Optional
 export PORT=3000                       # default: 3000
@@ -351,6 +351,8 @@ export LOG_LEVEL=debug                 # debug | info | warn | error
 
 go build -o tutor-mcp && ./tutor-mcp
 ```
+
+> `JWT_SECRET` must be a base64-encoded value (32 random bytes recommended). Use `openssl rand -base64 32` to generate one — a plain string will be rejected.
 
 For real use, put the runtime behind a public reverse proxy with TLS — see [Server Configuration](#server-configuration).
 
