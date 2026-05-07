@@ -375,6 +375,15 @@ html, body {
   };
 
   function dispatchScreen(sc) {
+    // Clear any in-flight button timeouts — a fresh screen has arrived,
+    // the user is no longer waiting on a stalled tool call.
+    if (state._attackTimeout)   { clearTimeout(state._attackTimeout);   state._attackTimeout   = null; }
+    if (state._submitTimeout)   { clearTimeout(state._submitTimeout);   state._submitTimeout   = null; }
+    if (state._continueTimeout) { clearTimeout(state._continueTimeout); state._continueTimeout = null; }
+    if (state._attackButton)   state._attackButton.disabled   = false;
+    if (state._submitButton)   state._submitButton.disabled   = false;
+    if (state._continueButton) state._continueButton.disabled = false;
+
     if (!sc || !sc["screen"]) {
       console.warn('cockpit dispatch: missing screen field', sc);
       return;
@@ -602,25 +611,48 @@ html, body {
     const btn = e.target.closest('[data-action="attack"]');
     if (btn && state.graph && state.graph.focus_concept) {
       btn.disabled = true;
+      // 10-second timeout — re-enable if no tool-result comes back. Cleared
+      // by dispatchScreen when a fresh screen arrives. Fixes the disabled-
+      // button regression where the cursor stayed "not-allowed" forever.
+      state._attackButton = btn;
+      if (state._attackTimeout) clearTimeout(state._attackTimeout);
+      state._attackTimeout = setTimeout(() => { btn.disabled = false; }, 10000);
+
       const concept = state.graph.focus_concept;
-      const did = (state.graph && state.graph.domain_id) || undefined;
-      // Optimistic UI: surface the action while the activity is computed.
-      const card = document.getElementById('ck-focus-card');
-      card.appendChild(el('div', { class: 'ck-focus-activity', text: "Activité en préparation pour '" + concept + "'…" }));
-      fireTool('get_next_activity', did ? { domain_id: did } : {});
-      pushModelContext(
-        "L'apprenant clique 'j'attaque' sur le palier '" + concept + "' depuis le cockpit. L'activité a déjà été calculée par get_next_activity — présente directement le premier exercice à l'apprenant (sans rappeler le tool, sans re-décrire le cockpit).",
-        { focus_attacked: concept }
-      );
+      const did = state.graph.domain_id || undefined;
+      fireTool('request_exercise', did ? { concept: concept, domain_id: did } : { concept: concept });
       return;
     }
-    // submit handler — wired in Task 8 (fires submit_answer tool).
-    if (e.target.closest('[data-action="submit"]')) {
-      return; // placeholder; Task 8 adds the body.
+    const submitBtn = e.target.closest('[data-action="submit"]');
+    if (submitBtn && state.exercise) {
+      submitBtn.disabled = true;
+      state._submitButton = submitBtn;
+      if (state._submitTimeout) clearTimeout(state._submitTimeout);
+      state._submitTimeout = setTimeout(() => { submitBtn.disabled = false; }, 10000);
+
+      const answer = (document.getElementById('ck-answer') || {}).value || '';
+      const calEl  = document.getElementById('ck-calibration');
+      const args = {
+        answer: answer,
+        concept: state.exercise.concept,
+        activity_type: state.exercise.activity_type,
+      };
+      if (state.exercise.domain_id) args.domain_id = state.exercise.domain_id;
+      if (calEl) args.predicted_mastery = parseInt(calEl.value || '3', 10);
+      fireTool('submit_answer', args);
+      return;
     }
-    // continue handler — wired in Task 8 (fires request_exercise / returns to cockpit).
-    if (e.target.closest('[data-action="continue"]')) {
-      return; // placeholder; Task 8 adds the body.
+    const cont = e.target.closest('[data-action="continue"]');
+    if (cont) {
+      cont.disabled = true;
+      state._continueButton = cont;
+      if (state._continueTimeout) clearTimeout(state._continueTimeout);
+      state._continueTimeout = setTimeout(() => { cont.disabled = false; }, 10000);
+
+      const did = (state.graph && state.graph.domain_id) ||
+                  (state.exercise && state.exercise.domain_id) || undefined;
+      fireTool('request_exercise', did ? { domain_id: did } : {});
+      return;
     }
     const row = e.target.closest('[data-kc]');
     if (row) {

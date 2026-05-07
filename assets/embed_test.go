@@ -72,6 +72,10 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 		"data-action=\"submit\"",
 		"data-action=\"continue\"",
 		"'data-kc'",
+		// 10-second re-enable timeout wiring (disabled-button regression fix)
+		"_attackTimeout",
+		"_submitTimeout",
+		"_continueTimeout",
 		// DOM ids the JS targets
 		"id=\"ck-domain-select\"",
 		"id=\"ck-fullscreen-btn\"",
