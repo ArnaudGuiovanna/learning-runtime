@@ -152,8 +152,10 @@ func TestOpenCockpit_ReturnsMetaAndStructuredContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("_meta.ui missing or wrong type: %+v", res.Meta)
 	}
-	if uiMeta["resourceUri"] != cockpitResourceURI {
-		t.Errorf("_meta.ui.resourceUri=%v, want %s", uiMeta["resourceUri"], cockpitResourceURI)
+	// open_cockpit is now an alias for open_app — it must point at the new
+	// app resource URI (ui://app), not the legacy ui://cockpit.
+	if uiMeta["resourceUri"] != appResourceURI {
+		t.Errorf("_meta.ui.resourceUri=%v, want %s", uiMeta["resourceUri"], appResourceURI)
 	}
 	// structuredContent must marshal to OLMGraph shape — read directly off res.StructuredContent.
 	scBytes, err := json.Marshal(res.StructuredContent)
@@ -187,5 +189,72 @@ func TestOpenCockpit_NoAuth(t *testing.T) {
 	res := callTool(t, deps, registerOpenCockpit, "", "open_cockpit", map[string]any{})
 	if !res.IsError {
 		t.Fatalf("expected auth error")
+	}
+}
+
+func TestOpenApp_StructuredContent_HasScreenCockpit(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerOpenApp, "L_owner", "open_app", map[string]any{
+		"domain_id": d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("open_app errored: %s", resultText(res))
+	}
+	out := decodeStructured(t, res)
+	if out["screen"] != "cockpit" {
+		t.Fatalf("expected screen=cockpit, got %v", out["screen"])
+	}
+}
+
+func TestOpenCockpit_StillRegistered_AsAlias(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerOpenCockpit, "L_owner", "open_cockpit", map[string]any{
+		"domain_id": d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("open_cockpit (alias) errored: %s", resultText(res))
+	}
+	out := decodeStructured(t, res)
+	if out["screen"] != "cockpit" {
+		t.Fatalf("expected screen=cockpit on alias output, got %v", out["screen"])
+	}
+}
+
+func TestAppResource_FetchableAtUiApp(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	registerAppResource(srv, deps)
+
+	c, s := mcp.NewInMemoryTransports()
+	go srv.Run(t.Context(), s)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(t.Context(), c, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cs.Close()
+
+	res, err := cs.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: appResourceURI})
+	if err != nil {
+		t.Fatalf("ReadResource ui://app: %v", err)
+	}
+	if len(res.Contents) == 0 {
+		t.Fatal("expected resource content, got empty")
+	}
+	body := res.Contents[0].Text
+	if !strings.Contains(body, "<html") && !strings.Contains(body, "<!DOCTYPE") {
+		preview := body
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		t.Errorf("expected HTML content, got: %q", preview)
+	}
+	const wantMIME = "text/html;profile=mcp-app"
+	if res.Contents[0].MIMEType != wantMIME {
+		t.Errorf("MIMEType=%q, want %q", res.Contents[0].MIMEType, wantMIME)
 	}
 }

@@ -127,6 +127,22 @@ func decodeResult(t *testing.T, res *mcp.CallToolResult) map[string]any {
 	return out
 }
 
+// decodeStructured returns the structuredContent of a CallToolResult as
+// a map. It is the shape consumed by MCP App iframes via
+// ui/notifications/tool-result. Fails the test on missing/wrong type.
+func decodeStructured(t *testing.T, res *mcp.CallToolResult) map[string]any {
+	t.Helper()
+	if res == nil || res.StructuredContent == nil {
+		t.Fatalf("expected StructuredContent, got nil")
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decodeStructured unmarshal: %v", err)
+	}
+	return out
+}
+
 // callToolWithSampling is callTool plus a canned client-side
 // CreateMessageHandler. The handler is invoked by the SDK whenever the
 // server (the tool under test) calls req.Session.CreateMessage. Returns
