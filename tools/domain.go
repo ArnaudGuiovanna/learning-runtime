@@ -55,8 +55,13 @@ func validateConcepts(concepts []string, prereqs map[string][]string) error {
 	}
 
 	// Build the universe of declared concepts for cross-referencing.
+	// Reject duplicates: a repeated concept inflates TotalGoalRelevant
+	// and skews mastery ratios in the FSM observables (issue #27).
 	universe := make(map[string]bool, len(concepts))
 	for _, c := range concepts {
+		if universe[c] {
+			return fmt.Errorf("duplicate concept name %q", c)
+		}
 		universe[c] = true
 	}
 
@@ -259,19 +264,28 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		// Merge new concepts into existing graph
+		// Reject duplicates BEFORE merging: (a) intra-batch duplicates and
+		// (b) batch entries that already live in the existing graph. A
+		// silent skip would let the caller believe the add succeeded while
+		// inflating their TotalGoalRelevant view (issue #27).
 		existingSet := make(map[string]bool)
 		for _, c := range domain.Graph.Concepts {
 			existingSet[c] = true
 		}
+		batchSet := make(map[string]bool, len(params.Concepts))
+		for _, c := range params.Concepts {
+			if existingSet[c] || batchSet[c] {
+				r, _ := errorResult(fmt.Sprintf("duplicate concept name %q", c))
+				return r, nil, nil
+			}
+			batchSet[c] = true
+		}
 
 		added := 0
 		for _, c := range params.Concepts {
-			if !existingSet[c] {
-				domain.Graph.Concepts = append(domain.Graph.Concepts, c)
-				existingSet[c] = true
-				added++
-			}
+			domain.Graph.Concepts = append(domain.Graph.Concepts, c)
+			existingSet[c] = true
+			added++
 		}
 
 		// Validate against the MERGED universe — prereqs may legitimately
