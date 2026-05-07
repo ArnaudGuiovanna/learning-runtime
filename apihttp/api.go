@@ -152,7 +152,7 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 	// Falls back gracefully to the raw prompt when no session is available.
 	exerciseText := activity.PromptForLLM
 	if sess := getSession(learnerID); sess != nil {
-		samplingCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		samplingCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		resp, err := sess.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
 			MaxTokens:    800,
@@ -225,7 +225,7 @@ func (d *Deps) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	// Use session-bridged sampling for LLM-evaluated feedback when available.
 	// Replaces the heuristic length-based check; heuristic stays as fallback.
 	if sess := getSession(learnerID); sess != nil {
-		samplingCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		samplingCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		evalUser := fmt.Sprintf("Concept: %s. Activité: %s. Réponse de l'apprenant: %s",
 			req.Concept, req.ActivityType, req.Answer)
