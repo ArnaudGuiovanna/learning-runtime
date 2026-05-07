@@ -47,6 +47,21 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Resolve the active domain (honoring the optional domain_id) and
+		// validate the concept against its concept list. Without this guard
+		// the BKT/FSRS chain silently inserts orphan concept_states for
+		// hallucinated or stale concept names — see issue #23.
+		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
+		if err != nil || domain == nil {
+			deps.Logger.Error("record_interaction: resolve domain", "err", err, "learner", learnerID)
+			r, _ := errorResult("no active domain — call init_domain first")
+			return r, nil, nil
+		}
+		if err := validateConceptInDomain(domain, params.Concept); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
 		cs, err := applyInteraction(deps, learnerID, interactionInput{
 			Concept:             params.Concept,
 			ActivityType:        params.ActivityType,
@@ -60,6 +75,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			CalibrationID:       params.CalibrationID,
 			MisconceptionType:   params.MisconceptionType,
 			MisconceptionDetail: params.MisconceptionDetail,
+			DomainID:            domain.ID,
 		}, time.Now().UTC())
 		if err != nil {
 			deps.Logger.Error("record_interaction: applyInteraction failed", "err", err, "learner", learnerID)

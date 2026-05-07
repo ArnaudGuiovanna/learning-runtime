@@ -5,10 +5,43 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"tutor-mcp/models"
 )
+
+func TestSubmitAnswer_RejectsUnknownConcept(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math") // concepts: ["a","b"]
+
+	res := callToolWithSampling(t, deps, registerSubmitAnswer, "L_owner",
+		"submit_answer",
+		map[string]any{
+			"answer":        "42",
+			"concept":       "ghost",
+			"activity_type": "PRACTICE",
+			"domain_id":     d.ID,
+		},
+		`{"correct": true, "explanation": "ok"}`,
+	)
+	if !res.IsError {
+		t.Fatalf("expected error for unknown concept, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "ghost") {
+		t.Fatalf("expected error to mention the unknown concept name, got %q", resultText(res))
+	}
+	// No orphan concept_state and no interaction must be created.
+	if cs, err := store.GetConceptState("L_owner", "ghost"); err == nil && cs != nil {
+		t.Fatalf("orphan concept_state row created for unknown concept: %+v", cs)
+	}
+	ints, _ := store.GetRecentInteractionsByLearner("L_owner", 5)
+	for _, i := range ints {
+		if i.Concept == "ghost" {
+			t.Fatalf("interaction recorded for unknown concept: %+v", i)
+		}
+	}
+}
 
 func TestSubmitAnswer_Correct_HappyPath(t *testing.T) {
 	store, deps := setupToolsTest(t)
