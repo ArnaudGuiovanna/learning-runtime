@@ -151,7 +151,11 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 	// Use session-bridged sampling to generate real exercise content.
 	// Falls back gracefully to the raw prompt when no session is available.
 	exerciseText := activity.PromptForLLM
-	if sess := getSession(learnerID); sess != nil {
+	usedSampling := false
+	sess := getSession(learnerID)
+	if sess == nil {
+		d.Logger.Warn("api exercise: no session registered for learner — sampling skipped, will use prompt fallback", "learner", learnerID)
+	} else {
 		samplingCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		resp, err := sess.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
@@ -164,11 +168,14 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 		if err == nil && resp != nil {
 			if tc, ok := resp.Content.(*mcp.TextContent); ok && tc.Text != "" {
 				exerciseText = tc.Text
+				usedSampling = true
 			}
+			d.Logger.Info("api exercise: sampling ok", "learner", learnerID, "chars", len(exerciseText))
 		} else {
 			d.Logger.Warn("api exercise: sampling failed, falling back to prompt", "err", err, "learner", learnerID)
 		}
 	}
+	d.Logger.Info("api exercise: returning", "learner", learnerID, "used_sampling", usedSampling, "concept", activity.Concept)
 
 	out := map[string]any{
 		"screen": "exercise",
@@ -224,7 +231,11 @@ func (d *Deps) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Use session-bridged sampling for LLM-evaluated feedback when available.
 	// Replaces the heuristic length-based check; heuristic stays as fallback.
-	if sess := getSession(learnerID); sess != nil {
+	sessSubmit := getSession(learnerID)
+	if sessSubmit == nil {
+		d.Logger.Warn("api submit: no session registered — falling back to length heuristic", "learner", learnerID)
+	}
+	if sess := sessSubmit; sess != nil {
 		samplingCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		evalUser := fmt.Sprintf("Concept: %s. Activité: %s. Réponse de l'apprenant: %s",

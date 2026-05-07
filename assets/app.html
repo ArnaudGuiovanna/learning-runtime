@@ -480,7 +480,7 @@ html, body {
 
   // Version banner — printed at iframe boot so we can confirm which
   // build is actually rendered (cache-busting diagnosis).
-  const TUTOR_APP_VERSION = 'v5-loading-states-2026-05-07';
+  const TUTOR_APP_VERSION = 'v6-prefetch-2026-05-07';
   console.log('[tutor-mcp] iframe version', TUTOR_APP_VERSION);
   // Visible badge in the bottom-right corner (sober, low-contrast).
   document.addEventListener('DOMContentLoaded', () => {
@@ -905,6 +905,26 @@ html, body {
 
       const concept = state.graph.focus_concept;
       const did = state.graph.domain_id || undefined;
+
+      if (state.graph.prefetched_exercise) {
+        const pre = state.graph.prefetched_exercise;
+        const synth = {
+          screen: 'exercise',
+          exercise: {
+            concept: pre.concept,
+            activity_type: pre.activity_type,
+            difficulty: pre.difficulty,
+            input_kind: 'text',
+            ask_calibration: true,
+            text: pre.text,
+          },
+          domain_id: state.graph.domain_id,
+        };
+        state.graph.prefetched_exercise = null;
+        dispatchScreen(synth);
+        return;
+      }
+
       renderLoading("Préparation de l'exercice", concept);
       apiCall('POST', '/api/v1/exercise', { concept: concept, domain_id: did })
         .then(payload => dispatchScreen(payload))
