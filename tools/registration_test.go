@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -132,6 +133,98 @@ func TestToolDescriptions_NoStrippedFrenchDiacritics(t *testing.T) {
 
 	if len(failures) > 0 {
 		t.Fatalf("found %d stripped-accent French stem(s) in tool descriptions:\n%s",
+			len(failures), strings.Join(failures, "\n"))
+	}
+}
+
+// learnerFacingStrippedStems are stripped-French stems that have appeared in
+// learner-facing string literals (handler-returned map values, error
+// messages, prompts) — anywhere outside `Description:` / `jsonschema:`.
+//
+// These are matched as whole words inside *any* string literal in the files
+// listed by stringLiteralLintFiles. Whole-word boundaries (\b) keep us safe
+// from collisions with English fragments and from Go identifier matches
+// (which are not BasicLit anyway). Trailing-s is allowed so plural French
+// stems are caught too.
+var learnerFacingStrippedStems = []string{
+	"maitrise",   // "maîtrise" / "maîtrisé"
+	"Apres",      // "Après"
+	"verifier",   // "vérifier"
+	"prerequis",  // "prérequis"
+	"reguliere",  // "régulière"
+	"regulier",   // "régulier"
+	"specifique", // "spécifique" / "spécifiques"
+	"genere",     // "génère"
+	"reciter",    // "réciter"
+	"connait",    // "connaît"
+	"enleve",     // "enlève"
+	"reflechi",   // "réfléchi"
+}
+
+// stringLiteralLintFiles is the set of source files whose every string
+// literal is checked against learnerFacingStrippedStems. The narrower
+// `Description:` / `jsonschema:` lint above runs across all tool files; this
+// stricter walk targets handlers known to emit learner-facing strings inside
+// returned maps / formatted prompts (see issue #28). Add files here as new
+// regressions are caught.
+var stringLiteralLintFiles = []string{
+	"feynman.go",
+}
+
+// TestToolStringLiterals_NoStrippedFrenchDiacritics widens the diacritic lint
+// to every string literal (any *ast.BasicLit of kind STRING) in the files
+// listed in stringLiteralLintFiles, not just `Description:` / `jsonschema:`
+// tags. This catches handler-returned map values like
+// `"message": "Concept pas encore maitrise..."` that the narrower lint
+// missed (see issue #28).
+func TestToolStringLiterals_NoStrippedFrenchDiacritics(t *testing.T) {
+	// Pre-compile whole-word regexps for each stem. Trailing-s is allowed
+	// (so "specifique" matches "specifiques") because plural French stems
+	// are a single transformation away from the singular.
+	stemREs := make(map[string]*regexp.Regexp, len(learnerFacingStrippedStems))
+	for _, stem := range learnerFacingStrippedStems {
+		stemREs[stem] = regexp.MustCompile(`\b` + regexp.QuoteMeta(stem) + `s?\b`)
+	}
+
+	fset := token.NewFileSet()
+	var failures []string
+
+	for _, path := range stringLiteralLintFiles {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		f, err := parser.ParseFile(fset, path, src, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			val := lit.Value
+			// Skip raw struct tags so we don't double-fire with the
+			// narrower lint above on `jsonschema:` / `json:` literals.
+			if strings.Contains(val, "jsonschema:") || strings.Contains(val, "json:\"") {
+				return true
+			}
+			for _, stem := range learnerFacingStrippedStems {
+				if stemREs[stem].MatchString(val) {
+					pos := fset.Position(lit.Pos())
+					failures = append(failures, formatFailure(pos.Filename, pos.Line, stem, val))
+				}
+			}
+			return true
+		})
+	}
+
+	if len(failures) > 0 {
+		t.Fatalf("found %d stripped-accent French stem(s) in tool string literals:\n%s",
 			len(failures), strings.Join(failures, "\n"))
 	}
 }

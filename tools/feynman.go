@@ -48,17 +48,17 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 				"eligible":  false,
 				"mastery":   cs.PMastery,
 				"threshold": algorithms.MasteryBKT(),
-				"message":   "Concept pas encore maitrise. Continue la pratique reguliere.",
+				"message":   "Concept pas encore maîtrisé. Continue la pratique régulière.",
 			})
 			return r, nil, nil
 		}
 
 		promptText := fmt.Sprintf(
-			"Explique le concept '%s' comme si tu l'enseignais a quelqu'un qui n'y connait rien. "+
+			"Explique le concept '%s' comme si tu l'enseignais à quelqu'un qui n'y connaît rien. "+
 				"Pas de jargon technique — utilise des analogies, des exemples concrets. "+
-				"L'objectif est de verifier que tu as vraiment compris, pas que tu sais reciter.\n\n"+
-				"Apres ton explication, je vais identifier les points flous ou incomplets "+
-				"et les transformer en micro-concepts a travailler.",
+				"L'objectif est de vérifier que tu as vraiment compris, pas que tu sais réciter.\n\n"+
+				"Après ton explication, je vais identifier les points flous ou incomplets "+
+				"et les transformer en micro-concepts à travailler.",
 			params.ConceptID,
 		)
 
@@ -66,10 +66,10 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 			"eligible":    true,
 			"prompt_text": promptText,
 			"concept_id":  params.ConceptID,
-			"instructions_for_llm": "Apres l'explication de l'apprenant, identifie les gaps conceptuels specifiques. " +
-				"Pour chaque gap, genere un label court et une description. " +
-				"Demande confirmation a l'apprenant avant d'injecter les gaps dans le graphe via add_concepts(). " +
-				"Les nouveaux micro-concepts doivent avoir le concept source comme prerequis.",
+			"instructions_for_llm": "Après l'explication de l'apprenant, identifie les gaps conceptuels spécifiques. " +
+				"Pour chaque gap, génère un label court et une description. " +
+				"Demande confirmation à l'apprenant avant d'injecter les gaps dans le graphe via add_concepts(). " +
+				"Les nouveaux micro-concepts doivent avoir le concept source comme prérequis.",
 			"gap_template": map[string]interface{}{
 				"label":          "<nom court du gap>",
 				"description":    "<ce qui manque dans l'explication>",
