@@ -294,9 +294,12 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 // with system prompts and existing chat sessions referring to "cockpit".
 func registerOpenCockpit(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "open_cockpit",
-		Description: "Alias historique pour open_app — préférer open_app dans les nouvelles intégrations. Comportement identique.",
-		Meta:        appUIMeta(),
+		Name: "open_cockpit",
+		Description: "[OPT-IN UNIQUEMENT — alias historique de open_app] " +
+			"Voir la description de open_app. À n'appeler que sur demande " +
+			"explicite et littérale (ex. 'ouvre le cockpit'). Sinon, " +
+			"utiliser les outils texte (request_exercise, submit_answer, etc.).",
+		Meta: appUIMeta(),
 	}, openAppHandler(deps))
 }
 
