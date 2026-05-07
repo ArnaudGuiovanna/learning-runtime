@@ -126,3 +126,145 @@ func decodeResult(t *testing.T, res *mcp.CallToolResult) map[string]any {
 	_ = json.Unmarshal([]byte(txt), &out)
 	return out
 }
+
+// decodeStructured returns the structuredContent of a CallToolResult as
+// a map. It is the shape consumed by MCP App iframes via
+// ui/notifications/tool-result. Fails the test on missing/wrong type.
+func decodeStructured(t *testing.T, res *mcp.CallToolResult) map[string]any {
+	t.Helper()
+	if res == nil || res.StructuredContent == nil {
+		t.Fatalf("expected StructuredContent, got nil")
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decodeStructured unmarshal: %v", err)
+	}
+	return out
+}
+
+// callToolWithSampling is callTool plus a canned client-side
+// CreateMessageHandler. The handler is invoked by the SDK whenever the
+// server (the tool under test) calls req.Session.CreateMessage. Returns
+// the same CallToolResult as callTool.
+//
+// If samplingResponse is empty, no CreateMessageHandler is registered on
+// the test client — the SDK then returns a method-not-found error to the
+// server, exercising the unsupported / fallback_b path.
+func callToolWithSampling(
+	t *testing.T,
+	deps *Deps,
+	register func(*mcp.Server, *Deps),
+	learnerID, name string,
+	args any,
+	samplingResponse string,
+) *mcp.CallToolResult {
+	t.Helper()
+	ctx := context.Background()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0.0.1"}, nil)
+	register(server, deps)
+	if learnerID != "" {
+		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				ctx = context.WithValue(ctx, auth.LearnerIDKey, learnerID)
+				return next(ctx, method, req)
+			}
+		})
+	}
+
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	clientOpts := &mcp.ClientOptions{}
+	if samplingResponse != "" {
+		clientOpts.CreateMessageHandler = func(ctx context.Context, req *mcp.CreateMessageRequest) (*mcp.CreateMessageResult, error) {
+			return &mcp.CreateMessageResult{
+				Content: &mcp.TextContent{Text: samplingResponse},
+				Model:   "test-model",
+				Role:    "assistant",
+			}, nil
+		}
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "0.0.1"}, clientOpts)
+	session, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	argsJSON, _ := json.Marshal(args)
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      name,
+		Arguments: json.RawMessage(argsJSON),
+	})
+	if err != nil {
+		t.Fatalf("CallTool transport error for %q: %v", name, err)
+	}
+	return res
+}
+
+// callToolWithSamplingSeq is callToolWithSampling but returns successive
+// elements of samplingResponses on each successive sampling/createMessage
+// call. Used to exercise retry logic.
+func callToolWithSamplingSeq(
+	t *testing.T,
+	deps *Deps,
+	register func(*mcp.Server, *Deps),
+	learnerID, name string,
+	args any,
+	samplingResponses []string,
+) *mcp.CallToolResult {
+	t.Helper()
+	ctx := context.Background()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0.0.1"}, nil)
+	register(server, deps)
+	if learnerID != "" {
+		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				ctx = context.WithValue(ctx, auth.LearnerIDKey, learnerID)
+				return next(ctx, method, req)
+			}
+		})
+	}
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := 0
+	clientOpts := &mcp.ClientOptions{
+		CreateMessageHandler: func(ctx context.Context, req *mcp.CreateMessageRequest) (*mcp.CreateMessageResult, error) {
+			if idx >= len(samplingResponses) {
+				return nil, fmt.Errorf("test: no canned response left at idx=%d", idx)
+			}
+			r := samplingResponses[idx]
+			idx++
+			return &mcp.CreateMessageResult{
+				Content: &mcp.TextContent{Text: r},
+				Model:   "test-model",
+				Role:    "assistant",
+			}, nil
+		},
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "0.0.1"}, clientOpts)
+	session, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	argsJSON, _ := json.Marshal(args)
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      name,
+		Arguments: json.RawMessage(argsJSON),
+	})
+	if err != nil {
+		t.Fatalf("CallTool transport error for %q: %v", name, err)
+	}
+	return res
+}

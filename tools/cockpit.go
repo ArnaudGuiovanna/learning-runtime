@@ -289,40 +289,15 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 	})
 }
 
-type OpenCockpitParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel, dernier domaine actif si absent)"`
-}
-
+// registerOpenCockpit is the legacy alias for open_app. Same handler,
+// different name, different description — kept for backward compat
+// with system prompts and existing chat sessions referring to "cockpit".
 func registerOpenCockpit(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "open_cockpit",
-		Description: "OUTIL À UTILISER quand l'apprenant demande d'ouvrir/voir/afficher/montrer son cockpit. Rend une UI MCP App native dans la conversation (Claude Desktop, claude.ai) — focus card du moment, KCs alternatifs cliquables (l'apprenant peut épingler un concept comme nouveau focus via le tool pick_concept), signaux métacognitifs, progression du domaine. NE PAS reformuler le résultat en texte : la UI s'affiche d'elle-même via _meta.ui.resourceUri. Pour les clients sans MCP Apps, le tool retourne aussi un résumé texte de fallback.",
-		Meta: cockpitUIMeta(),
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params OpenCockpitParams) (*mcp.CallToolResult, any, error) {
-		learnerID, err := getLearnerID(ctx)
-		if err != nil {
-			deps.Logger.Error("open_cockpit: auth failed", "err", err)
-			r, _ := errorResult(err.Error())
-			return r, nil, nil
-		}
-
-		graph, err := engine.BuildOLMGraph(deps.Store, learnerID, params.DomainID)
-		if err != nil {
-			deps.Logger.Error("open_cockpit: build graph failed", "err", err, "learner", learnerID)
-			r, _ := errorResult(err.Error())
-			return r, nil, nil
-		}
-
-		// Text fallback for clients without MCP Apps support — reuses the
-		// webhook formatter so cockpit and webhook show the same prose.
-		fallback := engine.FormatOLMEmbed(graph.OLMSnapshot)
-
-		return &mcp.CallToolResult{
-			Content:           []mcp.Content{&mcp.TextContent{Text: fallback.Description}},
-			StructuredContent: graph,
-			Meta: cockpitUIMeta(),
-		}, nil, nil
-	})
+		Description: "Alias historique pour open_app — préférer open_app dans les nouvelles intégrations. Comportement identique.",
+		Meta:        appUIMeta(),
+	}, openAppHandler(deps))
 }
 
 // registerCockpitResource serves the cockpit HTML at ui://cockpit. The HTML
@@ -340,7 +315,7 @@ func registerCockpitResource(server *mcp.Server, deps *Deps) {
 			uri = req.Params.URI
 		}
 		deps.Logger.Info("cockpit resource read", "uri", uri)
-		body, err := assets.FS.ReadFile("cockpit.html")
+		body, err := assets.FS.ReadFile("app.html")
 		if err != nil {
 			deps.Logger.Error("cockpit resource: read embedded html", "err", err)
 			return nil, err

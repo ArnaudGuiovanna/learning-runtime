@@ -4,7 +4,7 @@
 // Package engine — Open Learner Model graph layer.
 //
 // OLMGraph extends OLMSnapshot with the full KST graph (nodes + streak) and the
-// learner's activity streak. Consumed by the open_cockpit tool's
+// learner's activity streak. Consumed by the open_app tool's
 // structuredContent and by the in-iframe cockpit JS to render the focus card
 // and KC list.
 
@@ -77,6 +77,7 @@ func BuildOLMGraph(store *db.Store, learnerID, domainID string) (*OLMGraph, erro
 
 	return &OLMGraph{
 		OLMSnapshot:      snap,
+		Screen:           "cockpit",
 		Concepts:         nodes,
 		Streak:           streak,
 		AvailableDomains: availableDomains,
@@ -105,8 +106,11 @@ type DomainRef struct {
 // OLMGraph is the structured payload exposed to the cockpit iframe.
 // It composes OLMSnapshot (mastery distribution + focus + metacog + KST progress)
 // with the per-concept node data needed by the V2 cockpit (focus card + KC list).
+// Screen is a discriminator field consumed by the iframe SPA dispatcher to
+// determine which screen to render (e.g. "cockpit", "exercise", "feedback").
 type OLMGraph struct {
 	*OLMSnapshot
+	Screen           string      `json:"screen"`
 	Concepts         []GraphNode `json:"concepts"`
 	Streak           int         `json:"streak"`
 	AvailableDomains []DomainRef `json:"available_domains"`

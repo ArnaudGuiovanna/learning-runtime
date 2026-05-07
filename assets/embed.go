@@ -8,5 +8,5 @@ package assets
 
 import "embed"
 
-//go:embed cockpit.html
+//go:embed app.html
 var FS embed.FS

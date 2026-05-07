@@ -9,17 +9,17 @@ import (
 )
 
 func TestEmbeddedCockpitHTML_Present(t *testing.T) {
-	data, err := FS.ReadFile("cockpit.html")
+	data, err := FS.ReadFile("app.html")
 	if err != nil {
-		t.Fatalf("read cockpit.html: %v", err)
+		t.Fatalf("read app.html: %v", err)
 	}
 	if len(data) < 50 {
-		t.Errorf("cockpit.html too small: %d bytes", len(data))
+		t.Errorf("app.html too small: %d bytes", len(data))
 	}
 }
 
 func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
-	data, err := FS.ReadFile("cockpit.html")
+	data, err := FS.ReadFile("app.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,9 +58,24 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 		"pushModelContext",
 		"fireTool",
 		"tools/call",
-		// JS hooks the click delegation targets
+		// V3 dispatch + 3 renderers
+		"\"screen\"",
+		"renderCockpit",
+		"renderExercise",
+		"renderFeedback",
+		"dispatchScreen",
+		"RENDERERS",
+		"request_exercise",
+		"submit_answer",
+		// Click delegation targets
 		"data-action=\"attack\"",
+		"data-action=\"submit\"",
+		"data-action=\"continue\"",
 		"'data-kc'",
+		// 10-second re-enable timeout wiring (disabled-button regression fix)
+		"_attackTimeout",
+		"_submitTimeout",
+		"_continueTimeout",
 		// DOM ids the JS targets
 		"id=\"ck-domain-select\"",
 		"id=\"ck-fullscreen-btn\"",
@@ -72,16 +87,16 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 	}
 	for _, m := range mustContain {
 		if !strings.Contains(body, m) {
-			t.Errorf("cockpit.html missing required marker: %q", m)
+			t.Errorf("app.html missing required marker: %q", m)
 		}
 	}
 	if len(data) > 100*1024 {
-		t.Errorf("cockpit.html size %d bytes exceeds 100 KB budget", len(data))
+		t.Errorf("app.html size %d bytes exceeds 100 KB budget", len(data))
 	}
 }
 
 func TestEmbeddedCockpitHTML_DropsV4Markers(t *testing.T) {
-	data, _ := FS.ReadFile("cockpit.html")
+	data, _ := FS.ReadFile("app.html")
 	body := string(data)
 	mustNotContain := []string{
 		// V4 graph (carte cognitive) — dropped
@@ -97,7 +112,7 @@ func TestEmbeddedCockpitHTML_DropsV4Markers(t *testing.T) {
 	}
 	for _, m := range mustNotContain {
 		if strings.Contains(body, m) {
-			t.Errorf("cockpit.html still contains V4 marker that should be removed: %q", m)
+			t.Errorf("app.html still contains V4 marker that should be removed: %q", m)
 		}
 	}
 }

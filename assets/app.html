@@ -363,24 +363,48 @@ html, body {
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
   // ─── State ──────────────
-  let state = { graph: null, hostCaps: null };
+  let state = { graph: null, exercise: null, feedback: null, hostCaps: null, currentScreen: null };
 
-  // Discriminator for ui/notifications/tool-result: only OLMGraph-shaped
-  // payloads (from open_cockpit / pick_concept) should re-render the
-  // cockpit. Other tool results delivered via the same notification
-  // channel must be ignored to avoid clobbering the UI.
-  function isOLMGraph(sc) {
-    return !!(sc && typeof sc === 'object' && Array.isArray(sc.available_domains) && Array.isArray(sc.concepts));
+  // RENDERERS dispatches on the `screen` field of structuredContent. Each
+  // tool that drives the iframe sets this field; new screens (Spec #2 / #3)
+  // add an entry here without touching the dispatch path.
+  const RENDERERS = {
+    cockpit:  renderCockpit,
+    exercise: renderExercise,
+    feedback: renderFeedback,
+  };
+
+  function dispatchScreen(sc) {
+    // Clear any in-flight button timeouts — a fresh screen has arrived,
+    // the user is no longer waiting on a stalled tool call.
+    if (state._attackTimeout)   { clearTimeout(state._attackTimeout);   state._attackTimeout   = null; }
+    if (state._submitTimeout)   { clearTimeout(state._submitTimeout);   state._submitTimeout   = null; }
+    if (state._continueTimeout) { clearTimeout(state._continueTimeout); state._continueTimeout = null; }
+    if (state._attackButton)   state._attackButton.disabled   = false;
+    if (state._submitButton)   state._submitButton.disabled   = false;
+    if (state._continueButton) state._continueButton.disabled = false;
+
+    if (!sc || !sc["screen"]) {
+      console.warn('cockpit dispatch: missing screen field', sc);
+      return;
+    }
+    const r = RENDERERS[sc["screen"]];
+    if (!r) {
+      console.warn('cockpit dispatch: unknown screen', sc["screen"]);
+      return;
+    }
+    state.currentScreen = sc["screen"];
+    r(sc);
   }
 
   // ─── Render functions ──────────────
-  function renderAll(graph) {
-    state.graph = graph;
-    renderHeader(graph);
-    renderFocus(graph);
-    renderKCs(graph);
-    renderMetacog(graph);
-    renderStats(graph);
+  function renderCockpit(sc) {
+    state.graph = sc; // sc is the OLMGraph + screen field
+    renderHeader(sc);
+    renderFocus(sc);
+    renderKCs(sc);
+    renderMetacog(sc);
+    renderStats(sc);
     notifySize();
   }
 
@@ -486,6 +510,80 @@ html, body {
     });
   }
 
+  function renderExercise(sc) {
+    const ex = sc.exercise || {};
+    // Clear cockpit-specific blocks; keep header.
+    ['ck-focus-card', 'ck-kc-list', 'ck-signal', 'ck-stats'].forEach(id => {
+      const el2 = document.getElementById(id);
+      if (el2) clear(el2);
+    });
+
+    const focusCard = document.getElementById('ck-focus-card');
+    clear(focusCard);
+
+    const title = el('div', { class: 'ck-focus-eyebrow', text: 'Exercice · ' + (ex.concept || '') });
+    const text  = el('div', { class: 'ck-focus-name',    text: ex.text || ex.prompt_for_llm || '(en attente du contenu)' });
+    focusCard.appendChild(title);
+    focusCard.appendChild(text);
+
+    if (ex.ask_calibration) {
+      const calLabel = el('div', { class: 'ck-focus-why', text: "Combien tu te sens prêt sur ce concept ? (1-5)" });
+      const calInput = document.createElement('input');
+      calInput.type = 'range'; calInput.value = '3';
+      calInput.min = '1'; calInput.max = '5'; calInput.id = 'ck-calibration';
+      focusCard.appendChild(calLabel);
+      focusCard.appendChild(calInput);
+    }
+
+    const answerLabel = el('div', { class: 'ck-focus-why', text: 'Ta réponse :' });
+    const answerInput = document.createElement('textarea');
+    answerInput.id = 'ck-answer';
+    answerInput.rows = 4;
+    answerInput.style.width = '100%';
+    focusCard.appendChild(answerLabel);
+    focusCard.appendChild(answerInput);
+
+    const submitBtn = el('button', { class: 'ck-btn-primary', text: 'Soumettre', 'data-action': "submit" });
+    submitBtn.id = 'ck-submit-btn';
+    focusCard.appendChild(submitBtn);
+
+    // Stash exercise context for the submit handler (added in Task 8).
+    // Handler will fire: request_exercise (fetch) and submit_answer (grade).
+    state.exercise = {
+      concept: ex.concept,
+      activity_type: ex.activity_type,
+      domain_id: sc.domain_id,
+    };
+
+    notifySize();
+  }
+
+  function renderFeedback(sc) {
+    ['ck-kc-list', 'ck-signal', 'ck-stats'].forEach(id => {
+      const e2 = document.getElementById(id);
+      if (e2) clear(e2);
+    });
+    const focusCard = document.getElementById('ck-focus-card');
+    clear(focusCard);
+
+    if (sc.mode === 'fallback_b') {
+      focusCard.appendChild(el('div', { class: 'ck-focus-eyebrow', text: 'Évaluation indisponible' }));
+      focusCard.appendChild(el('div', { class: 'ck-focus-why', text: 'Pose la question dans le chat — le tutor te répondra.' }));
+      notifySize();
+      return;
+    }
+
+    const eyebrow = el('div', { class: 'ck-focus-eyebrow', text: sc.correct ? 'Bonne réponse ✓' : 'À retravailler' });
+    const expl    = el('div', { class: 'ck-focus-why',    text: sc.explanation || '' });
+    const next    = el('button', { class: 'ck-btn-primary', text: 'Continuer', 'data-action': "continue" });
+    next.id = 'ck-continue-btn';
+    focusCard.appendChild(eyebrow);
+    focusCard.appendChild(expl);
+    focusCard.appendChild(next);
+
+    notifySize();
+  }
+
   // ─── Toast ──────────────
   let toastTimer = null;
   function showToast(msg) {
@@ -513,16 +611,47 @@ html, body {
     const btn = e.target.closest('[data-action="attack"]');
     if (btn && state.graph && state.graph.focus_concept) {
       btn.disabled = true;
+      // 10-second timeout — re-enable if no tool-result comes back. Cleared
+      // by dispatchScreen when a fresh screen arrives. Fixes the disabled-
+      // button regression where the cursor stayed "not-allowed" forever.
+      state._attackButton = btn;
+      if (state._attackTimeout) clearTimeout(state._attackTimeout);
+      state._attackTimeout = setTimeout(() => { btn.disabled = false; }, 10000);
+
       const concept = state.graph.focus_concept;
-      const did = (state.graph && state.graph.domain_id) || undefined;
-      // Optimistic UI: surface the action while the activity is computed.
-      const card = document.getElementById('ck-focus-card');
-      card.appendChild(el('div', { class: 'ck-focus-activity', text: "Activité en préparation pour '" + concept + "'…" }));
-      fireTool('get_next_activity', did ? { domain_id: did } : {});
-      pushModelContext(
-        "L'apprenant clique 'j'attaque' sur le palier '" + concept + "' depuis le cockpit. L'activité a déjà été calculée par get_next_activity — présente directement le premier exercice à l'apprenant (sans rappeler le tool, sans re-décrire le cockpit).",
-        { focus_attacked: concept }
-      );
+      const did = state.graph.domain_id || undefined;
+      fireTool('request_exercise', did ? { concept: concept, domain_id: did } : { concept: concept });
+      return;
+    }
+    const submitBtn = e.target.closest('[data-action="submit"]');
+    if (submitBtn && state.exercise) {
+      submitBtn.disabled = true;
+      state._submitButton = submitBtn;
+      if (state._submitTimeout) clearTimeout(state._submitTimeout);
+      state._submitTimeout = setTimeout(() => { submitBtn.disabled = false; }, 10000);
+
+      const answer = (document.getElementById('ck-answer') || {}).value || '';
+      const calEl  = document.getElementById('ck-calibration');
+      const args = {
+        answer: answer,
+        concept: state.exercise.concept,
+        activity_type: state.exercise.activity_type,
+      };
+      if (state.exercise.domain_id) args.domain_id = state.exercise.domain_id;
+      if (calEl) args.predicted_mastery = parseInt(calEl.value || '3', 10);
+      fireTool('submit_answer', args);
+      return;
+    }
+    const cont = e.target.closest('[data-action="continue"]');
+    if (cont) {
+      cont.disabled = true;
+      state._continueButton = cont;
+      if (state._continueTimeout) clearTimeout(state._continueTimeout);
+      state._continueTimeout = setTimeout(() => { cont.disabled = false; }, 10000);
+
+      const did = (state.graph && state.graph.domain_id) ||
+                  (state.exercise && state.exercise.domain_id) || undefined;
+      fireTool('request_exercise', did ? { domain_id: did } : {});
       return;
     }
     const row = e.target.closest('[data-kc]');
@@ -562,14 +691,8 @@ html, body {
       return;
     }
     if (m.method === 'ui/notifications/tool-result') {
-      // Per MCP Apps spec: params is CallToolResult directly (not nested in .result).
-      // Discriminate by shape: only re-render the cockpit when the
-      // structuredContent is an OLMGraph (returned by open_cockpit and
-      // pick_concept). Other tools the iframe may fire — e.g.
-      // get_next_activity from "j'attaque" — return a different shape and
-      // would clobber the UI if passed to renderAll.
       const sc = m.params && m.params.structuredContent;
-      if (isOLMGraph(sc)) renderAll(sc);
+      dispatchScreen(sc);
       return;
     }
     if (m.method === 'ui/notifications/host-context-changed') {
