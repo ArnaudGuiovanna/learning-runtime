@@ -107,6 +107,23 @@ Two flags change the runtime (`REGULATION_THRESHOLD`, `REGULATION_FADE`); the re
 | `REGULATION_GATE` | on | Drops the gate appendix. Gate keeps running. | prompt only |
 | `REGULATION_FADE` | **off** | **Opt-in** (the only opt-in flag). Set to the literal `on` to enable [6] FadeController: maps `autonomy_score` × trend to fade params (hint verbosity, webhook frequency, ZPD aggressiveness, proactive review). When on, the fader modulates the `motivation_brief` so that the more autonomous the learner, the terser (and ultimately silent) the brief becomes; the resulting `fade_params` are also surfaced in the `get_next_activity` JSON for downstream consumers. Strict equality with `on` — any other value (including `ON`, `true`, `1`) keeps the fader off. See `docs/regulation-design/06-fade-controller.md`. | runtime |
 
+## Tutor App (iframe-native UI)
+
+Tutor MCP exposes a single SPA at `ui://app` that renders three screens — cockpit, exercise, feedback — driven by tools that return `structuredContent.screen`. The full E2E learning loop (read exercise, answer, get feedback, continue) happens inside the iframe; the chat is reduced to an explicit opt-out.
+
+**Entry tools:**
+
+| Tool | Role |
+|---|---|
+| `open_app` | Mounts the iframe with the cockpit screen. (`open_cockpit` is kept as a legacy alias serving the same handler.) |
+| `request_exercise` | Orchestrates the next activity, calls the host LLM via MCP `sampling/createMessage`, returns `screen:"exercise"`. |
+| `submit_answer` | Calls the host LLM to evaluate the answer, updates BKT/FSRS/IRT (`record_interaction` shared path), returns `screen:"feedback"`. |
+| `set_chat_mode` | Toggles a per-learner chat-only opt-out. |
+
+**Host requirement.** The MCP client must support `sampling/createMessage` (Claude Desktop ✓). When sampling is unavailable, tools return `mode:"fallback_b"` and the iframe shows a chat-fallback empty state.
+
+**Chat-mode opt-out.** An apprenant who prefers the legacy chat experience can ask "lance le tutor sans interface". Claude calls `set_chat_mode(enabled=true)`; subsequent `request_exercise`/`submit_answer` calls return text-only responses (no `_meta.ui`, no `structuredContent`), and the LLM speaks the exercise/feedback in chat as before. The cognitive state (BKT/FSRS/IRT) updates the same way on both paths.
+
 ## MCP Tools (30)
 
 ### Core Learning
@@ -116,10 +133,14 @@ Two flags change the runtime (`REGULATION_THRESHOLD`, `REGULATION_FADE`); the re
 | `get_learner_context` | Session context: active domain, concept states, recent history, active misconceptions |
 | `get_pending_alerts` | Critical alerts requiring immediate action |
 | `get_next_activity` | Next optimal activity + metacognitive mirror + tutor mode + motivation brief |
+| `request_exercise` | Iframe-driven counterpart of `get_next_activity`. Calls sampling to render the exercise; returns `screen:"exercise"` payload for the app UI. |
+| `submit_answer` | Iframe-driven answer submission. Sampling-evaluates the answer, runs the BKT/FSRS/IRT update, returns `screen:"feedback"` payload. |
+| `set_chat_mode` | Toggle per-learner chat-only mode (opt-out from the iframe app). |
 | `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA; tracks hints, initiative, proactive reviews, error type, misconception type/detail |
 | `check_mastery` | Check if a concept is eligible for a mastery challenge |
 | `get_cockpit_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
-| `open_cockpit` | Returns an MCP resource link that opens the cockpit UI inside compatible clients (Claude Desktop, claude.ai) |
+| `open_app` | Mounts the iframe app at `ui://app` with the cockpit screen on first load. |
+| `open_cockpit` | Legacy alias for `open_app` — same handler, kept for backward compat with existing chat sessions. |
 | `pick_concept` | Pin a specific concept as the next focus, overriding the router for one activity |
 | `get_olm_snapshot` | Open Learner Model snapshot: per-concept mastery, retention, last-seen, fringe membership, anti-repeat status |
 | `get_availability_model` | Learner's time windows and session frequency |
