@@ -14,9 +14,11 @@ package apihttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"tutor-mcp/algorithms"
@@ -24,7 +26,37 @@ import (
 	"tutor-mcp/db"
 	"tutor-mcp/engine"
 	"tutor-mcp/models"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// sessions maps learnerID to the active MCP server session that the
+// host LLM is connected through. The /api/v1/exercise handler uses this
+// to call sampling/createMessage on the session, generating real
+// exercise content via the user's Anthropic subscription. Populated by
+// the open_app tool handler at iframe-mount time. Last-writer-wins per
+// learner — concurrent conversations are rare in practice.
+var sessions sync.Map
+
+// RegisterSession is called by tools/app.go's openAppHandler so the
+// HTTP API can reach the host LLM via the same session the iframe was
+// minted from.
+func RegisterSession(learnerID string, sess *mcp.ServerSession) {
+	if sess == nil {
+		return
+	}
+	sessions.Store(learnerID, sess)
+}
+
+// getSession returns the most recent ServerSession for a learner, or nil.
+func getSession(learnerID string) *mcp.ServerSession {
+	v, ok := sessions.Load(learnerID)
+	if !ok {
+		return nil
+	}
+	s, _ := v.(*mcp.ServerSession)
+	return s
+}
 
 // Deps holds shared dependencies for the API handlers.
 type Deps struct {
@@ -116,6 +148,28 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use session-bridged sampling to generate real exercise content.
+	// Falls back gracefully to the raw prompt when no session is available.
+	exerciseText := activity.PromptForLLM
+	if sess := getSession(learnerID); sess != nil {
+		samplingCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		resp, err := sess.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
+			MaxTokens:    800,
+			SystemPrompt: "Tu es un tuteur pédagogique. Génère un exercice pour un apprenant. Retourne uniquement l'énoncé de l'exercice (la consigne et la question), sans préface, sans solution, sans hints inline. Style clair et concis. Markdown autorisé pour mise en forme légère.",
+			Messages: []*mcp.SamplingMessage{
+				{Role: "user", Content: &mcp.TextContent{Text: activity.PromptForLLM}},
+			},
+		})
+		if err == nil && resp != nil {
+			if tc, ok := resp.Content.(*mcp.TextContent); ok && tc.Text != "" {
+				exerciseText = tc.Text
+			}
+		} else {
+			d.Logger.Warn("api exercise: sampling failed, falling back to prompt", "err", err, "learner", learnerID)
+		}
+	}
+
 	out := map[string]any{
 		"screen": "exercise",
 		"exercise": map[string]any{
@@ -124,12 +178,7 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 			"difficulty":      activity.DifficultyTarget,
 			"input_kind":      "text",
 			"ask_calibration": true,
-			// v0: we don't have a direct way to call the LLM from this
-			// HTTP context (no MCP session). The iframe shows the prompt
-			// itself as the exercise. Real LLM-generated content is a
-			// follow-up (will require server-side LLM credentials or a
-			// session-bridge from the LLM's open_app tool call).
-			"text": activity.PromptForLLM,
+			"text":            exerciseText,
 		},
 		"domain_id": domain.ID,
 	}
@@ -163,12 +212,57 @@ func (d *Deps) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// v0 evaluation heuristic — without LLM we can't really judge correctness.
-	// Approximation: success = answer is non-empty AND length > 5 chars (proxy
-	// for "the learner attempted something substantive"). The orchestrator's
-	// next-step decisions still feed off BKT/FSRS/IRT — even a coarse signal
-	// beats no signal. Real LLM-evaluated submissions are a follow-up.
+	// Heuristic fallback: success = answer is non-empty AND length > 5 chars.
+	// The orchestrator's next-step decisions still feed off BKT/FSRS/IRT/PFA —
+	// even a coarse signal beats no signal.
 	correct := len(strings.TrimSpace(req.Answer)) >= 5
+
+	explanation := "Réponse enregistrée."
+	if !correct {
+		explanation = "Réponse trop courte ou vide. Reformule en au moins une phrase complète."
+	}
+
+	// Use session-bridged sampling for LLM-evaluated feedback when available.
+	// Replaces the heuristic length-based check; heuristic stays as fallback.
+	if sess := getSession(learnerID); sess != nil {
+		samplingCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		evalUser := fmt.Sprintf("Concept: %s. Activité: %s. Réponse de l'apprenant: %s",
+			req.Concept, req.ActivityType, req.Answer)
+		resp, err := sess.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
+			MaxTokens:    400,
+			SystemPrompt: "Tu évalues la réponse d'un apprenant à un exercice. Retourne strictement un JSON: {\"correct\": bool, \"explanation\": string}. Aucun texte hors JSON.",
+			Messages: []*mcp.SamplingMessage{
+				{Role: "user", Content: &mcp.TextContent{Text: evalUser}},
+			},
+		})
+		if err == nil && resp != nil {
+			if tc, ok := resp.Content.(*mcp.TextContent); ok {
+				// Light JSON parse — strip ```json``` fences if present.
+				text := strings.TrimSpace(tc.Text)
+				if strings.HasPrefix(text, "```") {
+					text = strings.TrimPrefix(text, "```json")
+					text = strings.TrimPrefix(text, "```")
+					text = strings.TrimSuffix(text, "```")
+					text = strings.TrimSpace(text)
+				}
+				var ev struct {
+					Correct     bool   `json:"correct"`
+					Explanation string `json:"explanation"`
+				}
+				if jerr := json.Unmarshal([]byte(text), &ev); jerr == nil {
+					correct = ev.Correct
+					if ev.Explanation != "" {
+						explanation = ev.Explanation
+					}
+				} else {
+					d.Logger.Warn("api submit: malformed eval JSON", "err", jerr, "learner", learnerID, "raw", text)
+				}
+			}
+		} else {
+			d.Logger.Warn("api submit: sampling failed", "err", err, "learner", learnerID)
+		}
+	}
 
 	// Apply BKT/FSRS/IRT update via the same algorithm chain used by
 	// record_interaction so server state stays consistent with chat-mode.
@@ -177,14 +271,10 @@ func (d *Deps) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		// Non-blocking: still return feedback.
 	}
 
-	expl := "Réponse enregistrée."
-	if !correct {
-		expl = "Réponse trop courte ou vide. Reformule en au moins une phrase complète."
-	}
 	out := map[string]any{
 		"screen":      "feedback",
 		"correct":     correct,
-		"explanation": expl,
+		"explanation": explanation,
 		"concept":     req.Concept,
 	}
 	writeJSON(w, out)

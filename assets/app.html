@@ -265,6 +265,108 @@ html, body {
 .ck-error b { display: block; margin-bottom: 6px; font-size: 15px; }
 .ck-error code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--ck-text-secondary); }
 
+/* ─── Screens (cockpit / exercise / feedback) ─── */
+.ck-screen { display: block; }
+.ck-screen[hidden] { display: none; }
+
+/* Sober layout for non-cockpit screens. */
+.ck-crumb {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ck-text-secondary);
+  margin: 18px 0 6px;
+}
+.ck-h2 {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ck-text-primary);
+  margin: 0 0 18px;
+  letter-spacing: -0.3px;
+}
+.ck-h2.ck-verdict-ok { color: #4ade80; }
+.ck-h2.ck-verdict-ko { color: #fb923c; }
+
+.ck-body {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ck-text-primary);
+  white-space: pre-wrap;
+  margin: 0 0 24px;
+  padding: 18px 20px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.ck-cal {
+  margin: 0 0 18px;
+}
+.ck-cal-label {
+  font-size: 13px;
+  color: var(--ck-text-secondary);
+  margin-bottom: 8px;
+}
+.ck-cal-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.ck-cal-tip {
+  font-size: 11px;
+  color: var(--ck-text-secondary);
+  white-space: nowrap;
+}
+.ck-slider {
+  flex: 1;
+  accent-color: var(--ck-accent-500, #e8804a);
+}
+
+.ck-field-label {
+  font-size: 13px;
+  color: var(--ck-text-secondary);
+  margin: 0 0 6px;
+}
+.ck-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ck-text-primary);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  resize: vertical;
+  font-family: inherit;
+}
+.ck-textarea:focus {
+  outline: none;
+  border-color: var(--ck-accent-500, #e8804a);
+  background: rgba(255,255,255,0.06);
+}
+
+.ck-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+.ck-btn {
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.ck-btn-primary {
+  background: var(--ck-accent-500, #e8804a);
+  color: white;
+}
+.ck-btn-primary:hover { filter: brightness(1.08); }
+.ck-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ─── Motion preference ─── */
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0s !important; transition-duration: 0s !important; }
@@ -306,26 +408,35 @@ html, body {
         </button>
       </div>
     </div>
-    <div class="ck-section-label">Le palier suivant</div>
-    <div id="ck-focus-card" class="ck-card ck-focus">
-      <div class="ck-skeleton ck-skel-sm"></div>
-      <div class="ck-skeleton ck-skel-lg"></div>
-      <div class="ck-skeleton ck-skel-md"></div>
+
+    <!-- Each screen-root is rendered exclusively. Renderers set
+         display:none on the others. -->
+    <div id="ck-screen-cockpit" class="ck-screen">
+      <div class="ck-section-label">Le palier suivant</div>
+      <div id="ck-focus-card" class="ck-card ck-focus">
+        <div class="ck-skeleton ck-skel-sm"></div>
+        <div class="ck-skeleton ck-skel-lg"></div>
+        <div class="ck-skeleton ck-skel-md"></div>
+      </div>
+      <div class="ck-section-label">Ou choisis ce que tu veux travailler</div>
+      <div id="ck-kc-list" class="ck-card ck-kc-list" role="list">
+        <div class="ck-skeleton ck-skel-md"></div>
+        <div class="ck-skeleton ck-skel-md"></div>
+        <div class="ck-skeleton ck-skel-md"></div>
+      </div>
+      <div class="ck-section-label">Signal métacognitif</div>
+      <div id="ck-signal" class="ck-signal">
+        <div class="ck-skeleton ck-skel-sm"></div>
+      </div>
+      <div class="ck-section-label">Vue d'ensemble · tous domaines</div>
+      <div id="ck-stats" class="ck-stats">
+        <div class="ck-skeleton ck-skel-md"></div>
+      </div>
     </div>
-    <div class="ck-section-label">Ou choisis ce que tu veux travailler</div>
-    <div id="ck-kc-list" class="ck-card ck-kc-list" role="list">
-      <div class="ck-skeleton ck-skel-md"></div>
-      <div class="ck-skeleton ck-skel-md"></div>
-      <div class="ck-skeleton ck-skel-md"></div>
-    </div>
-    <div class="ck-section-label">Signal métacognitif</div>
-    <div id="ck-signal" class="ck-signal">
-      <div class="ck-skeleton ck-skel-sm"></div>
-    </div>
-    <div class="ck-section-label">Vue d'ensemble · tous domaines</div>
-    <div id="ck-stats" class="ck-stats">
-      <div class="ck-skeleton ck-skel-md"></div>
-    </div>
+
+    <div id="ck-screen-exercise" class="ck-screen" hidden></div>
+    <div id="ck-screen-feedback" class="ck-screen" hidden></div>
+
     <div id="ck-error" class="ck-error" hidden></div>
     <div class="ck-footer-hint">apprenant et tuteur regardent les mêmes données.</div>
   </div>
@@ -336,7 +447,7 @@ html, body {
 
   // Version banner — printed at iframe boot so we can confirm which
   // build is actually rendered (cache-busting diagnosis).
-  const TUTOR_APP_VERSION = 'v3-direct-http-2026-05-07';
+  const TUTOR_APP_VERSION = 'v4-screens-sampling-2026-05-07';
   console.log('[tutor-mcp] iframe version', TUTOR_APP_VERSION);
   // Visible badge in the bottom-right corner (sober, low-contrast).
   document.addEventListener('DOMContentLoaded', () => {
@@ -474,6 +585,16 @@ html, body {
     r(sc);
   }
 
+  // Switch the visible screen-root. Hides the others — keeps DOM intact
+  // so re-entering a screen is fast.
+  function showScreen(name) {
+    const ids = ['cockpit', 'exercise', 'feedback'];
+    ids.forEach(function(id) {
+      const el2 = document.getElementById('ck-screen-' + id);
+      if (el2) el2.hidden = (id !== name);
+    });
+  }
+
   // ─── Render functions ──────────────
   function renderCockpit(sc) {
     state.graph = sc; // sc is the OLMGraph + screen field
@@ -485,6 +606,7 @@ html, body {
     renderKCs(sc);
     renderMetacog(sc);
     renderStats(sc);
+    showScreen('cockpit');
     notifySize();
   }
 
@@ -605,76 +727,107 @@ html, body {
   }
 
   function renderExercise(sc) {
+    const root = document.getElementById('ck-screen-exercise');
+    clear(root);
     const ex = sc.exercise || {};
-    // Clear cockpit-specific blocks; keep header.
-    ['ck-focus-card', 'ck-kc-list', 'ck-signal', 'ck-stats'].forEach(id => {
-      const el2 = document.getElementById(id);
-      if (el2) clear(el2);
-    });
 
-    const focusCard = document.getElementById('ck-focus-card');
-    clear(focusCard);
+    // Breadcrumb / context line — small, low-key.
+    const crumb = el('div', { class: 'ck-crumb', text: 'Exercice · ' + (ex.concept || '') });
+    root.appendChild(crumb);
 
-    const title = el('div', { class: 'ck-focus-eyebrow', text: 'Exercice · ' + (ex.concept || '') });
-    const text  = el('div', { class: 'ck-focus-name',    text: ex.text || ex.prompt_for_llm || '(en attente du contenu)' });
-    focusCard.appendChild(title);
-    focusCard.appendChild(text);
+    // Title — the activity type as a label, not the concept (the concept is
+    // already in the breadcrumb).
+    const title = el('h2', { class: 'ck-h2', text: prettyActivityType(ex.activity_type) });
+    root.appendChild(title);
+
+    // Body — the LLM-generated exercise text.
+    const body = el('div', { class: 'ck-body', text: ex.text || '(en attente du contenu)' });
+    root.appendChild(body);
 
     if (ex.ask_calibration) {
-      const calLabel = el('div', { class: 'ck-focus-why', text: "Combien tu te sens prêt sur ce concept ? (1-5)" });
+      const calBlock = el('div', { class: 'ck-cal' });
+      calBlock.appendChild(el('div', { class: 'ck-cal-label', text: "Combien te sens-tu prêt ?" }));
+      const sliderRow = el('div', { class: 'ck-cal-row' });
+      const minLabel = el('span', { class: 'ck-cal-tip', text: 'pas du tout' });
       const calInput = document.createElement('input');
-      calInput.type = 'range'; calInput.value = '3';
-      calInput.min = '1'; calInput.max = '5'; calInput.id = 'ck-calibration';
-      focusCard.appendChild(calLabel);
-      focusCard.appendChild(calInput);
+      calInput.type = 'range'; calInput.min = '1'; calInput.max = '5'; calInput.value = '3';
+      calInput.id = 'ck-calibration'; calInput.className = 'ck-slider';
+      const maxLabel = el('span', { class: 'ck-cal-tip', text: 'totalement' });
+      sliderRow.appendChild(minLabel);
+      sliderRow.appendChild(calInput);
+      sliderRow.appendChild(maxLabel);
+      calBlock.appendChild(sliderRow);
+      root.appendChild(calBlock);
     }
 
-    const answerLabel = el('div', { class: 'ck-focus-why', text: 'Ta réponse :' });
+    // Answer textarea.
+    const answerLabel = el('div', { class: 'ck-field-label', text: 'Ta réponse' });
     const answerInput = document.createElement('textarea');
     answerInput.id = 'ck-answer';
-    answerInput.rows = 4;
-    answerInput.style.width = '100%';
-    focusCard.appendChild(answerLabel);
-    focusCard.appendChild(answerInput);
+    answerInput.rows = 5;
+    answerInput.className = 'ck-textarea';
+    answerInput.placeholder = 'Tape ta réponse ici…';
+    root.appendChild(answerLabel);
+    root.appendChild(answerInput);
 
-    const submitBtn = el('button', { class: 'ck-btn-primary', text: 'Soumettre', 'data-action': "submit" });
+    // Submit button — primary action.
+    const actions = el('div', { class: 'ck-actions' });
+    const submitBtn = el('button', { class: 'ck-btn ck-btn-primary', text: 'Soumettre', 'data-action': 'submit' });
     submitBtn.id = 'ck-submit-btn';
-    focusCard.appendChild(submitBtn);
+    actions.appendChild(submitBtn);
+    root.appendChild(actions);
 
-    // Stash exercise context for the submit handler (added in Task 8).
-    // Handler will fire: request_exercise (fetch) and submit_answer (grade).
+    // Stash exercise context for the submit handler.
     state.exercise = {
       concept: ex.concept,
       activity_type: ex.activity_type,
       domain_id: sc.domain_id,
     };
 
+    showScreen('exercise');
     notifySize();
   }
 
+  // Activity type → human label.
+  function prettyActivityType(t) {
+    switch ((t || '').toUpperCase()) {
+      case 'NEW_CONCEPT':         return 'Nouveau concept';
+      case 'PRACTICE':            return 'Mise en pratique';
+      case 'RECALL_EXERCISE':     return 'Révision (rappel)';
+      case 'DEBUG_MISCONCEPTION': return 'Confronter une erreur';
+      case 'FEYNMAN_PROMPT':      return 'Explique-le toi-même';
+      case 'TRANSFER_PROBE':      return 'Transposer dans un autre contexte';
+      case 'MASTERY_CHALLENGE':   return 'Défi de maîtrise';
+      case 'CLOSE_SESSION':       return 'Fin de session';
+      default:                    return 'Exercice';
+    }
+  }
+
   function renderFeedback(sc) {
-    ['ck-kc-list', 'ck-signal', 'ck-stats'].forEach(id => {
-      const e2 = document.getElementById(id);
-      if (e2) clear(e2);
-    });
-    const focusCard = document.getElementById('ck-focus-card');
-    clear(focusCard);
+    const root = document.getElementById('ck-screen-feedback');
+    clear(root);
 
     if (sc.mode === 'fallback_b') {
-      focusCard.appendChild(el('div', { class: 'ck-focus-eyebrow', text: 'Évaluation indisponible' }));
-      focusCard.appendChild(el('div', { class: 'ck-focus-why', text: 'Pose la question dans le chat — le tutor te répondra.' }));
+      root.appendChild(el('div', { class: 'ck-crumb', text: 'Évaluation indisponible' }));
+      root.appendChild(el('div', { class: 'ck-body', text: 'Pose la question dans le chat — le tutor te répondra.' }));
+      showScreen('feedback');
       notifySize();
       return;
     }
 
-    const eyebrow = el('div', { class: 'ck-focus-eyebrow', text: sc.correct ? 'Bonne réponse ✓' : 'À retravailler' });
-    const expl    = el('div', { class: 'ck-focus-why',    text: sc.explanation || '' });
-    const next    = el('button', { class: 'ck-btn-primary', text: 'Continuer', 'data-action': "continue" });
-    next.id = 'ck-continue-btn';
-    focusCard.appendChild(eyebrow);
-    focusCard.appendChild(expl);
-    focusCard.appendChild(next);
+    const verdictText = sc.correct ? 'Bonne réponse' : 'À retravailler';
+    const verdictClass = sc.correct ? 'ck-verdict-ok' : 'ck-verdict-ko';
+    root.appendChild(el('div', { class: 'ck-crumb', text: 'Feedback · ' + (sc.concept || '') }));
+    root.appendChild(el('h2', { class: 'ck-h2 ' + verdictClass, text: verdictText }));
+    root.appendChild(el('div', { class: 'ck-body', text: sc.explanation || '' }));
 
+    const actions = el('div', { class: 'ck-actions' });
+    const next = el('button', { class: 'ck-btn ck-btn-primary', text: 'Continuer', 'data-action': 'continue' });
+    next.id = 'ck-continue-btn';
+    actions.appendChild(next);
+    root.appendChild(actions);
+
+    showScreen('feedback');
     notifySize();
   }
 

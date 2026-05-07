@@ -69,8 +69,15 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 		"renderFeedback",
 		"dispatchScreen",
 		"RENDERERS",
-		"request_exercise",
-		"submit_answer",
+		// V4 per-screen DOM containers
+		"showScreen",
+		"ck-screen-cockpit",
+		"ck-screen-exercise",
+		"ck-screen-feedback",
+		"ck-btn-primary",
+		"prettyActivityType",
+		"ck-verdict-ok",
+		"ck-verdict-ko",
 		// Direct HTTP API (replaces MCP App protocol for click actions)
 		"apiCall",
 		"_session_token",
