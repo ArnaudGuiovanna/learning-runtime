@@ -411,19 +411,23 @@ func (s *OAuthServer) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Confidential clients must authenticate on refresh too. Public clients
-	// (no client_id supplied) keep the existing PKCE-only flow.
+	// Per RFC 6749 §6 the client must authenticate on every refresh_token
+	// grant. The previous "if clientID != ''" bypass let a stolen refresh
+	// token be redeemed by any anonymous caller (issue #30 part 1). An empty
+	// client_id is now treated like malformed credentials → invalid_client.
 	clientID, clientSecret := extractClientCredentials(r)
-	if clientID != "" {
-		client, err := s.store.GetOAuthClient(clientID)
-		if err != nil {
-			writeTokenError(w, "invalid_client", http.StatusUnauthorized)
-			return
-		}
-		if err := verifyClientAuth(client, clientSecret); err != nil {
-			writeTokenError(w, "invalid_client", http.StatusUnauthorized)
-			return
-		}
+	if clientID == "" {
+		writeTokenError(w, "invalid_client", http.StatusUnauthorized)
+		return
+	}
+	client, err := s.store.GetOAuthClient(clientID)
+	if err != nil {
+		writeTokenError(w, "invalid_client", http.StatusUnauthorized)
+		return
+	}
+	if err := verifyClientAuth(client, clientSecret); err != nil {
+		writeTokenError(w, "invalid_client", http.StatusUnauthorized)
+		return
 	}
 
 	rt, err := s.store.GetRefreshToken(refreshToken)
