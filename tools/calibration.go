@@ -38,13 +38,15 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// 1-5 Likert self-assessment. Reject NaN/Inf and out-of-range values
+		// rather than silently clamping — clamping a hallucinated 100.0 to
+		// 1.0 would corrupt the calibration record. See issue #25.
+		if err := validateLikertFloat("predicted_mastery", params.PredictedMastery, 1, 5); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
 		predicted := (params.PredictedMastery - 1.0) / 4.0
-		if predicted < 0 {
-			predicted = 0
-		}
-		if predicted > 1 {
-			predicted = 1
-		}
 
 		predictionID := generatePredictionID()
 		record := &models.CalibrationRecord{

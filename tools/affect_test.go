@@ -82,6 +82,40 @@ func TestRecordAffect_LowEnergyTriggersLighter(t *testing.T) {
 	}
 }
 
+func TestRecordAffect_RejectsOutOfRangeLikert(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerRecordAffect, "L_owner", "record_affect", map[string]any{
+		"session_id": "s_bad",
+		"energy":     99, // legal Likert is 1-4
+		"confidence": 3,
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for energy=99, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "energy") {
+		t.Fatalf("expected error to mention 'energy', got %q", resultText(res))
+	}
+
+	// And nothing should be persisted.
+	if saved, err := store.GetAffectBySession("L_owner", "s_bad"); err == nil && saved != nil {
+		t.Fatalf("expected no affect row persisted, got %+v", saved)
+	}
+}
+
+func TestRecordAffect_RejectsNegativeLikert(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerRecordAffect, "L_owner", "record_affect", map[string]any{
+		"session_id":           "s_neg",
+		"perceived_difficulty": -2,
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for perceived_difficulty=-2, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "perceived_difficulty") {
+		t.Fatalf("expected error to mention 'perceived_difficulty', got %q", resultText(res))
+	}
+}
+
 func TestRecordAffect_EndOfSessionAutonomyAndDelta(t *testing.T) {
 	store, deps := setupToolsTest(t)
 

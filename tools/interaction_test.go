@@ -208,6 +208,74 @@ func TestRecordInteraction_NoActiveDomain(t *testing.T) {
 	}
 }
 
+func TestRecordInteraction_RejectsOutOfRangeConfidence(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            2.5, // out-of-range; legal interval is [0,1]
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for confidence=2.5, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "confidence") {
+		t.Fatalf("expected error message to mention 'confidence', got %q", msg)
+	}
+
+	// And nothing should have been written to the cognitive store.
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 5)
+	if len(recents) != 0 {
+		t.Fatalf("expected no interactions persisted, got %d", len(recents))
+	}
+}
+
+func TestRecordInteraction_RejectsNegativeResponseTime(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": -30.0,
+		"confidence":            0.5,
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for response_time_seconds=-30, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "response_time_seconds") {
+		t.Fatalf("expected error to mention 'response_time_seconds', got %q", resultText(res))
+	}
+}
+
+func TestRecordInteraction_RejectsOutOfRangeHints(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            0.5,
+		"hints_requested":       9999,
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for hints_requested=9999, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "hints_requested") {
+		t.Fatalf("expected error to mention 'hints_requested', got %q", resultText(res))
+	}
+}
+
 func TestComputeCognitiveSignals(t *testing.T) {
 	// Less than 3 interactions → no signals.
 	fatigue, frust := computeCognitiveSignals([]*models.Interaction{
