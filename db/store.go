@@ -1166,7 +1166,7 @@ type RawLearnerEvent struct {
 const fragileThreshold = 0.30
 
 // GetRecentLearnerEvents returns a chronological-DESC list of cognitive events
-// since `since`, used by the cockpit "Modèle global" timeline. Events are
+// since `since`, surfaced through GlobalOLMSnapshot.RecentEvents. Events are
 // derived from existing tables — no new persistence:
 //
 //   - mastery_threshold : concept_state.p_mastery >= 0.70 and updated_at >= since

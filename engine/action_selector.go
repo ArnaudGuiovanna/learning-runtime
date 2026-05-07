@@ -34,7 +34,7 @@ import (
 // Action is the structured output of SelectAction. It carries enough
 // information for the caller to wrap into a models.Activity (which
 // requires Concept and PromptForLLM, supplied by the caller) and for
-// the cockpit / audit trail to surface the rationale.
+// the dashboard / audit trail to surface the rationale.
 type Action struct {
 	Type             models.ActivityType
 	DifficultyTarget float64

@@ -16,7 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type GetCockpitStateParams struct {
+type GetDashboardStateParams struct {
 	DomainID        string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Si absent, agrège tous les domaines actifs."`
 	IncludeArchived bool   `json:"include_archived,omitempty" jsonschema:"Si true, inclut les domaines archivés dans la réponse."`
 }
@@ -29,7 +29,7 @@ type conceptProgress struct {
 	CardState string  `json:"card_state"`
 }
 
-type domainCockpit struct {
+type domainDashboard struct {
 	DomainID        string                   `json:"domain_id"`
 	Name            string                   `json:"name"`
 	Archived        bool                     `json:"archived"`
@@ -41,14 +41,14 @@ type domainCockpit struct {
 	NextAction      string                   `json:"next_action"`
 }
 
-func registerGetCockpitState(server *mcp.Server, deps *Deps) {
+func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_cockpit_state",
+		Name:        "get_dashboard_state",
 		Description: "Retourne l'état d'apprentissage en JSON structuré (progression par concept, alertes de rétention, signal de trajectoire, métriques d'autonomie, prochaine action). Le LLM peut formuler la réponse texte à partir de ce JSON pour l'apprenant.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetCockpitStateParams) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetDashboardStateParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_cockpit_state: auth failed", "err", err)
+			deps.Logger.Error("get_dashboard_state: auth failed", "err", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -66,7 +66,7 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 		if params.DomainID != "" {
 			d, derr := deps.Store.GetDomainByID(params.DomainID)
 			if derr != nil {
-				deps.Logger.Error("get_cockpit_state: failed to get domain", "err", derr, "learner", learnerID)
+				deps.Logger.Error("get_dashboard_state: failed to get domain", "err", derr, "learner", learnerID)
 				r, _ := errorResult(fmt.Sprintf("domain not found: %v", derr))
 				return r, nil, nil
 			}
@@ -78,7 +78,7 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 		} else {
 			allDomains, derr := deps.Store.GetDomainsByLearner(learnerID, params.IncludeArchived)
 			if derr != nil {
-				deps.Logger.Error("get_cockpit_state: failed to get domains", "err", derr, "learner", learnerID)
+				deps.Logger.Error("get_dashboard_state: failed to get domains", "err", derr, "learner", learnerID)
 				r, _ := errorResult("aucun domaine configuré")
 				return r, nil, nil
 			}
@@ -89,7 +89,7 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 			domains = allDomains
 		}
 
-		var domainCockpits []domainCockpit
+		var domainDashboards []domainDashboard
 		totalMastered := 0
 		totalConcepts := 0
 
@@ -164,7 +164,7 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 				progressPct = float64(masteredCount) / float64(len(domain.Graph.Concepts)) * 100
 			}
 
-			domainCockpits = append(domainCockpits, domainCockpit{
+			domainDashboards = append(domainDashboards, domainDashboard{
 				DomainID:        domain.ID,
 				Name:            domain.Name,
 				Archived:        domain.Archived,
@@ -246,7 +246,7 @@ func registerGetCockpitState(server *mcp.Server, deps *Deps) {
 		dependencyTrend := autonomy.Trend
 
 		r, _ := jsonResult(map[string]interface{}{
-			"domains":          domainCockpits,
+			"domains":          domainDashboards,
 			"total_concepts":   totalConcepts,
 			"total_mastered":   totalMastered,
 			"global_progress":  globalProgress,

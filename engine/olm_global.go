@@ -3,8 +3,9 @@
 
 // Package engine — Open Learner Model global aggregator.
 //
-// BuildGlobalOLMSnapshot rolls up across all non-archived domains for a learner
-// to power the cockpit's "Modèle global" tab.
+// BuildGlobalOLMSnapshot rolls up across all non-archived domains for a
+// learner — exposed via get_olm_snapshot(scope:"global") for the
+// "Modèle global" view.
 
 package engine
 
@@ -17,8 +18,8 @@ import (
 )
 
 const (
-	// sparklineWindow is the number of samples kept for calibration, autonomy
-	// and satisfaction sparklines on the cockpit "Modèle global" tab.
+	// sparklineWindow is the number of samples kept for the calibration,
+	// autonomy and satisfaction sparklines surfaced in the global snapshot.
 	sparklineWindow = 30
 	// recentEventDays is the look-back window for the recent events timeline.
 	recentEventDays = 7
@@ -57,7 +58,7 @@ type LearnerEvent struct {
 	Concept string    `json:"concept,omitempty"`
 }
 
-// GlobalOLMSnapshot is the aggregator payload for the cockpit's global tab.
+// GlobalOLMSnapshot is the aggregator payload for the global OLM scope.
 type GlobalOLMSnapshot struct {
 	Streak              int             `json:"streak"`
 	TotalSolid          int             `json:"total_solid"`
@@ -70,7 +71,7 @@ type GlobalOLMSnapshot struct {
 }
 
 // BuildGlobalOLMSnapshot aggregates across all non-archived domains for a
-// learner — powers the cockpit's "Modèle global" tab.
+// learner — powers get_olm_snapshot(scope:"global").
 func BuildGlobalOLMSnapshot(store *db.Store, learnerID string) (*GlobalOLMSnapshot, error) {
 	g := &GlobalOLMSnapshot{}
 
@@ -129,8 +130,8 @@ func BuildGlobalOLMSnapshot(store *db.Store, learnerID string) (*GlobalOLMSnapsh
 		}
 	}
 
-	// Recent events — past 7 days. GetRecentLearnerEvents returns DESC (newest-first),
-	// which matches the cockpit timeline's "newest at top" UX.
+	// Recent events — past 7 days. GetRecentLearnerEvents returns DESC
+	// (newest-first), preserved as the natural "newest at top" ordering.
 	since := time.Now().UTC().AddDate(0, 0, -recentEventDays)
 	if rawEvents, err := store.GetRecentLearnerEvents(learnerID, since); err == nil {
 		for _, re := range rawEvents {

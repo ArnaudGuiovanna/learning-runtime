@@ -37,7 +37,7 @@ func MasteryBKT() float64 {
 
 // MasteryKST returns the threshold for "prerequisite considered satisfied
 // to unlock a successor in the KST frontier". Used by ComputeFrontier,
-// ConceptStatus, OLM cluster classification and cockpit aggregations.
+// ConceptStatus, OLM cluster classification and dashboard aggregations.
 func MasteryKST() float64 {
 	if isUnifiedThreshold() {
 		return 0.85
