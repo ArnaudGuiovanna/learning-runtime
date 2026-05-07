@@ -27,3 +27,4 @@ eval/
 # Internal security tracking — never commit
 security-todo.md
 .superpowers/
+.claude/
