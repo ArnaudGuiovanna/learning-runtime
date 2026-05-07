@@ -50,14 +50,17 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 		"ui/request-display-mode",
 		"availableDisplayModes",
 		"\"fullscreen\"",
-		// V2 NEW: KC picker + j'attaque plumbing
+		// KC picker + j'attaque plumbing — clicks fire MCP tools directly
+		// from the iframe (per MCP Apps spec) and j'attaque additionally
+		// nudges the LLM via update-model-context.
 		"ui/update-model-context",
 		"pick_concept",
-		"learning_negotiation",
 		"pushModelContext",
+		"fireTool",
+		"tools/call",
 		// JS hooks the click delegation targets
 		"data-action=\"attack\"",
-		"data-kc=",
+		"'data-kc'",
 		// DOM ids the JS targets
 		"id=\"ck-domain-select\"",
 		"id=\"ck-fullscreen-btn\"",

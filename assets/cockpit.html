@@ -237,6 +237,34 @@ html, body {
   .ck-kc-why { font-size: 11px; }
 }
 
+/* ─── Skeleton (visible until ui/initialize completes) ─── */
+.ck-skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  background-size: 200% 100%;
+  animation: ck-shimmer 1.4s linear infinite;
+  border-radius: 8px;
+  height: 14px;
+  margin-bottom: 10px;
+}
+.ck-skeleton.ck-skel-lg { height: 22px; width: 60%; }
+.ck-skeleton.ck-skel-md { height: 14px; width: 90%; }
+.ck-skeleton.ck-skel-sm { height: 12px; width: 40%; }
+@keyframes ck-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ─── Error panel (init failure) ─── */
+.ck-error {
+  margin: 24px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: rgba(220, 80, 80, 0.10);
+  border: 1px solid rgba(220, 80, 80, 0.30);
+  color: var(--ck-text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ck-error b { display: block; margin-bottom: 6px; font-size: 15px; }
+.ck-error code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--ck-text-secondary); }
+
 /* ─── Motion preference ─── */
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0s !important; transition-duration: 0s !important; }
@@ -261,13 +289,26 @@ html, body {
       </div>
     </div>
     <div class="ck-section-label">Le palier suivant</div>
-    <div id="ck-focus-card" class="ck-card ck-focus"></div>
+    <div id="ck-focus-card" class="ck-card ck-focus">
+      <div class="ck-skeleton ck-skel-sm"></div>
+      <div class="ck-skeleton ck-skel-lg"></div>
+      <div class="ck-skeleton ck-skel-md"></div>
+    </div>
     <div class="ck-section-label">Ou choisis ce que tu veux travailler</div>
-    <div id="ck-kc-list" class="ck-card ck-kc-list" role="list"></div>
+    <div id="ck-kc-list" class="ck-card ck-kc-list" role="list">
+      <div class="ck-skeleton ck-skel-md"></div>
+      <div class="ck-skeleton ck-skel-md"></div>
+      <div class="ck-skeleton ck-skel-md"></div>
+    </div>
     <div class="ck-section-label">Signal métacognitif</div>
-    <div id="ck-signal" class="ck-signal"></div>
+    <div id="ck-signal" class="ck-signal">
+      <div class="ck-skeleton ck-skel-sm"></div>
+    </div>
     <div class="ck-section-label">Vue d'ensemble · tous domaines</div>
-    <div id="ck-stats" class="ck-stats"></div>
+    <div id="ck-stats" class="ck-stats">
+      <div class="ck-skeleton ck-skel-md"></div>
+    </div>
+    <div id="ck-error" class="ck-error" hidden></div>
     <div class="ck-footer-hint">apprenant et tuteur regardent les mêmes données.</div>
   </div>
 </div>
@@ -323,6 +364,14 @@ html, body {
 
   // ─── State ──────────────
   let state = { graph: null, hostCaps: null };
+
+  // Discriminator for ui/notifications/tool-result: only OLMGraph-shaped
+  // payloads (from open_cockpit / pick_concept) should re-render the
+  // cockpit. Other tool results delivered via the same notification
+  // channel must be ignored to avoid clobbering the UI.
+  function isOLMGraph(sc) {
+    return !!(sc && typeof sc === 'object' && Array.isArray(sc.available_domains) && Array.isArray(sc.concepts));
+  }
 
   // ─── Render functions ──────────────
   function renderAll(graph) {
@@ -448,45 +497,47 @@ html, body {
   }
 
   // ─── Click handlers (delegation) ──────────────
-  // The View only signals INTENT via ui/update-model-context. Claude reads
-  // the context on the next turn and calls the appropriate MCP tool. The
-  // host then pushes ui/notifications/tool-result back to the View, which
-  // triggers re-render via the notification handler. This pattern avoids
-  // View-initiated tools/call which claude.ai does not forward over HTTP.
+  // KC clicks and domain switches fire the corresponding MCP tool directly
+  // from the iframe via fireTool (per the MCP Apps spec, blog 2026-01-26):
+  // pick_concept and open_cockpit return OLMGraph-shaped results that the
+  // host re-delivers via ui/notifications/tool-result, which the message
+  // handler renders. The iframe refreshes without requiring the learner to
+  // type a chat message first.
+  //
+  // For the "j'attaque" button, we additionally push model context so
+  // Claude knows to present the exercise in the chat on the next turn —
+  // get_next_activity computes the activity (its result is observable to
+  // the LLM via tool-call history), and the context cue tells Claude to
+  // surface it as a question to the learner rather than a tool re-call.
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action="attack"]');
     if (btn && state.graph && state.graph.focus_concept) {
       btn.disabled = true;
       const concept = state.graph.focus_concept;
-      // Optimistic UI: surface the action immediately. The full activity
-      // arrives in the chat once Claude responds to the model-context cue.
+      const did = (state.graph && state.graph.domain_id) || undefined;
+      // Optimistic UI: surface the action while the activity is computed.
       const card = document.getElementById('ck-focus-card');
-      card.appendChild(el('div', { class: 'ck-focus-activity', text: "j'attaque '" + concept + "' — réponds-moi pour démarrer l'activité." }));
+      card.appendChild(el('div', { class: 'ck-focus-activity', text: "Activité en préparation pour '" + concept + "'…" }));
+      fireTool('get_next_activity', did ? { domain_id: did } : {});
       pushModelContext(
-        "L'apprenant clique 'j'attaque' sur le palier '" + concept + "' depuis le cockpit. Démarre maintenant une activité courte sur ce concept (appelle learning_negotiation si pertinent puis présente le premier exercice). Évite de re-décrire le cockpit.",
+        "L'apprenant clique 'j'attaque' sur le palier '" + concept + "' depuis le cockpit. L'activité a déjà été calculée par get_next_activity — présente directement le premier exercice à l'apprenant (sans rappeler le tool, sans re-décrire le cockpit).",
         { focus_attacked: concept }
       );
       return;
     }
     const row = e.target.closest('[data-kc]');
     if (row) {
-      // row[data-kc=<concept>] identifies the KC
       const concept = row.getAttribute('data-kc');
-      showToast("KC '" + concept + "' demandé — réponds-moi pour confirmer.");
-      pushModelContext(
-        "L'apprenant a cliqué le KC '" + concept + "' dans le cockpit pour en faire son nouveau focus. Appelle pick_concept(concept='" + concept + "') puis confirme brièvement, puis re-affiche le cockpit (open_cockpit) pour que la nouvelle focus card s'affiche.",
-        { focus_changed_to: concept }
-      );
+      const did = (state.graph && state.graph.domain_id) || undefined;
+      showToast("Focus → '" + concept + "'");
+      fireTool('pick_concept', did ? { concept: concept, domain_id: did } : { concept: concept });
     }
   });
 
   document.getElementById('ck-domain-select').addEventListener('change', (e) => {
     const did = e.target.value;
-    showToast("Changement de domaine demandé — réponds-moi pour confirmer.");
-    pushModelContext(
-      "L'apprenant a changé de domaine via le sélecteur du cockpit (domain_id='" + did + "'). Appelle open_cockpit(domain_id='" + did + "') pour rafraîchir l'iframe sur ce domaine.",
-      { domain_switched_to: did }
-    );
+    showToast("Changement de domaine…");
+    fireTool('open_cockpit', { domain_id: did });
   });
 
   document.getElementById('ck-fullscreen-btn').addEventListener('click', () => {
@@ -512,8 +563,13 @@ html, body {
     }
     if (m.method === 'ui/notifications/tool-result') {
       // Per MCP Apps spec: params is CallToolResult directly (not nested in .result).
+      // Discriminate by shape: only re-render the cockpit when the
+      // structuredContent is an OLMGraph (returned by open_cockpit and
+      // pick_concept). Other tools the iframe may fire — e.g.
+      // get_next_activity from "j'attaque" — return a different shape and
+      // would clobber the UI if passed to renderAll.
       const sc = m.params && m.params.structuredContent;
-      if (sc) renderAll(sc);
+      if (isOLMGraph(sc)) renderAll(sc);
       return;
     }
     if (m.method === 'ui/notifications/host-context-changed') {
@@ -526,6 +582,25 @@ html, body {
     const fsBtn = document.getElementById('ck-fullscreen-btn');
     const modes = (state.hostCaps && state.hostCaps.availableDisplayModes) || [];
     fsBtn.hidden = !modes.includes('fullscreen');
+  }
+
+  // ─── Error panel ──────────────
+  function showInitError(err) {
+    const panel = document.getElementById('ck-error');
+    if (!panel) return;
+    clear(panel);
+    const title = el('b', { text: 'Le cockpit n\'a pas pu démarrer' });
+    const detail = el('div', { text: 'Le client MCP n\'a pas répondu à la poignée de main ui/initialize. Vérifie que ton client supporte les MCP Apps (Claude Desktop, claude.ai recents).' });
+    const errLine = err ? el('div', { class: '', text: '' }) : null;
+    if (errLine) {
+      const code = el('code', { text: String((err && err.message) || err || '') });
+      errLine.appendChild(code);
+    }
+    panel.appendChild(title);
+    panel.appendChild(detail);
+    if (errLine) panel.appendChild(errLine);
+    panel.hidden = false;
+    notifySize();
   }
 
   // ─── Lifecycle handshake ──────────────
@@ -542,6 +617,7 @@ html, body {
       notifySize();
     } catch (err) {
       console.error('cockpit init failed', err);
+      showInitError(err);
     }
   })();
 })();
