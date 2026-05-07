@@ -36,9 +36,6 @@ type interactionInput struct {
 // cognitive state (BKT, FSRS, IRT, PFA) for the concept.  Returns the
 // resulting ConceptState (post-update) and an error if any persistence
 // step failed.
-//
-// Used by both registerRecordInteraction (chat-mode path) and
-// submit_answer (iframe path) to keep the algorithm chain DRY.
 func applyInteraction(
 	deps *Deps,
 	learnerID string,

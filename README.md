@@ -107,24 +107,11 @@ Two flags change the runtime (`REGULATION_THRESHOLD`, `REGULATION_FADE`); the re
 | `REGULATION_GATE` | on | Drops the gate appendix. Gate keeps running. | prompt only |
 | `REGULATION_FADE` | **off** | **Opt-in** (the only opt-in flag). Set to the literal `on` to enable [6] FadeController: maps `autonomy_score` × trend to fade params (hint verbosity, webhook frequency, ZPD aggressiveness, proactive review). When on, the fader modulates the `motivation_brief` so that the more autonomous the learner, the terser (and ultimately silent) the brief becomes; the resulting `fade_params` are also surfaced in the `get_next_activity` JSON for downstream consumers. Strict equality with `on` — any other value (including `ON`, `true`, `1`) keeps the fader off. See `docs/regulation-design/06-fade-controller.md`. | runtime |
 
-## Tutor App (iframe-native UI)
+## Surface
 
-Tutor MCP exposes a single SPA at `ui://app` that renders three screens — cockpit, exercise, feedback — driven by tools that return `structuredContent.screen`. The full E2E learning loop (read exercise, answer, get feedback, continue) happens inside the iframe; the chat is reduced to an explicit opt-out.
+Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it queries cognitive state with the read-side tools, narrates exercises and feedback in plain text, and persists each turn through `record_interaction`. There is no iframe, no embedded SPA, no client-side rendering — everything happens in the host's chat surface (Claude Desktop, Claude.ai, or any MCP-compatible client).
 
-**Entry tools:**
-
-| Tool | Role |
-|---|---|
-| `open_app` | Mounts the iframe with the cockpit screen. (`open_cockpit` is kept as a legacy alias serving the same handler.) |
-| `request_exercise` | Orchestrates the next activity, calls the host LLM via MCP `sampling/createMessage`, returns `screen:"exercise"`. |
-| `submit_answer` | Calls the host LLM to evaluate the answer, updates BKT/FSRS/IRT (`record_interaction` shared path), returns `screen:"feedback"`. |
-| `set_chat_mode` | Toggles a per-learner chat-only opt-out. |
-
-**Host requirement.** The MCP client must support `sampling/createMessage` (Claude Desktop ✓). When sampling is unavailable, tools return `mode:"fallback_b"` and the iframe shows a chat-fallback empty state.
-
-**Chat-mode opt-out.** An apprenant who prefers the legacy chat experience can ask "lance le tutor sans interface". Claude calls `set_chat_mode(enabled=true)`; subsequent `request_exercise`/`submit_answer` calls return text-only responses (no `_meta.ui`, no `structuredContent`), and the LLM speaks the exercise/feedback in chat as before. The cognitive state (BKT/FSRS/IRT) updates the same way on both paths.
-
-## MCP Tools (30)
+## MCP Tools
 
 ### Core Learning
 
@@ -133,15 +120,9 @@ Tutor MCP exposes a single SPA at `ui://app` that renders three screens — cock
 | `get_learner_context` | Session context: active domain, concept states, recent history, active misconceptions |
 | `get_pending_alerts` | Critical alerts requiring immediate action |
 | `get_next_activity` | Next optimal activity + metacognitive mirror + tutor mode + motivation brief |
-| `request_exercise` | Iframe-driven counterpart of `get_next_activity`. Calls sampling to render the exercise; returns `screen:"exercise"` payload for the app UI. |
-| `submit_answer` | Iframe-driven answer submission. Sampling-evaluates the answer, runs the BKT/FSRS/IRT update, returns `screen:"feedback"` payload. |
-| `set_chat_mode` | Toggle per-learner chat-only mode (opt-out from the iframe app). |
 | `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA; tracks hints, initiative, proactive reviews, error type, misconception type/detail |
 | `check_mastery` | Check if a concept is eligible for a mastery challenge |
-| `get_cockpit_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
-| `open_app` | Mounts the iframe app at `ui://app` with the cockpit screen on first load. |
-| `open_cockpit` | Legacy alias for `open_app` — same handler, kept for backward compat with existing chat sessions. |
-| `pick_concept` | Pin a specific concept as the next focus, overriding the router for one activity |
+| `get_dashboard_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
 | `get_olm_snapshot` | Open Learner Model snapshot: per-concept mastery, retention, last-seen, fringe membership, anti-repeat status |
 | `get_availability_model` | Learner's time windows and session frequency |
 | `update_learner_profile` | Persist learner metadata (device, background, level, calibration bias, autonomy score) |
@@ -152,7 +133,7 @@ Tutor MCP exposes a single SPA at `ui://app` that renders three screens — cock
 |------|-------------|
 | `init_domain` | Create a knowledge domain with concepts, prerequisite graph, personal goal, and optional value framings |
 | `add_concepts` | Add concepts to an existing domain without resetting progress |
-| `archive_domain` | Hide a domain from cockpit/routing while preserving progress |
+| `archive_domain` | Hide a domain from dashboard/routing while preserving progress |
 | `unarchive_domain` | Reactivate an archived domain |
 | `delete_domain` | Permanently remove a domain and all its data |
 | `set_goal_relevance` | LLM-decomposed goal-relevance vector over the concept graph (0 = orthogonal, 1 = goal-critical) — biases the concept selector toward what matters for the learner's stated objective. Disabled by `REGULATION_GOAL=off`. |
@@ -204,7 +185,7 @@ The scheduler runs background jobs that detect nine alert types:
 - **AFFECT_NEGATIVE** — Low satisfaction or excessive difficulty on 2 consecutive sessions.
 - **TRANSFER_BLOCKED** — BKT shows mastery but transfer scores remain low across contexts.
 
-Critical alerts are delivered via Discord webhook; dedup prevents the same alert firing twice in one day. Alert computation, the cockpit, and `priority_concept` filter out concept history that no longer belongs to an active (non-archived) domain, so `delete_domain` keeps progression on disk (re-`init_domain` brings it back) without leaking into reads or webhooks.
+Critical alerts are delivered via Discord webhook; dedup prevents the same alert firing twice in one day. Alert computation, the dashboard, and `priority_concept` filter out concept history that no longer belongs to an active (non-archived) domain, so `delete_domain` keeps progression on disk (re-`init_domain` brings it back) without leaking into reads or webhooks.
 
 ## Motivation Engine
 

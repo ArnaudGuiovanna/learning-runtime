@@ -583,7 +583,7 @@ func TestInteractionsLifecycle(t *testing.T) {
 	// GetSessionStart for a learner with no interactions returns now (non-zero, no error).
 	// The MIN() aggregate path is exercised in TestGetSessionStart_Empty below;
 	// when rows exist, the modernc/sqlite driver returns MIN(time) as text and
-	// the production caller swallows the error (see tools/cockpit.go).
+	// the production caller swallows the error (see tools/get_dashboard_state.go).
 	start2, err := store.GetSessionStart("L-missing")
 	if err != nil {
 		t.Fatalf("session start missing: %v", err)

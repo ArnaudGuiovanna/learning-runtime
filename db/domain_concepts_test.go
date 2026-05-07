@@ -55,7 +55,7 @@ func TestActiveDomainConceptSet_FiltersOutDeletedDomain(t *testing.T) {
 }
 
 // TestActiveDomainConceptSet_ExcludesArchived confirms archived domains don't leak
-// into the active set either — the cockpit/priority surface should only mention
+// into the active set either — the dashboard/priority surface should only mention
 // concepts the learner currently has visible.
 func TestActiveDomainConceptSet_ExcludesArchived(t *testing.T) {
 	store := setupTestDB(t)

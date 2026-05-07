@@ -31,8 +31,8 @@ import (
 const nodeFragileMasteryThreshold = 0.30
 
 // NodeState classifies a concept's mastery for OLM rendering. The values are
-// stable JSON strings used both server-side (BuildOLMGraph) and client-side
-// (cockpit.html JS rendering).
+// stable JSON strings consumed by callers that surface OLM state to the
+// learner (dashboards, webhooks).
 type NodeState string
 
 const (
@@ -416,9 +416,9 @@ func compactBuckets(snap *OLMSnapshot) string {
 
 // MetacogLine returns the single most actionable metacognitive sentence,
 // in descending priority: calibration bias, then autonomy trend, then affect
-// trend. Empty string when no signal is active. Exported so the cockpit's
-// fallback rendering and BuildOLMGraph can produce the same text as the
-// webhook's FormatOLMEmbed.
+// trend. Empty string when no signal is active. Exported so any caller
+// that needs the metacog signal can produce the same text as the webhook's
+// FormatOLMEmbed.
 func MetacogLine(snap *OLMSnapshot) string {
 	if snap.CalibrationBias > calibrationActionableThreshold {
 		return "Tu sur-estimes un peu tes acquis depuis 3 sessions — quelques exercices à froid t'aideront à recalibrer."
