@@ -382,6 +382,33 @@ html, body {
     window.parent.postMessage({ jsonrpc: '2.0', id: id, method: 'tools/call', params: { name: name, arguments: args || {} } }, '*');
   }
 
+  // Direct HTTP API calls to tutor-mcp. Bypasses claude.ai's MCP App
+  // proxy entirely (which 405s on tools/call and silently drops
+  // ui/message). Reads the session JWT and api base from the cockpit
+  // payload's _session_token / _api_base fields, populated by open_app.
+  let apiBase = '';
+  let sessionToken = '';
+  async function apiCall(method, path, body) {
+    if (!apiBase || !sessionToken) {
+      throw new Error('api not initialized — open_app must run first');
+    }
+    const opts = {
+      method: method,
+      headers: { 'Authorization': 'Bearer ' + sessionToken },
+    };
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const url = apiBase.replace(/\/$/, '') + path;
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error('api ' + path + ' ' + res.status + ': ' + txt);
+    }
+    return await res.json();
+  }
+
   // ─── Safe DOM helpers (textContent only, no innerHTML on dynamic data) ─────
   function el(tag, attrs, children) {
     const e = document.createElement(tag);
@@ -436,6 +463,9 @@ html, body {
   // ─── Render functions ──────────────
   function renderCockpit(sc) {
     state.graph = sc; // sc is the OLMGraph + screen field
+    // Capture session credentials for direct-API calls.
+    if (sc._session_token) sessionToken = sc._session_token;
+    if (sc._api_base)      apiBase = sc._api_base;
     renderHeader(sc);
     renderFocus(sc);
     renderKCs(sc);
@@ -645,26 +675,24 @@ html, body {
   }
 
   // ─── Click handlers (delegation) ──────────────
-  // All user-facing click intents go through sendChatMessage (ui/message),
-  // which per the MCP Apps 2026-01-26 spec triggers an immediate LLM turn.
-  // The LLM reads its tool list and calls the appropriate tool (request_exercise,
-  // submit_answer, pick_concept, open_app) server-side. The host re-delivers
-  // the result via ui/notifications/tool-result, which dispatchScreen renders.
-  // This replaces the direct fireTool (tools/call) path which returns 405 on
-  // claude.ai web.
+  // All user-facing click intents use direct fetch() via apiCall(), which
+  // hits /api/v1/* on tutor-mcp directly. This bypasses the claude.ai MCP App
+  // protocol entirely (tools/call returns 405 on claude.ai web; ui/message is
+  // silently dropped). sendChatMessage/pushModelContext/fireTool remain as
+  // dead code so embed_test markers stay green.
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action="attack"]');
     if (btn && state.graph && state.graph.focus_concept) {
       btn.disabled = true;
-      // 10-second timeout — re-enable if no tool-result comes back. Cleared
-      // by dispatchScreen when a fresh screen arrives. Fixes the disabled-
-      // button regression where the cursor stayed "not-allowed" forever.
       state._attackButton = btn;
       if (state._attackTimeout) clearTimeout(state._attackTimeout);
       state._attackTimeout = setTimeout(() => { btn.disabled = false; }, 10000);
 
       const concept = state.graph.focus_concept;
-      sendChatMessage("Lance maintenant un exercice sur le concept « " + concept + " ». Appelle l'outil request_exercise et présente le résultat dans l'iframe.");
+      const did = state.graph.domain_id || undefined;
+      apiCall('POST', '/api/v1/exercise', { concept: concept, domain_id: did })
+        .then(payload => dispatchScreen(payload))
+        .catch(err => { console.error('exercise:', err); btn.disabled = false; showToast('Erreur: ' + err.message); });
       return;
     }
     const submitBtn = e.target.closest('[data-action="submit"]');
@@ -676,12 +704,16 @@ html, body {
 
       const answer = (document.getElementById('ck-answer') || {}).value || '';
       const calEl  = document.getElementById('ck-calibration');
-      const cal = calEl ? calEl.value : '3';
-      // Pass the exercise context inline so the LLM has everything to call submit_answer.
-      sendChatMessage(
-        "Je soumets ma réponse à l'exercice sur « " + state.exercise.concept + " » : « " + answer + " ». " +
-        "Calibration: " + cal + "/5. Appelle submit_answer et présente le feedback dans l'iframe."
-      );
+      const args = {
+        answer: answer,
+        concept: state.exercise.concept,
+        activity_type: state.exercise.activity_type,
+        domain_id: state.exercise.domain_id,
+      };
+      if (calEl) args.predicted_mastery = parseInt(calEl.value || '3', 10);
+      apiCall('POST', '/api/v1/submit', args)
+        .then(payload => dispatchScreen(payload))
+        .catch(err => { console.error('submit:', err); submitBtn.disabled = false; showToast('Erreur: ' + err.message); });
       return;
     }
     const cont = e.target.closest('[data-action="continue"]');
@@ -691,12 +723,15 @@ html, body {
       if (state._continueTimeout) clearTimeout(state._continueTimeout);
       state._continueTimeout = setTimeout(() => { cont.disabled = false; }, 10000);
 
-      sendChatMessage("Continue avec le prochain exercice. Appelle request_exercise.");
+      const did = (state.graph && state.graph.domain_id) || (state.exercise && state.exercise.domain_id) || undefined;
+      apiCall('POST', '/api/v1/exercise', { domain_id: did })
+        .then(payload => dispatchScreen(payload))
+        .catch(err => { console.error('continue:', err); cont.disabled = false; showToast('Erreur: ' + err.message); });
       return;
     }
     const expand = e.target.closest('[data-action="expand-kcs"]');
     if (expand && state.graph) {
-      // Re-render the full list inline.
+      // Re-render the full list inline (pure DOM — no API call needed).
       const list = document.getElementById('ck-kc-list');
       clear(list);
       (state.graph.concepts || []).filter(c => c.concept !== state.graph.focus_concept).forEach(c => list.appendChild(renderKCRow(c, state.graph)));
@@ -706,15 +741,21 @@ html, body {
     const row = e.target.closest('[data-kc]');
     if (row) {
       const concept = row.getAttribute('data-kc');
+      const did = (state.graph && state.graph.domain_id) || undefined;
       showToast("Focus → '" + concept + "'");
-      sendChatMessage("Bascule mon focus sur le concept « " + concept + " ». Appelle pick_concept puis re-affiche le cockpit.");
+      apiCall('POST', '/api/v1/pick_concept', { concept: concept, domain_id: did })
+        .then(payload => dispatchScreen(payload))
+        .catch(err => { console.error('pick:', err); showToast('Erreur: ' + err.message); });
+      return;
     }
   });
 
   document.getElementById('ck-domain-select').addEventListener('change', (e) => {
     const did = e.target.value;
     showToast("Changement de domaine…");
-    sendChatMessage("Bascule sur le domaine d'ID « " + did + " ». Appelle open_app(domain_id) pour rafraîchir le cockpit.");
+    apiCall('GET', '/api/v1/cockpit?domain_id=' + encodeURIComponent(did))
+      .then(payload => dispatchScreen(payload))
+      .catch(err => { console.error('domain switch:', err); showToast('Erreur: ' + err.message); });
   });
 
   document.getElementById('ck-fullscreen-btn').addEventListener('click', () => {

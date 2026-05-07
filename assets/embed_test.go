@@ -71,6 +71,14 @@ func TestEmbeddedCockpitHTML_HasV2Markers(t *testing.T) {
 		"RENDERERS",
 		"request_exercise",
 		"submit_answer",
+		// Direct HTTP API (replaces MCP App protocol for click actions)
+		"apiCall",
+		"_session_token",
+		"_api_base",
+		"/api/v1/exercise",
+		"/api/v1/cockpit",
+		"/api/v1/submit",
+		"/api/v1/pick_concept",
 		// Click delegation targets
 		"data-action=\"attack\"",
 		"data-action=\"submit\"",
