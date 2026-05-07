@@ -6,7 +6,6 @@ package tools
 
 import (
 	"context"
-	"time"
 
 	"tutor-mcp/apihttp"
 	"tutor-mcp/assets"
@@ -120,44 +119,17 @@ func openAppHandler(deps *Deps) func(context.Context, *mcp.CallToolRequest, Open
 			APIBase:      deps.BaseURL,
 		}
 
-		if hasSession && graph.OLMSnapshot != nil && graph.OLMSnapshot.DomainID != "" {
-			activity, oerr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
-				LearnerID: learnerID,
-				DomainID:  graph.OLMSnapshot.DomainID,
-				Now:       time.Now().UTC(),
-				Config:    engine.NewDefaultPhaseConfig(),
-			})
-			if oerr != nil {
-				deps.Logger.Warn("open_app: prefetch orchestrate failed", "err", oerr, "learner", learnerID)
-			} else if activity.Concept == "" || activity.PromptForLLM == "" {
-				deps.Logger.Warn("open_app: prefetch skipped (empty concept or prompt)", "learner", learnerID, "type", string(activity.Type))
-			} else {
-				samplingCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-				resp, serr := req.Session.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
-					MaxTokens:    800,
-					SystemPrompt: "Tu es un tuteur pédagogique. Génère un exercice pour un apprenant. Retourne uniquement l'énoncé de l'exercice (la consigne et la question), sans préface, sans solution, sans hints inline. Style clair et concis. Markdown autorisé pour mise en forme légère.",
-					Messages: []*mcp.SamplingMessage{
-						{Role: "user", Content: &mcp.TextContent{Text: activity.PromptForLLM}},
-					},
-				})
-				cancel()
-				if serr == nil && resp != nil {
-					if tc, ok := resp.Content.(*mcp.TextContent); ok && tc.Text != "" {
-						out.PrefetchedExercise = &prefetchedExercise{
-							Concept:      activity.Concept,
-							ActivityType: string(activity.Type),
-							Difficulty:   activity.DifficultyTarget,
-							Text:         tc.Text,
-						}
-						deps.Logger.Info("open_app: prefetched exercise", "learner", learnerID, "concept", activity.Concept, "type", string(activity.Type), "chars", len(tc.Text))
-					} else {
-						deps.Logger.Warn("open_app: prefetch sampling returned non-text or empty content", "learner", learnerID)
-					}
-				} else {
-					deps.Logger.Warn("open_app: prefetch sampling failed", "err", serr, "learner", learnerID)
-				}
-			}
-		}
+		// Sampling/createMessage was previously attempted here to prefetch
+		// exercise content. It does not work on claude.ai's connector
+		// transport — the host either ignores the request (context deadline
+		// exceeded inside the tool handler) or the stream is already closed
+		// (from detached HTTP handlers). Worse, the 12s wait pushed
+		// open_app over the Anthropic Proxy's tools/call response budget,
+		// triggering -32600 "Invalid content from server". Removed.
+		// Content generation now happens through chat-side tool roundtrips
+		// (the host LLM, prompted via ui/message, calls a generation tool
+		// and the iframe polls for the result).
+		_ = req // keep req referenced; the hasSession diagnostic above already used it
 
 		// Text fallback for clients without MCP Apps support — reuses the
 		// webhook formatter so cockpit and webhook show the same prose.
