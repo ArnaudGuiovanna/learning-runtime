@@ -27,10 +27,40 @@ type Scheduler struct {
 }
 
 func NewScheduler(store *db.Store, logger *slog.Logger) *Scheduler {
+	// cron.New() ships no recover middleware: an unrecovered panic in any
+	// scheduled job is a goroutine panic, which Go terminates the whole
+	// process for. The HTTP recoveryMiddleware does not cover scheduler
+	// goroutines, so without WithChain(Recover(...)) a single bad-data
+	// learner could DoS the entire tutor at scheduled job times. See #35.
+	cl := slogCronLogger{l: logger}
 	return &Scheduler{
-		store: store, cron: cron.New(), logger: logger,
+		store:  store,
+		cron:   cron.New(cron.WithChain(cron.Recover(cl))),
+		logger: logger,
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// slogCronLogger adapts robfig/cron's Logger interface onto an *slog.Logger.
+// cron only emits two kinds of messages: routine Info and Error (the latter
+// is what cron.Recover uses to report a recovered panic + stack).
+type slogCronLogger struct {
+	l *slog.Logger
+}
+
+func (s slogCronLogger) Info(msg string, keysAndValues ...interface{}) {
+	if s.l == nil {
+		return
+	}
+	s.l.Info("cron: "+msg, keysAndValues...)
+}
+
+func (s slogCronLogger) Error(err error, msg string, keysAndValues ...interface{}) {
+	if s.l == nil {
+		return
+	}
+	args := append([]interface{}{"err", err}, keysAndValues...)
+	s.l.Error("cron: "+msg, args...)
 }
 
 func (s *Scheduler) Start() error {
