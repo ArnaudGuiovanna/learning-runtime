@@ -7,6 +7,7 @@ package tools
 import (
 	"context"
 
+	"tutor-mcp/apihttp"
 	"tutor-mcp/assets"
 	"tutor-mcp/auth"
 	"tutor-mcp/engine"
@@ -83,6 +84,11 @@ func openAppHandler(deps *Deps) func(context.Context, *mcp.CallToolRequest, Open
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
+
+		// Register the active MCP session so the HTTP API handlers can
+		// reach the host LLM via sampling/createMessage for real exercise
+		// content and LLM-evaluated feedback.
+		apihttp.RegisterSession(learnerID, req.Session)
 
 		// Embed a short-lived JWT and the API base URL so the iframe can make
 		// direct fetch() calls to /api/v1/* without going through the MCP App
