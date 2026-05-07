@@ -65,6 +65,7 @@ func TestRegisterTools_Smoke(t *testing.T) {
 		"queue_webhook_message",
 		"request_exercise",
 		"submit_answer",
+		"get_cockpit_state",
 	}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
