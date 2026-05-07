@@ -6,6 +6,7 @@ package tools
 
 import (
 	"context"
+	"time"
 
 	"tutor-mcp/apihttp"
 	"tutor-mcp/assets"
@@ -23,8 +24,20 @@ import (
 // rejected the previous map[string]any round-trip with -32600.
 type openAppOutput struct {
 	*engine.OLMGraph
-	SessionToken string `json:"_session_token,omitempty"`
-	APIBase      string `json:"_api_base,omitempty"`
+	SessionToken       string              `json:"_session_token,omitempty"`
+	APIBase            string              `json:"_api_base,omitempty"`
+	PrefetchedExercise *prefetchedExercise `json:"prefetched_exercise,omitempty"`
+}
+
+// prefetchedExercise carries the first exercise generated inside
+// openAppHandler so the iframe can display real LLM content instantly
+// when the user clicks "j'attaque" — bypassing /api/v1/exercise for the
+// first attack. Subsequent attacks fall back to the HTTP endpoint.
+type prefetchedExercise struct {
+	Concept      string  `json:"concept"`
+	ActivityType string  `json:"activity_type"`
+	Difficulty   float64 `json:"difficulty"`
+	Text         string  `json:"text"`
 }
 
 // OpenAppParams is the input shape for open_app and its legacy alias open_cockpit.
@@ -88,7 +101,9 @@ func openAppHandler(deps *Deps) func(context.Context, *mcp.CallToolRequest, Open
 		// Register the active MCP session so the HTTP API handlers can
 		// reach the host LLM via sampling/createMessage for real exercise
 		// content and LLM-evaluated feedback.
+		hasSession := req.Session != nil
 		apihttp.RegisterSession(learnerID, req.Session)
+		deps.Logger.Info("open_app handler invoked", "learner", learnerID, "session_present", hasSession)
 
 		// Embed a short-lived JWT and the API base URL so the iframe can make
 		// direct fetch() calls to /api/v1/* without going through the MCP App
@@ -103,6 +118,45 @@ func openAppHandler(deps *Deps) func(context.Context, *mcp.CallToolRequest, Open
 			OLMGraph:     graph,
 			SessionToken: sessionToken,
 			APIBase:      deps.BaseURL,
+		}
+
+		if hasSession && graph.OLMSnapshot != nil && graph.OLMSnapshot.DomainID != "" {
+			activity, oerr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
+				LearnerID: learnerID,
+				DomainID:  graph.OLMSnapshot.DomainID,
+				Now:       time.Now().UTC(),
+				Config:    engine.NewDefaultPhaseConfig(),
+			})
+			if oerr != nil {
+				deps.Logger.Warn("open_app: prefetch orchestrate failed", "err", oerr, "learner", learnerID)
+			} else if activity.Concept == "" || activity.PromptForLLM == "" {
+				deps.Logger.Warn("open_app: prefetch skipped (empty concept or prompt)", "learner", learnerID, "type", string(activity.Type))
+			} else {
+				samplingCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+				resp, serr := req.Session.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
+					MaxTokens:    800,
+					SystemPrompt: "Tu es un tuteur pédagogique. Génère un exercice pour un apprenant. Retourne uniquement l'énoncé de l'exercice (la consigne et la question), sans préface, sans solution, sans hints inline. Style clair et concis. Markdown autorisé pour mise en forme légère.",
+					Messages: []*mcp.SamplingMessage{
+						{Role: "user", Content: &mcp.TextContent{Text: activity.PromptForLLM}},
+					},
+				})
+				cancel()
+				if serr == nil && resp != nil {
+					if tc, ok := resp.Content.(*mcp.TextContent); ok && tc.Text != "" {
+						out.PrefetchedExercise = &prefetchedExercise{
+							Concept:      activity.Concept,
+							ActivityType: string(activity.Type),
+							Difficulty:   activity.DifficultyTarget,
+							Text:         tc.Text,
+						}
+						deps.Logger.Info("open_app: prefetched exercise", "learner", learnerID, "concept", activity.Concept, "type", string(activity.Type), "chars", len(tc.Text))
+					} else {
+						deps.Logger.Warn("open_app: prefetch sampling returned non-text or empty content", "learner", learnerID)
+					}
+				} else {
+					deps.Logger.Warn("open_app: prefetch sampling failed", "err", serr, "learner", learnerID)
+				}
+			}
 		}
 
 		// Text fallback for clients without MCP Apps support — reuses the
