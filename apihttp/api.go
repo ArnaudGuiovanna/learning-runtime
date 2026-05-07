@@ -13,6 +13,8 @@ package apihttp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -77,6 +79,7 @@ func RegisterRoutes(mux *http.ServeMux, deps *Deps) {
 
 	mux.Handle("GET /api/v1/cockpit", deps.middleware(deps.handleCockpit))
 	mux.Handle("POST /api/v1/exercise", deps.middleware(deps.handleExercise))
+	mux.Handle("GET /api/v1/exercise_content", deps.middleware(deps.handleExerciseContent))
 	mux.Handle("POST /api/v1/submit", deps.middleware(deps.handleSubmit))
 	mux.Handle("POST /api/v1/pick_concept", deps.middleware(deps.handlePickConcept))
 }
@@ -148,34 +151,23 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use session-bridged sampling to generate real exercise content.
-	// Falls back gracefully to the raw prompt when no session is available.
-	exerciseText := activity.PromptForLLM
-	usedSampling := false
-	sess := getSession(learnerID)
-	if sess == nil {
-		d.Logger.Warn("api exercise: no session registered for learner — sampling skipped, will use prompt fallback", "learner", learnerID)
-	} else {
-		samplingCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-		defer cancel()
-		resp, err := sess.CreateMessage(samplingCtx, &mcp.CreateMessageParams{
-			MaxTokens:    800,
-			SystemPrompt: "Tu es un tuteur pédagogique. Génère un exercice pour un apprenant. Retourne uniquement l'énoncé de l'exercice (la consigne et la question), sans préface, sans solution, sans hints inline. Style clair et concis. Markdown autorisé pour mise en forme légère.",
-			Messages: []*mcp.SamplingMessage{
-				{Role: "user", Content: &mcp.TextContent{Text: activity.PromptForLLM}},
-			},
-		})
-		if err == nil && resp != nil {
-			if tc, ok := resp.Content.(*mcp.TextContent); ok && tc.Text != "" {
-				exerciseText = tc.Text
-				usedSampling = true
-			}
-			d.Logger.Info("api exercise: sampling ok", "learner", learnerID, "chars", len(exerciseText))
-		} else {
-			d.Logger.Warn("api exercise: sampling failed, falling back to prompt", "err", err, "learner", learnerID)
-		}
+	// Generate a per-request rendezvous ID. The iframe will:
+	//   1. send a ui/message asking the host LLM to generate content,
+	//      including this request_id and the orchestrator prompt.
+	//   2. poll GET /api/v1/exercise_content?id=<request_id> until the
+	//      LLM has called the submit_exercise_content tool, which stores
+	//      the generated text under the same id.
+	// Sampling/createMessage was removed: claude.ai connector hosts do
+	// not honour it (handler errors with "stream not connected" or times
+	// out from inside tools/call). The chat-side roundtrip via ui/message
+	// is the only viable LLM-content path on this host.
+	requestID, err := newRequestID()
+	if err != nil {
+		d.Logger.Error("api exercise: request id", "err", err, "learner", learnerID)
+		http.Error(w, `{"error":"could not allocate request id"}`, http.StatusInternalServerError)
+		return
 	}
-	d.Logger.Info("api exercise: returning", "learner", learnerID, "used_sampling", usedSampling, "concept", activity.Concept)
+	d.Logger.Info("api exercise: returning", "learner", learnerID, "concept", activity.Concept, "request_id", requestID)
 
 	out := map[string]any{
 		"screen": "exercise",
@@ -185,11 +177,41 @@ func (d *Deps) handleExercise(w http.ResponseWriter, r *http.Request) {
 			"difficulty":      activity.DifficultyTarget,
 			"input_kind":      "text",
 			"ask_calibration": true,
-			"text":            exerciseText,
+			"text":            "",
+			"request_id":      requestID,
+			"prompt_for_llm":  activity.PromptForLLM,
 		},
 		"domain_id": domain.ID,
 	}
 	writeJSON(w, out)
+}
+
+// newRequestID returns 16 hex chars (8 random bytes) suitable for a
+// short-lived rendezvous key. Collision-resistance only needs to hold
+// over the 5-minute store TTL.
+func newRequestID() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// handleExerciseContent serves the polling endpoint that the iframe
+// hits every second after firing a ui/message. Returns immediately with
+// the current state — no long-poll. The iframe gives up after ~25s and
+// falls back to displaying the orchestrator prompt directly.
+func (d *Deps) handleExerciseContent(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, `{"error":"id query param required"}`, http.StatusBadRequest)
+		return
+	}
+	text, ok := GetContent(id)
+	writeJSON(w, map[string]any{
+		"ready": ok,
+		"text":  text,
+	})
 }
 
 type submitReq struct {
