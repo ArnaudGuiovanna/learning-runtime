@@ -72,9 +72,20 @@ func appUIMeta() mcp.Meta {
 // (tools/cockpit.go) using the same shared handler.
 func registerOpenApp(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "open_app",
-		Description: "Ouvre l'app Tutor MCP (interface complète : cockpit, exercices, feedback). Utiliser quand l'apprenant demande d'ouvrir/voir/afficher son tutor ou son cockpit. Rend une UI MCP App native dans la conversation. NE PAS reformuler le résultat en texte : la UI s'affiche d'elle-même via _meta.ui.resourceUri. Pour les clients sans MCP Apps, le tool retourne aussi un résumé texte de fallback.",
-		Meta:        appUIMeta(),
+		Name: "open_app",
+		Description: "[OPT-IN UNIQUEMENT] Ouvre l'iframe Tutor MCP (cockpit visuel). " +
+			"À n'appeler QUE si l'apprenant demande EXPLICITEMENT et littéralement " +
+			"d'ouvrir l'app/le cockpit/l'interface visuelle (ex. 'ouvre l'app', " +
+			"'lance l'app', 'ouvre le cockpit', 'mode app', 'mode iframe'). " +
+			"NE PAS appeler ce tool pour une demande générique d'apprentissage, " +
+			"de révision, d'exercice ou de progrès — utilise alors les outils " +
+			"texte (request_exercise, submit_answer, get_cockpit_state, etc.) " +
+			"qui retournent du contenu directement dans le chat. " +
+			"Limitation actuelle : le contenu LLM des exercices ne peut pas " +
+			"être généré côté iframe (sampling non supporté par le connecteur), " +
+			"l'app affichera le prompt brut tant que cette restriction tient. " +
+			"Le mode chat texte streamé est plus fiable et est le défaut.",
+		Meta: appUIMeta(),
 	}, openAppHandler(deps))
 }
 
