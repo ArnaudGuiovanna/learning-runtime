@@ -154,7 +154,10 @@ func TestAddConcepts_HappyPath(t *testing.T) {
 	}
 }
 
-func TestAddConcepts_DuplicateNotReadded(t *testing.T) {
+func TestAddConcepts_DuplicateRejected(t *testing.T) {
+	// Issue #27: duplicates of existing concepts are now hard-rejected
+	// (previously silently no-op'd). This guards against inflated
+	// TotalGoalRelevant counts in the FSM observables.
 	store, deps := setupToolsTest(t)
 	d := makeOwnerDomain(t, store, "L_owner", "math")
 
@@ -163,12 +166,8 @@ func TestAddConcepts_DuplicateNotReadded(t *testing.T) {
 		"concepts":      []string{"a"},
 		"prerequisites": map[string][]string{},
 	})
-	if res.IsError {
-		t.Fatalf("expected success, got %q", resultText(res))
-	}
-	out := decodeResult(t, res)
-	if out["added"].(float64) != 0 {
-		t.Fatalf("expected added=0 for duplicate, got %v", out["added"])
+	if !res.IsError || !strings.Contains(resultText(res), "duplicate concept name") {
+		t.Fatalf("expected duplicate error, got %q", resultText(res))
 	}
 }
 
@@ -193,6 +192,32 @@ func TestAddConcepts_DomainNotFound(t *testing.T) {
 	})
 	if !res.IsError || !strings.Contains(resultText(res), "domain not found") {
 		t.Fatalf("got %q", resultText(res))
+	}
+}
+
+func TestInitDomain_RejectsDuplicateConcepts(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerInitDomain, "L_owner", "init_domain", map[string]any{
+		"name": "x", "concepts": []string{"a", "b", "a"},
+		"prerequisites": map[string][]string{},
+	})
+	if !res.IsError || !strings.Contains(resultText(res), "duplicate concept name") {
+		t.Fatalf("expected duplicate error, got %q", resultText(res))
+	}
+}
+
+func TestAddConcepts_RejectsDuplicateInBatch(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math") // contains a, b
+
+	// Duplicate WITHIN the new batch.
+	res := callTool(t, deps, registerAddConcepts, "L_owner", "add_concepts", map[string]any{
+		"domain_id":     d.ID,
+		"concepts":      []string{"c", "c"},
+		"prerequisites": map[string][]string{},
+	})
+	if !res.IsError || !strings.Contains(resultText(res), "duplicate concept name") {
+		t.Fatalf("expected duplicate-in-batch error, got %q", resultText(res))
 	}
 }
 
