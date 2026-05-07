@@ -265,9 +265,41 @@ html, body {
 .ck-error b { display: block; margin-bottom: 6px; font-size: 15px; }
 .ck-error code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--ck-text-secondary); }
 
-/* ─── Screens (cockpit / exercise / feedback) ─── */
+/* ─── Screens (cockpit / exercise / feedback / loading) ─── */
 .ck-screen { display: block; }
 .ck-screen[hidden] { display: none; }
+
+/* Loading screen — shown while the orchestrator + sampling resolve.
+   Calm, minimal: a centred pulsing dot + status line. Avoids the
+   "page statique" feel during multi-second waits. */
+.ck-loading-wrap {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 40px 0;
+}
+.ck-loading-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--ck-accent, #6aa9ff);
+  animation: ck-loading-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ck-loading-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+.ck-loading-status {
+  font-size: 13px;
+  color: var(--ck-text-secondary);
+  letter-spacing: 0.02em;
+}
+.ck-loading-substatus {
+  font-size: 11px;
+  color: var(--ck-text-secondary);
+  opacity: 0.6;
+}
 
 /* Sober layout for non-cockpit screens. */
 .ck-crumb {
@@ -436,6 +468,7 @@ html, body {
 
     <div id="ck-screen-exercise" class="ck-screen" hidden></div>
     <div id="ck-screen-feedback" class="ck-screen" hidden></div>
+    <div id="ck-screen-loading" class="ck-screen" hidden></div>
 
     <div id="ck-error" class="ck-error" hidden></div>
     <div class="ck-footer-hint">apprenant et tuteur regardent les mêmes données.</div>
@@ -447,7 +480,7 @@ html, body {
 
   // Version banner — printed at iframe boot so we can confirm which
   // build is actually rendered (cache-busting diagnosis).
-  const TUTOR_APP_VERSION = 'v4-screens-sampling-2026-05-07';
+  const TUTOR_APP_VERSION = 'v5-loading-states-2026-05-07';
   console.log('[tutor-mcp] iframe version', TUTOR_APP_VERSION);
   // Visible badge in the bottom-right corner (sober, low-contrast).
   document.addEventListener('DOMContentLoaded', () => {
@@ -588,11 +621,26 @@ html, body {
   // Switch the visible screen-root. Hides the others — keeps DOM intact
   // so re-entering a screen is fast.
   function showScreen(name) {
-    const ids = ['cockpit', 'exercise', 'feedback'];
+    const ids = ['cockpit', 'exercise', 'feedback', 'loading'];
     ids.forEach(function(id) {
       const el2 = document.getElementById('ck-screen-' + id);
       if (el2) el2.hidden = (id !== name);
     });
+  }
+
+  // Render a loading screen with status text. Called immediately after
+  // a click that triggers a backend round-trip, so the user sees an
+  // active state instead of a frozen cockpit while sampling resolves.
+  function renderLoading(status, substatus) {
+    const root = document.getElementById('ck-screen-loading');
+    clear(root);
+    const wrap = el('div', { class: 'ck-loading-wrap' });
+    wrap.appendChild(el('div', { class: 'ck-loading-dot' }));
+    wrap.appendChild(el('div', { class: 'ck-loading-status', text: status || 'Préparation…' }));
+    if (substatus) wrap.appendChild(el('div', { class: 'ck-loading-substatus', text: substatus }));
+    root.appendChild(wrap);
+    showScreen('loading');
+    notifySize();
   }
 
   // ─── Render functions ──────────────
@@ -857,9 +905,10 @@ html, body {
 
       const concept = state.graph.focus_concept;
       const did = state.graph.domain_id || undefined;
+      renderLoading("Préparation de l'exercice", concept);
       apiCall('POST', '/api/v1/exercise', { concept: concept, domain_id: did })
         .then(payload => dispatchScreen(payload))
-        .catch(err => { console.error('exercise:', err); btn.disabled = false; showToast('Erreur: ' + err.message); });
+        .catch(err => { console.error('exercise:', err); btn.disabled = false; showToast('Erreur: ' + err.message); showScreen('cockpit'); });
       return;
     }
     const submitBtn = e.target.closest('[data-action="submit"]');
@@ -878,9 +927,10 @@ html, body {
         domain_id: state.exercise.domain_id,
       };
       if (calEl) args.predicted_mastery = parseInt(calEl.value || '3', 10);
+      renderLoading('Évaluation de ta réponse', state.exercise.concept);
       apiCall('POST', '/api/v1/submit', args)
         .then(payload => dispatchScreen(payload))
-        .catch(err => { console.error('submit:', err); submitBtn.disabled = false; showToast('Erreur: ' + err.message); });
+        .catch(err => { console.error('submit:', err); submitBtn.disabled = false; showToast('Erreur: ' + err.message); showScreen('exercise'); });
       return;
     }
     const cont = e.target.closest('[data-action="continue"]');
@@ -891,9 +941,10 @@ html, body {
       state._continueTimeout = setTimeout(() => { cont.disabled = false; }, 10000);
 
       const did = (state.graph && state.graph.domain_id) || (state.exercise && state.exercise.domain_id) || undefined;
+      renderLoading("Préparation de l'exercice suivant");
       apiCall('POST', '/api/v1/exercise', { domain_id: did })
         .then(payload => dispatchScreen(payload))
-        .catch(err => { console.error('continue:', err); cont.disabled = false; showToast('Erreur: ' + err.message); });
+        .catch(err => { console.error('continue:', err); cont.disabled = false; showToast('Erreur: ' + err.message); showScreen('feedback'); });
       return;
     }
     const expand = e.target.closest('[data-action="expand-kcs"]');
@@ -909,20 +960,21 @@ html, body {
     if (row) {
       const concept = row.getAttribute('data-kc');
       const did = (state.graph && state.graph.domain_id) || undefined;
-      showToast("Focus → '" + concept + "'");
+      renderLoading("Focus → " + concept);
       apiCall('POST', '/api/v1/pick_concept', { concept: concept, domain_id: did })
         .then(payload => dispatchScreen(payload))
-        .catch(err => { console.error('pick:', err); showToast('Erreur: ' + err.message); });
+        .catch(err => { console.error('pick:', err); showToast('Erreur: ' + err.message); showScreen('cockpit'); });
       return;
     }
   });
 
   document.getElementById('ck-domain-select').addEventListener('change', (e) => {
     const did = e.target.value;
-    showToast("Changement de domaine…");
+    const name = e.target.options[e.target.selectedIndex] ? e.target.options[e.target.selectedIndex].textContent : '';
+    renderLoading('Changement de domaine', name);
     apiCall('GET', '/api/v1/cockpit?domain_id=' + encodeURIComponent(did))
       .then(payload => dispatchScreen(payload))
-      .catch(err => { console.error('domain switch:', err); showToast('Erreur: ' + err.message); });
+      .catch(err => { console.error('domain switch:', err); showToast('Erreur: ' + err.message); showScreen('cockpit'); });
   });
 
   document.getElementById('ck-fullscreen-btn').addEventListener('click', () => {
