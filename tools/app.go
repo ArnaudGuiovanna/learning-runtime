@@ -6,8 +6,10 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 
 	"tutor-mcp/assets"
+	"tutor-mcp/auth"
 	"tutor-mcp/engine"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -71,15 +73,37 @@ func openAppHandler(deps *Deps) func(context.Context, *mcp.CallToolRequest, Open
 			return r, nil, nil
 		}
 
+		// Embed a short-lived JWT and the API base URL so the iframe can make
+		// direct fetch() calls to /api/v1/* without going through the MCP App
+		// protocol (which 405s on claude.ai web for tools/call and drops
+		// ui/message silently).
+		sessionToken, jwtErr := auth.GenerateJWT(deps.BaseURL, learnerID)
+		if jwtErr != nil {
+			deps.Logger.Error("open_app: jwt issue", "err", jwtErr)
+			// Continue without — iframe will show "auth missing" and fall
+			// back gracefully.
+		}
+
+		// Merge token + api_base into the graph payload as extra top-level
+		// fields. Marshal the OLMGraph to a map, inject, then pass to
+		// structuredContent.
+		out := map[string]any{}
+		if b, err2 := json.Marshal(graph); err2 == nil {
+			_ = json.Unmarshal(b, &out)
+		}
+		if sessionToken != "" {
+			out["_session_token"] = sessionToken
+		}
+		out["_api_base"] = deps.BaseURL
+
 		// Text fallback for clients without MCP Apps support — reuses the
 		// webhook formatter so cockpit and webhook show the same prose.
 		fallback := engine.FormatOLMEmbed(graph.OLMSnapshot)
 
-		return &mcp.CallToolResult{
-			Content:           []mcp.Content{&mcp.TextContent{Text: fallback.Description}},
-			StructuredContent: graph,
-			Meta:              appUIMeta(),
-		}, nil, nil
+		r, _ := jsonResult(out)
+		r.Content = []mcp.Content{&mcp.TextContent{Text: fallback.Description}}
+		r.Meta = appUIMeta()
+		return r, nil, nil
 	}
 }
 
@@ -109,6 +133,17 @@ func registerAppResource(server *mcp.Server, deps *Deps) {
 				URI:      appResourceURI,
 				MIMEType: "text/html;profile=mcp-app",
 				Text:     string(body),
+				// connectDomains whitelists our server origin so the iframe
+				// sandbox CSP allows fetch() to the /api/v1/* endpoints.
+				// Per MCP Apps spec 2026-01-26 §CSP, connectDomains is the
+				// canonical mechanism for this.
+				Meta: mcp.Meta{
+					"ui": map[string]any{
+						"csp": map[string]any{
+							"connectDomains": []string{deps.BaseURL},
+						},
+					},
+				},
 			}},
 		}, nil
 	})

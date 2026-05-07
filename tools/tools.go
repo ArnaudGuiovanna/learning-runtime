@@ -19,8 +19,9 @@ import (
 
 // Deps holds shared dependencies for all MCP tool handlers.
 type Deps struct {
-	Store  *db.Store
-	Logger *slog.Logger
+	Store   *db.Store
+	Logger  *slog.Logger
+	BaseURL string
 }
 
 func getLearnerID(ctx context.Context) (string, error) {

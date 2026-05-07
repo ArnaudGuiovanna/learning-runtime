@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"tutor-mcp/apihttp"
 	"tutor-mcp/auth"
 	"tutor-mcp/db"
 	"tutor-mcp/engine"
@@ -67,7 +68,7 @@ func main() {
 	}, nil)
 
 	// Register tools
-	deps := &tools.Deps{Store: store, Logger: logger}
+	deps := &tools.Deps{Store: store, Logger: logger, BaseURL: baseURL}
 	tools.RegisterTools(mcpServer, deps)
 
 	// Create MCP handler — disable localhost protection (server is reached via a public reverse proxy)
@@ -116,6 +117,10 @@ func main() {
 
 	// MCP route (auth + rate limit protected)
 	mux.Handle("/mcp", auth.RateLimitMiddleware(mcpLimiter, auth.BearerMiddleware(baseURL, mcpHandler)))
+
+	// Direct HTTP API for iframe — bypasses claude.ai MCP App protocol.
+	apiDeps := &apihttp.Deps{Store: store, Logger: logger, BaseURL: baseURL}
+	apihttp.RegisterRoutes(mux, apiDeps)
 
 	// Start scheduler
 	scheduler := engine.NewScheduler(store, logger)
