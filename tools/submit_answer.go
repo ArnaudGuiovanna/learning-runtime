@@ -27,7 +27,6 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "submit_answer",
 		Description: "Évalue la réponse de l'apprenant à un exercice (sampling), met à jour BKT/FSRS/IRT (record_interaction), et retourne un payload structuredContent {screen:'feedback', correct, explanation}.",
-		Meta:        appUIMeta(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params SubmitAnswerParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -40,8 +39,6 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult("domain not found")
 			return r, nil, nil
 		}
-
-		chatMode, _ := deps.Store.GetChatModeEnabled(learnerID)
 
 		evalSystem := "Tu évalues une réponse d'apprenant. Retourne strictement un JSON: {\"correct\": bool, \"explanation\": string, \"error_type\"?: string}. Pas de texte hors JSON."
 		evalUser := fmt.Sprintf("Concept: %s. Type d'activité: %s. Réponse de l'apprenant: %s", params.Concept, params.ActivityType, params.Answer)
@@ -56,24 +53,19 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 		if evalErr != nil {
 			out["mode"] = "fallback_b"
 			out["parsed_failed"] = true
-			if chatMode {
-				out["chat_mode"] = true
-				r, _ := textOnlyResult(out)
-				return r, nil, nil // nil structuredContent on purpose
-			}
 			r, _ := jsonResult(out)
 			return r, out, nil
 		}
 
 		// Persist interaction and run BKT/FSRS/IRT/PFA update chain.
 		if _, applyErr := applyInteraction(deps, learnerID, interactionInput{
-			Concept:      params.Concept,
-			ActivityType: params.ActivityType,
-			Success:      eval.Correct,
-			ErrorType:    eval.ErrorType,
+			Concept:       params.Concept,
+			ActivityType:  params.ActivityType,
+			Success:       eval.Correct,
+			ErrorType:     eval.ErrorType,
 			CalibrationID: params.CalibrationID,
 			// Confidence/HintsRequested/SelfInitiated default to 0/false —
-			// submit_answer (iframe path) does not surface them yet.
+			// submit_answer does not surface them yet.
 		}, time.Now().UTC()); applyErr != nil {
 			deps.Logger.Error("submit_answer: applyInteraction", "err", applyErr, "learner", learnerID)
 			// Non-blocking: still return the feedback to the learner.
@@ -92,12 +84,6 @@ func registerSubmitAnswer(server *mcp.Server, deps *Deps) {
 		out["explanation"] = eval.Explanation
 		if eval.ErrorType != "" {
 			out["error_type"] = eval.ErrorType
-		}
-
-		if chatMode {
-			out["chat_mode"] = true
-			r, _ := textOnlyResult(out)
-			return r, nil, nil // nil structuredContent on purpose
 		}
 
 		r, _ := jsonResult(out)

@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"tutor-mcp/apihttp"
 	"tutor-mcp/auth"
 	"tutor-mcp/db"
 	"tutor-mcp/engine"
@@ -118,10 +117,6 @@ func main() {
 	// MCP route (auth + rate limit protected)
 	mux.Handle("/mcp", auth.RateLimitMiddleware(mcpLimiter, auth.BearerMiddleware(baseURL, mcpHandler)))
 
-	// Direct HTTP API for iframe — bypasses claude.ai MCP App protocol.
-	apiDeps := &apihttp.Deps{Store: store, Logger: logger, BaseURL: baseURL}
-	apihttp.RegisterRoutes(mux, apiDeps)
-
 	// Start scheduler
 	scheduler := engine.NewScheduler(store, logger)
 	if err := scheduler.Start(); err != nil {
@@ -132,14 +127,10 @@ func main() {
 
 	// Wrap with recovery + request logging + security headers + CORS.
 	// Order: recovery outermost so panics in any inner middleware are caught.
-	// CORS: allow chat-side origins (claude.ai, baseURL) by exact match, AND
-	// MCP App iframe sandbox origins (https://<hex>.claudemcpcontent.com,
-	// https://*.anthropic.com) by suffix match — the iframe gets a unique
-	// per-conversation subdomain on those hosts. JWT auth is the security
-	// boundary on /api/v1/* so opening CORS to those iframe origins is safe.
+	// CORS: allow chat-side origins (claude.ai, baseURL) by exact match.
 	handler := recoveryMiddleware(logger, requestLogger(logger, securityHeaders(baseURL, corsMiddleware(
 		[]string{"https://claude.ai", baseURL},
-		[]string{".claudemcpcontent.com", ".anthropic.com"},
+		nil,
 		mux,
 	))))
 

@@ -62,6 +62,11 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE domains ADD COLUMN phase_changed_at TIMESTAMP`,
 		`ALTER TABLE domains ADD COLUMN phase_entry_entropy REAL`,
 		`ALTER TABLE learners ADD COLUMN chat_mode_enabled INTEGER NOT NULL DEFAULT 0`,
+		// chat_mode flag retired (MCP App iframe surface dropped). DROP COLUMN
+		// requires SQLite >= 3.35; modernc.org/sqlite ships well above. Errors
+		// (e.g. column already removed) are swallowed by the loop, matching
+		// the rest of the ALTER list.
+		`ALTER TABLE learners DROP COLUMN chat_mode_enabled`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors
