@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Arnaud Guiovanna <https://www.aguiovanna.fr>
-// GitHub: https://github.com/ArnaudGuiovanna
+// GitHub: https://github.com/ArnaudGuiovanna/tutor-mcp
 // SPDX-License-Identifier: MIT
 
 package db
@@ -26,131 +26,99 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func Migrate(db *sql.DB) error {
-	_, err := db.Exec(schemaSQL)
-	if err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-	// Incremental migrations for existing databases (ALTER TABLE is idempotent-safe)
-	alterMigrations := []string{
-		`ALTER TABLE learners ADD COLUMN profile_json TEXT DEFAULT '{}'`,
-		`ALTER TABLE interactions ADD COLUMN error_type TEXT DEFAULT ''`,
-		`ALTER TABLE interactions ADD COLUMN hints_requested INTEGER DEFAULT 0`,
-		`ALTER TABLE interactions ADD COLUMN self_initiated INTEGER DEFAULT 0`,
-		`ALTER TABLE interactions ADD COLUMN calibration_id TEXT DEFAULT ''`,
-		`ALTER TABLE interactions ADD COLUMN is_proactive_review INTEGER DEFAULT 0`,
-		`ALTER TABLE domains ADD COLUMN personal_goal TEXT DEFAULT ''`,
-		`ALTER TABLE domains ADD COLUMN archived INTEGER DEFAULT 0`,
-		`ALTER TABLE interactions ADD COLUMN misconception_type TEXT`,
-		`ALTER TABLE interactions ADD COLUMN misconception_detail TEXT`,
-		`ALTER TABLE domains ADD COLUMN value_framings_json TEXT DEFAULT ''`,
-		`ALTER TABLE domains ADD COLUMN last_value_axis TEXT DEFAULT ''`,
-		`ALTER TABLE oauth_codes ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE oauth_clients ADD COLUMN client_secret_hash TEXT DEFAULT ''`,
-		`ALTER TABLE domains ADD COLUMN pinned_concept TEXT DEFAULT ''`,
-		// [1] GoalDecomposer — graph version + goal relevance vector storage.
-		// graph_version starts at 1 for existing rows so the next add_concepts
-		// makes IsGoalRelevanceStale() true vs goal_relevance_version=0.
-		`ALTER TABLE domains ADD COLUMN graph_version INTEGER NOT NULL DEFAULT 1`,
-		`ALTER TABLE domains ADD COLUMN goal_relevance_json TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE domains ADD COLUMN goal_relevance_version INTEGER NOT NULL DEFAULT 0`,
-		// [2] PhaseController — FSM state per domain. NULL on existing
-		// rows means "pre-pipeline domain, treat as PhaseInstruction"
-		// (backward-compat per OQ-2.1.b). New domains are initialised
-		// to DIAGNOSTIC explicitly by tools/domain.go init_domain.
-		`ALTER TABLE domains ADD COLUMN phase TEXT`,
-		`ALTER TABLE domains ADD COLUMN phase_changed_at TIMESTAMP`,
-		`ALTER TABLE domains ADD COLUMN phase_entry_entropy REAL`,
-		// Historical chat_mode_enabled column: added then dropped after the
-		// iframe surface was retired. Both statements stay in the ALTER list
-		// so a fresh DB is reconciled with one that already saw the column.
-		// DROP COLUMN requires SQLite >= 3.35 (modernc.org/sqlite ships above).
-		`ALTER TABLE learners ADD COLUMN chat_mode_enabled INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE learners DROP COLUMN chat_mode_enabled`,
-		// Issue #24: persist domain_id on interaction rows so two domains
-		// sharing a concept name can be told apart in audits and downstream
-		// analytics. Nullable: pre-existing rows stay NULL (origin unknown).
-		`ALTER TABLE interactions ADD COLUMN domain_id TEXT`,
-		// Issue #30 part 2: bind refresh_token rows to the issuing client
-		// so a stolen token cannot be redeemed by a different (e.g. self-
-		// registered confidential) client. Nullable: pre-existing rows
-		// stay NULL and bypass the binding check (compat with v0.2 tokens
-		// that were issued before the migration).
-		`ALTER TABLE refresh_tokens ADD COLUMN client_id TEXT`,
-		// Issue #51: log the slip/guess values that the non-canonical
-		// error-type-aware heuristic (algorithms.BKTUpdateHeuristicSlipByErrorType)
-		// actually fed into the BKT update on each interaction so the
-		// run can be replayed deterministically. Nullable: pre-existing
-		// rows have no record (NULL means "unknown / heuristic not
-		// captured at write time").
-		`ALTER TABLE interactions ADD COLUMN bkt_slip REAL`,
-		`ALTER TABLE interactions ADD COLUMN bkt_guess REAL`,
-		// Issue #55: PFA persisted state was written but never consumed —
-		// engine/alert.go recomputes PFA in-memory from the interactions
-		// list each call. Drop the dead columns. Forward-only: there is
-		// no "down" migration. The errors are swallowed by the loop's
-		// `_, _ = db.Exec(m)` so re-running on a DB where the columns
-		// are already gone is a no-op (idempotent). DROP COLUMN requires
-		// SQLite >= 3.35; modernc.org/sqlite v1.47 ships above that.
-		`ALTER TABLE concept_states DROP COLUMN pfa_successes`,
-		`ALTER TABLE concept_states DROP COLUMN pfa_failures`,
-	}
-	for _, m := range alterMigrations {
-		_, _ = db.Exec(m) // ignore "duplicate column" errors
-	}
+// alterMigrations are historical incremental schema changes. Each statement is
+// recorded as its own migration in schema_migrations so future drift can be
+// detected on a per-statement basis. Errors during Exec are tolerated (see
+// migration.IgnoreExecErrors) because legacy databases will already have most
+// of these columns from the previous "best-effort ALTER" loop.
+var alterMigrations = []string{
+	`ALTER TABLE learners ADD COLUMN profile_json TEXT DEFAULT '{}'`,
+	`ALTER TABLE interactions ADD COLUMN error_type TEXT DEFAULT ''`,
+	`ALTER TABLE interactions ADD COLUMN hints_requested INTEGER DEFAULT 0`,
+	`ALTER TABLE interactions ADD COLUMN self_initiated INTEGER DEFAULT 0`,
+	`ALTER TABLE interactions ADD COLUMN calibration_id TEXT DEFAULT ''`,
+	`ALTER TABLE interactions ADD COLUMN is_proactive_review INTEGER DEFAULT 0`,
+	`ALTER TABLE domains ADD COLUMN personal_goal TEXT DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN archived INTEGER DEFAULT 0`,
+	`ALTER TABLE interactions ADD COLUMN misconception_type TEXT`,
+	`ALTER TABLE interactions ADD COLUMN misconception_detail TEXT`,
+	`ALTER TABLE domains ADD COLUMN value_framings_json TEXT DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN last_value_axis TEXT DEFAULT ''`,
+	`ALTER TABLE oauth_codes ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE oauth_clients ADD COLUMN client_secret_hash TEXT DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN pinned_concept TEXT DEFAULT ''`,
+	// [1] GoalDecomposer — graph version + goal relevance vector storage.
+	// graph_version starts at 1 for existing rows so the next add_concepts
+	// makes IsGoalRelevanceStale() true vs goal_relevance_version=0.
+	`ALTER TABLE domains ADD COLUMN graph_version INTEGER NOT NULL DEFAULT 1`,
+	`ALTER TABLE domains ADD COLUMN goal_relevance_json TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN goal_relevance_version INTEGER NOT NULL DEFAULT 0`,
+	// [2] PhaseController — FSM state per domain. NULL on existing
+	// rows means "pre-pipeline domain, treat as PhaseInstruction"
+	// (backward-compat per OQ-2.1.b). New domains are initialised
+	// to DIAGNOSTIC explicitly by tools/domain.go init_domain.
+	`ALTER TABLE domains ADD COLUMN phase TEXT`,
+	`ALTER TABLE domains ADD COLUMN phase_changed_at TIMESTAMP`,
+	`ALTER TABLE domains ADD COLUMN phase_entry_entropy REAL`,
+	// Historical chat_mode_enabled column: added then dropped after the
+	// iframe surface was retired. Both statements stay in the ALTER list
+	// so a fresh DB is reconciled with one that already saw the column.
+	// DROP COLUMN requires SQLite >= 3.35 (modernc.org/sqlite ships above).
+	`ALTER TABLE learners ADD COLUMN chat_mode_enabled INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE learners DROP COLUMN chat_mode_enabled`,
+	// Issue #24: persist domain_id on interaction rows so two domains
+	// sharing a concept name can be told apart in audits and downstream
+	// analytics. Nullable: pre-existing rows stay NULL (origin unknown).
+	`ALTER TABLE interactions ADD COLUMN domain_id TEXT`,
+	// Issue #30 part 2: bind refresh_token rows to the issuing client
+	// so a stolen token cannot be redeemed by a different (e.g. self-
+	// registered confidential) client. Nullable: pre-existing rows
+	// stay NULL and bypass the binding check (compat with v0.2 tokens
+	// that were issued before the migration).
+	`ALTER TABLE refresh_tokens ADD COLUMN client_id TEXT`,
+	// Issue #51: log the slip/guess values that the non-canonical
+	// error-type-aware heuristic (algorithms.BKTUpdateHeuristicSlipByErrorType)
+	// actually fed into the BKT update on each interaction so the
+	// run can be replayed deterministically. Nullable: pre-existing
+	// rows have no record (NULL means "unknown / heuristic not
+	// captured at write time").
+	`ALTER TABLE interactions ADD COLUMN bkt_slip REAL`,
+	`ALTER TABLE interactions ADD COLUMN bkt_guess REAL`,
+	// Issue #55: PFA persisted state was written but never consumed —
+	// engine/alert.go recomputes PFA in-memory from the interactions
+	// list each call. Drop the dead columns. Forward-only: there is
+	// no "down" migration. DROP COLUMN requires SQLite >= 3.35;
+	// modernc.org/sqlite v1.47 ships above that.
+	`ALTER TABLE concept_states DROP COLUMN pfa_successes`,
+	`ALTER TABLE concept_states DROP COLUMN pfa_failures`,
+}
 
-	// Data migration: BKT.PLearn default lowered from 0.30 to 0.15 after
-	// the synthetic-learner harness investigation showed BKT systematically
-	// over-estimates mastery by +0.27 with PLearn=0.30 (see
-	// eval/PLEARN_FINDINGS.md). Idempotent: matches no rows after the
-	// first run on this database.
-	if _, err := db.Exec(`UPDATE concept_states SET p_learn = 0.15 WHERE p_learn = 0.3`); err != nil {
-		return fmt.Errorf("data migration plearn: %w", err)
-	}
-
-	// Issue #61: scrub the legacy `level`, `background`, `learning_style`
-	// keys out of profile_json. These were write-only fields on
-	// update_learner_profile with no production reader (no consumer in
-	// motivation, concept selection, alerts, dashboard). Forward-only —
-	// the tool no longer accepts them so re-introduction is impossible
-	// without code changes. json_remove is idempotent: a second run on a
-	// scrubbed row is a no-op (the keys are already absent).
-	if _, err := db.Exec(
-		`UPDATE learners
-		 SET profile_json = json_remove(profile_json, '$.level', '$.background', '$.learning_style')
-		 WHERE profile_json IS NOT NULL
-		   AND profile_json != ''
-		   AND (json_extract(profile_json, '$.level') IS NOT NULL
-		     OR json_extract(profile_json, '$.background') IS NOT NULL
-		     OR json_extract(profile_json, '$.learning_style') IS NOT NULL)`,
-	); err != nil {
-		return fmt.Errorf("data migration drop learner profile fields: %w", err)
-	}
-
-	// Idempotent table + index creation for existing databases
-	idempotentMigrations := []string{
-		`CREATE TABLE IF NOT EXISTS oauth_codes (
-			code           TEXT PRIMARY KEY,
-			learner_id     TEXT NOT NULL REFERENCES learners(id),
-			code_challenge TEXT NOT NULL,
-			client_id      TEXT NOT NULL DEFAULT '',
-			expires_at     DATETIME NOT NULL,
-			created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS oauth_clients (
-			client_id          TEXT PRIMARY KEY,
-			client_name        TEXT DEFAULT '',
-			redirect_uris      TEXT DEFAULT '[]',
-			client_secret_hash TEXT DEFAULT '',
-			created_at         DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_concept_states_learner ON concept_states(learner_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_concept_states_review ON concept_states(learner_id, next_review)`,
-		`CREATE INDEX IF NOT EXISTS idx_interactions_learner_created ON interactions(learner_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_interactions_learner_concept ON interactions(learner_id, concept, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_scheduled_alerts_learner_type ON scheduled_alerts(learner_id, alert_type, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_codes(expires_at)`,
-		`CREATE TABLE IF NOT EXISTS affect_states (
+// idempotentMigrations are CREATE TABLE/INDEX IF NOT EXISTS statements that
+// were historically rerun on every startup. They are now versioned individually
+// so a body change is caught as drift rather than silently re-executed.
+var idempotentMigrations = []string{
+	`CREATE TABLE IF NOT EXISTS oauth_codes (
+				code           TEXT PRIMARY KEY,
+				learner_id     TEXT NOT NULL REFERENCES learners(id),
+				code_challenge TEXT NOT NULL,
+				client_id      TEXT NOT NULL DEFAULT '',
+				expires_at     DATETIME NOT NULL,
+				created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+	`CREATE TABLE IF NOT EXISTS oauth_clients (
+				client_id          TEXT PRIMARY KEY,
+				client_name        TEXT DEFAULT '',
+				redirect_uris      TEXT DEFAULT '[]',
+				client_secret_hash TEXT DEFAULT '',
+				created_at         DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+	`CREATE INDEX IF NOT EXISTS idx_concept_states_learner ON concept_states(learner_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_concept_states_review ON concept_states(learner_id, next_review)`,
+	`CREATE INDEX IF NOT EXISTS idx_interactions_learner_created ON interactions(learner_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_interactions_learner_concept ON interactions(learner_id, concept, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_scheduled_alerts_learner_type ON scheduled_alerts(learner_id, alert_type, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_codes(expires_at)`,
+	`CREATE TABLE IF NOT EXISTS affect_states (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     learner_id           TEXT NOT NULL REFERENCES learners(id),
     session_id           TEXT NOT NULL,
@@ -163,7 +131,7 @@ func Migrate(db *sql.DB) error {
     created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(learner_id, session_id)
 )`,
-		`CREATE TABLE IF NOT EXISTS calibration_records (
+	`CREATE TABLE IF NOT EXISTS calibration_records (
     prediction_id TEXT PRIMARY KEY,
     learner_id    TEXT NOT NULL REFERENCES learners(id),
     concept_id    TEXT NOT NULL,
@@ -172,7 +140,7 @@ func Migrate(db *sql.DB) error {
     delta         REAL,
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 )`,
-		`CREATE TABLE IF NOT EXISTS transfer_records (
+	`CREATE TABLE IF NOT EXISTS transfer_records (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     learner_id   TEXT NOT NULL REFERENCES learners(id),
     concept_id   TEXT NOT NULL,
@@ -181,12 +149,12 @@ func Migrate(db *sql.DB) error {
     session_id   TEXT DEFAULT '',
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 )`,
-		`CREATE INDEX IF NOT EXISTS idx_affect_states_learner ON affect_states(learner_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_calibration_records_learner ON calibration_records(learner_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_transfer_records_learner_concept ON transfer_records(learner_id, concept_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_interactions_self_initiated ON interactions(learner_id, self_initiated, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_interactions_misconception ON interactions(learner_id, concept, misconception_type)`,
-		`CREATE TABLE IF NOT EXISTS implementation_intentions (
+	`CREATE INDEX IF NOT EXISTS idx_affect_states_learner ON affect_states(learner_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_calibration_records_learner ON calibration_records(learner_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_transfer_records_learner_concept ON transfer_records(learner_id, concept_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_interactions_self_initiated ON interactions(learner_id, self_initiated, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_interactions_misconception ON interactions(learner_id, concept, misconception_type)`,
+	`CREATE TABLE IF NOT EXISTS implementation_intentions (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     learner_id     TEXT    NOT NULL REFERENCES learners(id),
     domain_id      TEXT    NOT NULL,
@@ -196,7 +164,7 @@ func Migrate(db *sql.DB) error {
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     scheduled_for  DATETIME
 )`,
-		`CREATE TABLE IF NOT EXISTS webhook_message_queue (
+	`CREATE TABLE IF NOT EXISTS webhook_message_queue (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     learner_id     TEXT    NOT NULL REFERENCES learners(id),
     kind           TEXT    NOT NULL,
@@ -208,12 +176,33 @@ func Migrate(db *sql.DB) error {
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     sent_at        DATETIME
 )`,
-		`CREATE INDEX IF NOT EXISTS idx_impl_intent_learner ON implementation_intentions(learner_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_wmq_dispatch ON webhook_message_queue(learner_id, kind, status, scheduled_for)`,
+	`CREATE INDEX IF NOT EXISTS idx_impl_intent_learner ON implementation_intentions(learner_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wmq_dispatch ON webhook_message_queue(learner_id, kind, status, scheduled_for)`,
+}
+
+// Migrate brings the database schema up to the version expected by this build.
+//
+// On first run it creates the schema_migrations bookkeeping table, then walks
+// the ordered list returned by buildMigrations() applying any rows that are
+// not yet recorded. On subsequent runs it verifies every previously applied
+// migration's stored SHA-256 checksum still matches the in-source body, and
+// returns an error containing "checksum mismatch" if a body has drifted —
+// rollback is intentionally out of scope, drift requires manual operator
+// intervention.
+//
+// The first invocation against a pre-existing database (one created before the
+// schema_migrations table existed) re-executes every migration body. Each
+// statement is either idempotent (CREATE TABLE/INDEX IF NOT EXISTS, the data
+// UPDATEs) or is marked IgnoreExecErrors so a "duplicate column" from an ALTER
+// that already ran does not abort startup; only the final INSERT into
+// schema_migrations is required to succeed.
+func Migrate(db *sql.DB) error {
+	if err := ensureSchemaMigrationsTable(db); err != nil {
+		return fmt.Errorf("migrate: %w", err)
 	}
-	for _, m := range idempotentMigrations {
-		if _, err := db.Exec(m); err != nil {
-			return fmt.Errorf("idempotent migration: %w", err)
+	for _, m := range buildMigrations() {
+		if err := applyMigration(db, m); err != nil {
+			return fmt.Errorf("migrate: %w", err)
 		}
 	}
 	return nil

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -158,6 +159,12 @@ func TestMigrate_DropsPFAColumns(t *testing.T) {
 	})
 
 	// Scenario 2: pre-#55 DB upgraded.
+	//
+	// Under the schema_migrations + checksum system the DROP COLUMN
+	// migrations run exactly once per database, recorded by version.
+	// To simulate a real pre-#55 DB we apply the base schema directly
+	// and seed the legacy columns BEFORE Migrate runs — that mirrors
+	// the upgrade path a deployed v0.2 DB would actually take.
 	t.Run("upgrade_from_pre_55", func(t *testing.T) {
 		dsn := fmt.Sprintf("file:migrate_pfa_upgrade_%d?mode=memory&cache=shared", testDBCounter+10200)
 		testDBCounter++
@@ -167,11 +174,13 @@ func TestMigrate_DropsPFAColumns(t *testing.T) {
 		}
 		t.Cleanup(func() { db.Close() })
 
-		// First migration brings the schema up to current.
-		if err := Migrate(db); err != nil {
-			t.Fatalf("first Migrate: %v", err)
+		// Apply the embedded base schema directly. CREATE TABLE IF NOT
+		// EXISTS keeps it compatible with Migrate's own bookkeeping run
+		// later in the test.
+		if _, err := db.Exec(schemaSQL); err != nil {
+			t.Fatalf("apply base schema: %v", err)
 		}
-		// Re-introduce the legacy columns to simulate a pre-#55 DB.
+		// Seed the legacy columns to simulate a pre-#55 DB.
 		for _, col := range pfaCols {
 			if _, err := db.Exec(fmt.Sprintf(
 				"ALTER TABLE concept_states ADD COLUMN %s REAL DEFAULT 0.0", col,
@@ -182,18 +191,19 @@ func TestMigrate_DropsPFAColumns(t *testing.T) {
 				t.Fatalf("seed column %s should exist", col)
 			}
 		}
-		// Second migration must drop them again — idempotent.
+		// Migrate must drop them as part of the versioned ALTER list.
 		if err := Migrate(db); err != nil {
-			t.Fatalf("second Migrate: %v", err)
+			t.Fatalf("Migrate: %v", err)
 		}
 		for _, col := range pfaCols {
 			if hasColumn(t, db, "concept_states", col) {
 				t.Errorf("concept_states.%s should have been dropped by Migrate", col)
 			}
 		}
-		// Third migration must remain a no-op (no panic, no error).
+		// Subsequent Migrate calls must remain no-ops (checksums match,
+		// no migration body is re-executed).
 		if err := Migrate(db); err != nil {
-			t.Fatalf("third Migrate (idempotent): %v", err)
+			t.Fatalf("second Migrate (idempotent): %v", err)
 		}
 	})
 }
@@ -217,13 +227,14 @@ func TestMigrate_DropsLegacyLearnerProfileFields(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	// Run an initial migration so the learners table (and profile_json
-	// column) exists, then seed legacy rows BEFORE the second migration
-	// runs the data scrub. The migration is idempotent so the seed runs
-	// after a no-op second call would also work — but seeding between
-	// two Migrate() calls makes the assertion order obvious.
-	if err := Migrate(db); err != nil {
-		t.Fatalf("first Migrate: %v", err)
+	// Apply the embedded base schema directly (CREATE TABLE IF NOT EXISTS
+	// so it stays compatible with the schema_migrations bookkeeping in
+	// Migrate). Seeding legacy rows BEFORE Migrate is what we need to test
+	// here — the data-scrub migration is now versioned and runs exactly
+	// once, on the first Migrate it sees, so the seed must precede it
+	// (the same shape any deployed pre-#61 DB had at upgrade time).
+	if _, err := db.Exec(schemaSQL); err != nil {
+		t.Fatalf("apply base schema: %v", err)
 	}
 	seed := []struct {
 		id      string
@@ -254,7 +265,7 @@ func TestMigrate_DropsLegacyLearnerProfileFields(t *testing.T) {
 	}
 
 	if err := Migrate(db); err != nil {
-		t.Fatalf("second Migrate (must scrub legacy keys): %v", err)
+		t.Fatalf("Migrate (must scrub legacy keys): %v", err)
 	}
 
 	// Each dropped key must be absent (json_extract returns NULL) on
@@ -339,5 +350,155 @@ func TestOpenDB_BadPath(t *testing.T) {
 	_, err := OpenDB("/proc/0/forbidden-not-a-real-sqlite-file")
 	if err == nil {
 		t.Fatal("expected error for unreachable path")
+	}
+}
+
+// openMigrateTestDB returns a fresh in-memory sqlite handle scoped to the
+// current test. Sub-issue #65 tests need to inspect the schema_migrations
+// table directly, so they bypass the higher-level Store helper.
+func openMigrateTestDB(t *testing.T, suffix string) *sql.DB {
+	t.Helper()
+	testDBCounter++
+	dsn := fmt.Sprintf("file:memdb_%s_%s_%d?mode=memory&cache=shared", t.Name(), suffix, testDBCounter)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// TestMigrate_RecordsSchemaMigrationsRows guards the bookkeeping contract:
+// after Migrate() succeeds on a fresh database the schema_migrations table
+// must exist and contain one row per migration in buildMigrations(), each
+// with a non-empty checksum that matches the in-source body. This is the
+// "fresh DB" arm of sub-issue #65.
+func TestMigrate_RecordsSchemaMigrationsRows(t *testing.T) {
+	db := openMigrateTestDB(t, "fresh")
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// schema_migrations must exist as a table.
+	var name string
+	if err := db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'`,
+	).Scan(&name); err != nil {
+		t.Fatalf("schema_migrations table missing: %v", err)
+	}
+
+	// Row count == migration count.
+	expected := buildMigrations()
+	var rowCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&rowCount); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rowCount != len(expected) {
+		t.Fatalf("schema_migrations row count = %d, want %d", rowCount, len(expected))
+	}
+
+	// Every migration is recorded with the correct, non-empty checksum.
+	for _, m := range expected {
+		var (
+			storedChecksum string
+			appliedAt      sql.NullTime
+		)
+		err := db.QueryRow(
+			`SELECT checksum, applied_at FROM schema_migrations WHERE version = ?`, m.Version,
+		).Scan(&storedChecksum, &appliedAt)
+		if err != nil {
+			t.Fatalf("missing row for version %q: %v", m.Version, err)
+		}
+		if storedChecksum == "" {
+			t.Errorf("version %q: checksum is empty", m.Version)
+		}
+		if storedChecksum != m.checksum() {
+			t.Errorf("version %q: stored checksum %q != current %q",
+				m.Version, storedChecksum, m.checksum())
+		}
+		if !appliedAt.Valid {
+			t.Errorf("version %q: applied_at is NULL", m.Version)
+		}
+	}
+}
+
+// TestMigrate_ReRunIsNoOp asserts that running Migrate twice does not insert
+// duplicate schema_migrations rows and does not change applied_at — proving
+// the second pass took the "checksum already matches, skip" branch rather
+// than re-executing every body.
+func TestMigrate_ReRunIsNoOp(t *testing.T) {
+	db := openMigrateTestDB(t, "rerun")
+	if err := Migrate(db); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+
+	// Snapshot rows after the first pass.
+	type row struct {
+		version   string
+		checksum  string
+		appliedAt string
+	}
+	snap := func() []row {
+		rows, err := db.Query(`SELECT version, checksum, applied_at FROM schema_migrations ORDER BY version`)
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		defer rows.Close()
+		var out []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.version, &r.checksum, &r.appliedAt); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+
+	before := snap()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+	after := snap()
+
+	if len(before) != len(after) {
+		t.Fatalf("row count changed: before=%d after=%d", len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Errorf("row %d drifted on re-run: before=%+v after=%+v", i, before[i], after[i])
+		}
+	}
+}
+
+// TestMigrate_DetectsChecksumDrift simulates an operator (or a corrupted
+// replica) editing a migration body after it was applied. The next call to
+// Migrate must refuse to start and surface a "checksum mismatch" error so
+// the drift is visible rather than silently accepted.
+func TestMigrate_DetectsChecksumDrift(t *testing.T) {
+	db := openMigrateTestDB(t, "drift")
+	if err := Migrate(db); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+
+	// Pick the base schema migration and corrupt its stored checksum to
+	// simulate the source body having changed since it was applied.
+	const tampered = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	res, err := db.Exec(
+		`UPDATE schema_migrations SET checksum = ? WHERE version = '0001_base_schema'`, tampered,
+	)
+	if err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		t.Fatalf("expected to tamper 1 row, got %d", n)
+	}
+
+	err = Migrate(db)
+	if err == nil {
+		t.Fatal("expected checksum-mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("error %q does not contain 'checksum mismatch'", err.Error())
 	}
 }
