@@ -197,7 +197,7 @@ func TestComputeTutorMode(t *testing.T) {
 		{"scaffolding — anxious", &models.AffectState{SubjectConfidence: 1}, nil, "scaffolding"},
 		{"lighter — fatigued", &models.AffectState{Energy: 1, SubjectConfidence: 3}, nil, "lighter"},
 		{"lighter — affect negative frustration", &models.AffectState{Energy: 2, Satisfaction: 1}, []models.Alert{{Type: models.AlertAffectNegative}}, "lighter"},
-		{"recontextualize — bored", &models.AffectState{Energy: 4, Satisfaction: 1}, []models.Alert{{Type: models.AlertAffectNegative}}, "recontextualize"},
+		{"lighter — affect negative bored (was recontextualize)", &models.AffectState{Energy: 4, Satisfaction: 1}, []models.Alert{{Type: models.AlertAffectNegative}}, "lighter"},
 		{"normal — happy", &models.AffectState{Energy: 3, SubjectConfidence: 3, Satisfaction: 3}, nil, "normal"},
 	}
 
@@ -208,6 +208,43 @@ func TestComputeTutorMode(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestComputeTutorMode_NeverReturnsRecontextualize is a regression guard for
+// issue #60: the cosmetic "recontextualize" mode was removed because it had no
+// behavioural effect (it only appended a label suffix to Activity.Rationale).
+// This sweep exercises the full input space ComputeTutorMode reads and asserts
+// the removed mode is never produced.
+func TestComputeTutorMode_NeverReturnsRecontextualize(t *testing.T) {
+	alertSets := [][]models.Alert{
+		nil,
+		{{Type: models.AlertAffectNegative}},
+		{{Type: models.AlertCalibrationDiverging}},
+		{{Type: models.AlertAffectNegative}, {Type: models.AlertCalibrationDiverging}},
+	}
+	// AffectState fields used by ComputeTutorMode are Energy, Satisfaction,
+	// SubjectConfidence — sweep their full 0..5 range.
+	for _, alerts := range alertSets {
+		for energy := 0; energy <= 5; energy++ {
+			for sat := 0; sat <= 5; sat++ {
+				for conf := 0; conf <= 5; conf++ {
+					affect := &models.AffectState{
+						Energy:            energy,
+						Satisfaction:      sat,
+						SubjectConfidence: conf,
+					}
+					got := ComputeTutorMode(affect, alerts)
+					if got == "recontextualize" {
+						t.Errorf("ComputeTutorMode returned removed mode %q for affect=%+v alerts=%v", got, affect, alerts)
+					}
+				}
+			}
+		}
+	}
+	// Nil-affect path.
+	if got := ComputeTutorMode(nil, nil); got == "recontextualize" {
+		t.Errorf("ComputeTutorMode(nil, nil) returned removed mode %q", got)
 	}
 }
 
