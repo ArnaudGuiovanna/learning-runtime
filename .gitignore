@@ -6,6 +6,8 @@
 # Database
 data/
 *.db
+*.bak
+*.bak.*
 
 # Binary
 tutor-mcp
