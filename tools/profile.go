@@ -12,13 +12,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// UpdateLearnerProfileParams enumerates the fields the chat-side LLM may push
+// into a learner's persisted profile blob. Issue #61: `level`, `background`
+// and `learning_style` were removed because no downstream component (motivation
+// brief, concept selector, alerts, dashboard) consumes them — they were
+// write-only metadata that bloated the profile_json blob without informing
+// any decision. The forward-only migration in db/migrations.go scrubs the keys
+// out of existing rows so a re-introduction won't silently inherit stale data.
 type UpdateLearnerProfileParams struct {
 	Device          string  `json:"device,omitempty" jsonschema:"Appareil principal (ex: laptop, phone, tablet)"`
-	Background      string  `json:"background,omitempty" jsonschema:"Contexte professionnel ou académique de l'apprenant"`
-	Style           string  `json:"learning_style,omitempty" jsonschema:"Style d'apprentissage préféré (ex: visuel, pratique, théorique)"`
 	Objective       string  `json:"objective,omitempty" jsonschema:"Objectif d'apprentissage mis à jour"`
 	Language        string  `json:"language,omitempty" jsonschema:"Langue préférée pour les exercices"`
-	Level           string  `json:"level,omitempty" jsonschema:"Niveau actuel (débutant, intermédiaire, avancé)"`
 	CalibrationBias float64 `json:"calibration_bias,omitempty" jsonschema:"Biais de calibration (positif=sur-estimé, négatif=sous-estimé)"`
 	AffectBaseline  string  `json:"affect_baseline,omitempty" jsonschema:"Baseline émotionnelle de l'apprenant"`
 	AutonomyScore   float64 `json:"autonomy_score,omitempty" jsonschema:"Score d'autonomie actuel (0-1)"`
@@ -27,7 +31,7 @@ type UpdateLearnerProfileParams struct {
 func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_learner_profile",
-		Description: "Met à jour les métadonnées persistantes de l'apprenant (device, background, style, objectif, niveau). Seuls les champs fournis sont modifiés.",
+		Description: "Met à jour les métadonnées persistantes de l'apprenant (device, objectif, langue, calibration, affect, autonomie). Seuls les champs fournis sont modifiés.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UpdateLearnerProfileParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -52,11 +56,8 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 			max   int
 		}{
 			{"device", params.Device, maxShortLabelLen},
-			{"background", params.Background, maxNoteLen},
-			{"learning_style", params.Style, maxShortLabelLen},
 			{"objective", params.Objective, maxNoteLen},
 			{"language", params.Language, maxShortLabelLen},
-			{"level", params.Level, maxShortLabelLen},
 			{"affect_baseline", params.AffectBaseline, maxShortLabelLen},
 		}
 		for _, f := range stringFields {
@@ -78,20 +79,8 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 			profile["device"] = params.Device
 			updated++
 		}
-		if params.Background != "" {
-			profile["background"] = params.Background
-			updated++
-		}
-		if params.Style != "" {
-			profile["learning_style"] = params.Style
-			updated++
-		}
 		if params.Language != "" {
 			profile["language"] = params.Language
-			updated++
-		}
-		if params.Level != "" {
-			profile["level"] = params.Level
 			updated++
 		}
 		if params.CalibrationBias != 0 {
@@ -121,9 +110,9 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 		}
 
 		r, _ := jsonResult(map[string]interface{}{
-			"updated":       true,
+			"updated":        true,
 			"fields_changed": updated,
-			"profile":       profile,
+			"profile":        profile,
 		})
 		return r, nil, nil
 	})

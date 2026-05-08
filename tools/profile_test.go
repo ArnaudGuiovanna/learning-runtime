@@ -5,6 +5,8 @@ package tools
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -20,11 +22,8 @@ func TestUpdateLearnerProfile_HappyPath(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerUpdateLearnerProfile, "L_owner", "update_learner_profile", map[string]any{
 		"device":           "laptop",
-		"background":       "engineer",
-		"learning_style":   "visual",
 		"objective":        "deep math",
 		"language":         "fr",
-		"level":            "intermediate",
 		"calibration_bias": 0.15,
 		"affect_baseline":  "calm",
 		"autonomy_score":   0.6,
@@ -36,8 +35,8 @@ func TestUpdateLearnerProfile_HappyPath(t *testing.T) {
 	if out["updated"] != true {
 		t.Fatalf("expected updated=true, got %v", out)
 	}
-	if out["fields_changed"].(float64) != 9 {
-		t.Fatalf("expected 9 fields_changed, got %v", out["fields_changed"])
+	if out["fields_changed"].(float64) != 6 {
+		t.Fatalf("expected 6 fields_changed, got %v", out["fields_changed"])
 	}
 
 	// DB state: profile is persisted.
@@ -49,7 +48,7 @@ func TestUpdateLearnerProfile_HappyPath(t *testing.T) {
 	if err := json.Unmarshal([]byte(learner.ProfileJSON), &p); err != nil {
 		t.Fatalf("bad profile JSON: %v", err)
 	}
-	if p["device"] != "laptop" || p["learning_style"] != "visual" {
+	if p["device"] != "laptop" || p["language"] != "fr" {
 		t.Fatalf("unexpected profile: %v", p)
 	}
 }
@@ -57,18 +56,18 @@ func TestUpdateLearnerProfile_HappyPath(t *testing.T) {
 func TestUpdateLearnerProfile_PartialUpdatePreservesExisting(t *testing.T) {
 	store, deps := setupToolsTest(t)
 
-	// First call: sets device + level.
+	// First call: sets device + language.
 	res := callTool(t, deps, registerUpdateLearnerProfile, "L_owner", "update_learner_profile", map[string]any{
-		"device": "phone",
-		"level":  "beginner",
+		"device":   "phone",
+		"language": "fr",
 	})
 	if res.IsError {
 		t.Fatalf("first call: %q", resultText(res))
 	}
 
-	// Second call: only updates level — device should be preserved.
+	// Second call: only updates language — device should be preserved.
 	res2 := callTool(t, deps, registerUpdateLearnerProfile, "L_owner", "update_learner_profile", map[string]any{
-		"level": "advanced",
+		"language": "en",
 	})
 	if res2.IsError {
 		t.Fatalf("second call: %q", resultText(res2))
@@ -83,8 +82,8 @@ func TestUpdateLearnerProfile_PartialUpdatePreservesExisting(t *testing.T) {
 	if p["device"] != "phone" {
 		t.Fatalf("device should be preserved, got %v", p["device"])
 	}
-	if p["level"] != "advanced" {
-		t.Fatalf("level should be updated, got %v", p["level"])
+	if p["language"] != "en" {
+		t.Fatalf("language should be updated, got %v", p["language"])
 	}
 }
 
@@ -97,5 +96,55 @@ func TestUpdateLearnerProfile_NoFieldsProvided(t *testing.T) {
 	out := decodeResult(t, res)
 	if out["fields_changed"].(float64) != 0 {
 		t.Fatalf("expected 0 fields_changed, got %v", out["fields_changed"])
+	}
+}
+
+// TestUpdateLearnerProfile_DroppedFieldsRejected is the issue #61 regression
+// guard. The deprecated fields `level`, `background` and `learning_style`
+// were write-only with no consumer (no read site in motivation, concept
+// selection, alerts or dashboard). After their removal from
+// UpdateLearnerProfileParams, the SDK's JSON-Schema input validator rejects
+// posts that include any of them with an `unexpected additional properties`
+// transport error — so a stale client cannot smuggle them back into
+// profile_json.
+//
+// We try each deprecated key in isolation to assert the rejection is
+// per-field, not just a happy-path collision with one specific key.
+func TestUpdateLearnerProfile_DroppedFieldsRejected(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	for _, key := range []string{"level", "background", "learning_style"} {
+		_, err := callToolRaw(t, deps, registerUpdateLearnerProfile, "L_owner", "update_learner_profile", map[string]any{
+			key: "x",
+		})
+		if err == nil {
+			t.Fatalf("posting deprecated key %q should be rejected by JSON-schema validator, got nil error", key)
+		}
+		if !strings.Contains(err.Error(), "additional properties") {
+			t.Errorf("posting deprecated key %q: expected 'additional properties' rejection, got %v", key, err)
+		}
+	}
+}
+
+// TestUpdateLearnerProfile_DroppedKeysAbsentFromInputSchema is a structural
+// guard: even if the SDK relaxes additionalProperties enforcement in the
+// future, the param struct itself must not carry these JSON tags. We
+// reflect over UpdateLearnerProfileParams and assert no field maps to any
+// of the three deprecated JSON keys.
+func TestUpdateLearnerProfile_DroppedKeysAbsentFromInputSchema(t *testing.T) {
+	dropped := map[string]struct{}{
+		"level":          {},
+		"background":     {},
+		"learning_style": {},
+	}
+	rt := reflect.TypeOf(UpdateLearnerProfileParams{})
+	for i := 0; i < rt.NumField(); i++ {
+		tag := rt.Field(i).Tag.Get("json")
+		// strip ",omitempty" suffix
+		if idx := strings.Index(tag, ","); idx >= 0 {
+			tag = tag[:idx]
+		}
+		if _, bad := dropped[tag]; bad {
+			t.Errorf("UpdateLearnerProfileParams.%s carries deprecated JSON tag %q (issue #61)", rt.Field(i).Name, tag)
+		}
 	}
 }

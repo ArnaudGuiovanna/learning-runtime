@@ -68,7 +68,7 @@ OUTILS DISPONIBLES :
 - get_availability_model() : créneaux et fréquence
 - init_domain(name, concepts, prerequisites, personal_goal?, value_framings?) : crée un domaine (value_framings = 4 axes de gain: financial/employment/intellectual/innovation)
 - add_concepts(domain_id?, concepts, prerequisites) : ajoute des concepts
-- update_learner_profile(device?, background?, learning_style?, objective?, language?, level?, calibration_bias?, affect_baseline?, autonomy_score?) : métadonnées persistantes
+- update_learner_profile(device?, objective?, language?, calibration_bias?, affect_baseline?, autonomy_score?) : métadonnées persistantes
 - get_misconceptions(domain_id?, concept?) : liste les misconceptions détectées par concept
 - get_olm_snapshot(domain_id?, scope?) : snapshot transparent de l'état d'apprentissage (mastery distrib, focus, signaux métacognitifs, progression goal). scope='session' (défaut) ou 'global'
 - archive_domain(domain_id) : archive un domaine — il disparaît du dashboard et du routing, progression préservée
