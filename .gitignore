@@ -28,3 +28,6 @@ eval/
 security-todo.md
 .superpowers/
 .claude/
+
+# Session reports — local artefacts only
+reports/
