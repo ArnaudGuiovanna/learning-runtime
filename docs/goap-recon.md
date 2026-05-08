@@ -315,11 +315,14 @@ follow-up?
 
 ### 6.9 `INTERLEAVING` is declared but never emitted
 
-The current router never produces `ActivityInterleaving`. A planner
-that thinks in sequences could naturally use it ("alternate concept A
-and concept B over 3 steps to combat illusion of competence"). Free
-expressivity gain — but also a risk of inflating action count beyond
-the 8–12 budget the brief asks for.
+**Resolved (sub-issue #64):** `ActivityInterleaving` was removed from
+`models/domain.go` because no production path ever emitted it. A
+future planner that thinks in sequences could naturally re-introduce
+it ("alternate concept A and concept B over 3 steps to combat
+illusion of competence") — free expressivity gain, but also a risk
+of inflating action count beyond the 8–12 budget the brief asks for.
+Re-introducing it must come with a Rohrer-2012-style emitter, not
+just a constant.
 
 ### 6.10 `learning_negotiation` returns a **single tradeoff per factor**, not a plan diff
 
