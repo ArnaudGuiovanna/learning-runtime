@@ -302,7 +302,7 @@ func (s *Store) CreateDomainWithValueFramings(learnerID, name, personalGoal stri
 	}, nil
 }
 
-const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, pinned_concept, graph_version, goal_relevance_json, goal_relevance_version, phase, phase_changed_at, phase_entry_entropy, created_at`
+const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, graph_version, goal_relevance_json, goal_relevance_version, phase, phase_changed_at, phase_entry_entropy, created_at`
 
 // scanDomainFields is the shared row decoder for both *sql.Row and *sql.Rows
 // callers — Scan has the same signature on both so we factor through a small
@@ -315,13 +315,13 @@ type domainScanner interface {
 func scanDomainFields(s domainScanner) (*models.Domain, error) {
 	d := &models.Domain{}
 	var graphJSON, goalRelevanceJSON string
-	var valueFramings, lastAxis, pinnedConcept, phase sql.NullString
+	var valueFramings, lastAxis, phase sql.NullString
 	var phaseChangedAt sql.NullTime
 	var phaseEntryEntropy sql.NullFloat64
 	var archived int
 	err := s.Scan(
 		&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON,
-		&valueFramings, &lastAxis, &archived, &pinnedConcept,
+		&valueFramings, &lastAxis, &archived,
 		&d.GraphVersion, &goalRelevanceJSON, &d.GoalRelevanceVersion,
 		&phase, &phaseChangedAt, &phaseEntryEntropy,
 		&d.CreatedAt,
@@ -335,9 +335,6 @@ func scanDomainFields(s domainScanner) (*models.Domain, error) {
 	}
 	if lastAxis.Valid {
 		d.LastValueAxis = lastAxis.String
-	}
-	if pinnedConcept.Valid {
-		d.PinnedConcept = pinnedConcept.String
 	}
 	d.GoalRelevanceJSON = goalRelevanceJSON
 	if phase.Valid {
@@ -431,23 +428,6 @@ func (s *Store) UpdateDomainLastValueAxis(domainID, axis string) error {
 	return nil
 }
 
-// SetPinnedConcept sets (or clears, with concept="") the pinned focus concept
-// for a (learner, domain). Rejects mismatched learner ownership (zero rows
-// affected → error).
-func (s *Store) SetPinnedConcept(learnerID, domainID, concept string) error {
-	res, err := s.db.Exec(
-		`UPDATE domains SET pinned_concept = ? WHERE id = ? AND learner_id = ?`,
-		concept, domainID, learnerID,
-	)
-	if err != nil {
-		return fmt.Errorf("set pinned concept: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("domain not found or not owned by learner")
-	}
-	return nil
-}
 
 func (s *Store) UpdateDomainGraph(domainID string, graph models.KnowledgeSpace) error {
 	graphJSON, err := json.Marshal(graph)

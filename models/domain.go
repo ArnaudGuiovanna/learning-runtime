@@ -105,7 +105,6 @@ type Domain struct {
 	ValueFramingsJSON    string
 	LastValueAxis        string
 	Archived             bool
-	PinnedConcept        string
 	GraphVersion         int
 	GoalRelevanceJSON    string
 	GoalRelevanceVersion int

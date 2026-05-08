@@ -91,6 +91,11 @@ var alterMigrations = []string{
 	// modernc.org/sqlite v1.47 ships above that.
 	`ALTER TABLE concept_states DROP COLUMN pfa_successes`,
 	`ALTER TABLE concept_states DROP COLUMN pfa_failures`,
+	// Pin feature retired: the MCP tool that set pinned_concept
+	// (pick_concept) was removed with the iframe surface, leaving the
+	// column unreachable. Drop it so the schema reflects what the
+	// runtime actually uses. Forward-only.
+	`ALTER TABLE domains DROP COLUMN pinned_concept`,
 }
 
 // idempotentMigrations are CREATE TABLE/INDEX IF NOT EXISTS statements that

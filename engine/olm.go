@@ -200,23 +200,6 @@ func BuildOLMSnapshot(store *db.Store, learnerID, domainID string) (*OLMSnapshot
 		}
 	}
 
-	// Pin override: explicit learner choice trumps auto-computed focus.
-	// Preserves auto-focus urgency when present (a pinned forgetting concept
-	// stays Critical so the "à reprendre vite" signal is not lost).
-	// Silent clear if the pinned concept is no longer in the graph.
-	if domain.PinnedConcept != "" {
-		if domainConceptSet[domain.PinnedConcept] {
-			snap.FocusConcept = domain.PinnedConcept
-			snap.FocusReason = "concept épinglé par l'apprenant"
-			if snap.FocusUrgency == "" {
-				snap.FocusUrgency = models.UrgencyInfo
-			}
-		} else {
-			// Stale pin — concept removed from graph. Clear silently.
-			_ = store.SetPinnedConcept(learnerID, domain.ID, "")
-		}
-	}
-
 	// Metacognitive signals — only set if a clear trend exists across the
 	// last 3 affects (or if calibration bias exceeds the actionable threshold).
 	affects, _ := store.GetRecentAffectStates(learnerID, 3)

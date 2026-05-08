@@ -11,10 +11,10 @@ import (
 )
 
 // validateConceptInDomain checks that concept is a member of d.Graph.Concepts.
-// It is the shared write-side guard for record_interaction, submit_answer, and
-// any other tool that mutates a learner's cognitive state on a per-concept
-// basis. The error string mirrors pick_concept's read-side guard so the LLM
-// can self-correct uniformly across read and write surfaces.
+// It is the shared write-side guard for record_interaction and any other tool
+// that mutates a learner's cognitive state on a per-concept basis. The error
+// string names the unknown concept and the active domain so the LLM can
+// self-correct (call get_learner_context to refresh the concept list).
 func validateConceptInDomain(d *models.Domain, concept string) error {
 	if d == nil {
 		return fmt.Errorf("no active domain — call init_domain first")

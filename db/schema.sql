@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS domains (
     value_framings_json      TEXT DEFAULT '',
     last_value_axis          TEXT DEFAULT '',
     archived                 INTEGER DEFAULT 0,
-    pinned_concept           TEXT DEFAULT '',
     graph_version            INTEGER NOT NULL DEFAULT 1,
     goal_relevance_json      TEXT NOT NULL DEFAULT '',
     goal_relevance_version   INTEGER NOT NULL DEFAULT 0,

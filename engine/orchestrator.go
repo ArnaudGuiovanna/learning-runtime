@@ -336,40 +336,13 @@ func runPipeline(
 		allowedSet[c] = true
 	}
 
-	// Pinned-concept short-circuit: if the learner has explicitly
-	// pinned a concept via pick_concept and the Gate hasn't excluded
-	// it, honour the pin. The Gate remains authoritative — it can
-	// still block the pin via misconception_lock, anti-repeat, or
-	// prereq filtering. In that case we silently fall through to
-	// SelectConcept and log for observability so the operator can
-	// see why the pin was bypassed.
-	var selection Selection
-	if domain.PinnedConcept != "" {
-		if allowedSet[domain.PinnedConcept] {
-			slog.Info("concept selection (pinned)",
-				"domain", domain.ID, "pinned_concept", domain.PinnedConcept, "phase", phase)
-			selection = Selection{
-				Concept:   domain.PinnedConcept,
-				Phase:     phase,
-				Rationale: fmt.Sprintf("[phase=%s] concept épinglé par l'apprenant", phase),
-			}
-		} else {
-			slog.Info("pinned concept not eligible (gate filtered)",
-				"domain", domain.ID, "pinned_concept", domain.PinnedConcept,
-				"phase", phase, "allowed_count", len(allowedSet))
-		}
+	filteredGraph := models.KnowledgeSpace{
+		Concepts:      gateResult.AllowedConcepts,
+		Prerequisites: filterPrerequisites(domain.Graph.Prerequisites, allowedSet),
 	}
-
-	if selection.Concept == "" {
-		filteredGraph := models.KnowledgeSpace{
-			Concepts:      gateResult.AllowedConcepts,
-			Prerequisites: filterPrerequisites(domain.Graph.Prerequisites, allowedSet),
-		}
-		var err error
-		selection, err = SelectConcept(phase, pf.StatesList, filteredGraph, pf.GoalRelevance)
-		if err != nil {
-			return models.Activity{}, pipelineSignal{}, fmt.Errorf("concept_selector: %w", err)
-		}
+	selection, err := SelectConcept(phase, pf.StatesList, filteredGraph, pf.GoalRelevance)
+	if err != nil {
+		return models.Activity{}, pipelineSignal{}, fmt.Errorf("concept_selector: %w", err)
 	}
 	if selection.NoFringe {
 		return models.Activity{}, pipelineSignal{IsNoFringe: true}, nil
