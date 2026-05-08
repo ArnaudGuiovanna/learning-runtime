@@ -155,8 +155,6 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			}
 		case "scaffolding":
 			activity.DifficultyTarget *= 0.75
-		case "recontextualize":
-			activity.Rationale += " · recontextualisation demandée"
 		}
 
 		// Apply calibration bias adjustment

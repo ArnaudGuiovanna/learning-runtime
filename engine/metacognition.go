@@ -286,12 +286,11 @@ func ComputeTutorMode(affect *models.AffectState, alerts []models.Alert) string 
 		}
 	}
 
-	// Affect negative: bored (high energy + low satisfaction) → recontextualize
-	if hasAffectNegative && affect.Energy >= 3 && affect.Satisfaction <= 2 {
-		return "recontextualize"
-	}
-
-	// Affect negative: frustration → lighter
+	// Affect negative (frustration or boredom): low satisfaction → lighter.
+	// (The previously distinct "recontextualize" branch for high-energy boredom
+	// was removed in #60: it was purely cosmetic — the only side effect was
+	// appending a label to Activity.Rationale, with no different prompt,
+	// selector input, or persistence. Both sub-cases now map to "lighter".)
 	if hasAffectNegative && affect.Satisfaction <= 2 {
 		return "lighter"
 	}

@@ -227,8 +227,7 @@ The system adapts its communication register based on affect state:
 |------|---------|
 | `normal` | Default |
 | `scaffolding` | Learner reports high anxiety (confidence = 1) |
-| `lighter` | Learner reports fatigue (energy = 1) or frustration (2 negative sessions) |
-| `recontextualize` | High energy but low satisfaction (boredom detected) |
+| `lighter` | Learner reports fatigue (energy = 1), frustration, or boredom (negative affect with low satisfaction) |
 
 ## Authentication
 

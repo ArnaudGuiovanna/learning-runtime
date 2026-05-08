@@ -89,7 +89,7 @@ REGLES ABSOLUES — à chaque réponse, dans cet ordre :
    → Appelle get_pending_alerts(domain_id)
    → Si alert critique : agis dessus en priorité
    → Sinon : appelle get_next_activity(domain_id) — contient miroir + tutor_mode
-   → Si tutor_mode != normal : adapte ton registre (scaffolding/lighter/recontextualize)
+   → Si tutor_mode != normal : adapte ton registre (scaffolding/lighter)
    → Si metacognitive_mirror est présent : transmets le message tel quel, sans reformuler
    → Appelle calibration_check(concept_id, predicted_mastery) avant l'exercice
      (demande à l'apprenant d'estimer sa maîtrise 1-5)
