@@ -537,12 +537,12 @@ func (s *Store) InsertConceptStateIfNotExists(cs *models.ConceptState) error {
 		`INSERT OR IGNORE INTO concept_states
 		    (learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
 		     reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
-		     p_slip, p_guess, theta, pfa_successes, pfa_failures, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		     p_slip, p_guess, theta, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cs.LearnerID, cs.Concept, cs.Stability, cs.Difficulty, cs.ElapsedDays, cs.ScheduledDays,
 		cs.Reps, cs.Lapses, cs.CardState, cs.LastReview, cs.NextReview,
 		cs.PMastery, cs.PLearn, cs.PForget, cs.PSlip, cs.PGuess,
-		cs.Theta, cs.PFASuccesses, cs.PFAFailures, cs.UpdatedAt,
+		cs.Theta, cs.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert concept state if not exists: %w", err)
@@ -558,7 +558,7 @@ func (s *Store) GetConceptState(learnerID, concept string) (*models.ConceptState
 	err := s.db.QueryRow(
 		`SELECT id, learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
 		        reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
-		        p_slip, p_guess, theta, pfa_successes, pfa_failures, updated_at
+		        p_slip, p_guess, theta, updated_at
 		 FROM concept_states WHERE learner_id = ? AND concept = ?`,
 		learnerID, concept,
 	).Scan(
@@ -566,7 +566,7 @@ func (s *Store) GetConceptState(learnerID, concept string) (*models.ConceptState
 		&cs.ElapsedDays, &cs.ScheduledDays, &cs.Reps, &cs.Lapses, &cs.CardState,
 		&lastReview, &nextReview,
 		&cs.PMastery, &cs.PLearn, &cs.PForget, &cs.PSlip, &cs.PGuess,
-		&cs.Theta, &cs.PFASuccesses, &cs.PFAFailures, &cs.UpdatedAt,
+		&cs.Theta, &cs.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get concept state: %w", err)
@@ -586,8 +586,8 @@ func (s *Store) UpsertConceptState(cs *models.ConceptState) error {
 		`INSERT INTO concept_states
 		    (learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
 		     reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
-		     p_slip, p_guess, theta, pfa_successes, pfa_failures, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		     p_slip, p_guess, theta, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(learner_id, concept) DO UPDATE SET
 		    stability      = excluded.stability,
 		    difficulty     = excluded.difficulty,
@@ -604,13 +604,11 @@ func (s *Store) UpsertConceptState(cs *models.ConceptState) error {
 		    p_slip         = excluded.p_slip,
 		    p_guess        = excluded.p_guess,
 		    theta          = excluded.theta,
-		    pfa_successes  = excluded.pfa_successes,
-		    pfa_failures   = excluded.pfa_failures,
 		    updated_at     = excluded.updated_at`,
 		cs.LearnerID, cs.Concept, cs.Stability, cs.Difficulty, cs.ElapsedDays, cs.ScheduledDays,
 		cs.Reps, cs.Lapses, cs.CardState, cs.LastReview, cs.NextReview,
 		cs.PMastery, cs.PLearn, cs.PForget, cs.PSlip, cs.PGuess,
-		cs.Theta, cs.PFASuccesses, cs.PFAFailures, cs.UpdatedAt,
+		cs.Theta, cs.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert concept state: %w", err)
@@ -622,7 +620,7 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 	rows, err := s.db.Query(
 		`SELECT id, learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
 		        reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
-		        p_slip, p_guess, theta, pfa_successes, pfa_failures, updated_at
+		        p_slip, p_guess, theta, updated_at
 		 FROM concept_states WHERE learner_id = ?`,
 		learnerID,
 	)
@@ -640,7 +638,7 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 			&cs.ElapsedDays, &cs.ScheduledDays, &cs.Reps, &cs.Lapses, &cs.CardState,
 			&lastReview, &nextReview,
 			&cs.PMastery, &cs.PLearn, &cs.PForget, &cs.PSlip, &cs.PGuess,
-			&cs.Theta, &cs.PFASuccesses, &cs.PFAFailures, &cs.UpdatedAt,
+			&cs.Theta, &cs.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan concept state row: %w", err)
 		}

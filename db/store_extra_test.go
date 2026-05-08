@@ -840,8 +840,8 @@ func TestGetConceptsDueForReview_ExcludesArchivedDomain(t *testing.T) {
 	// Concept states: BOTH due, BOTH non-new.
 	for _, c := range []string{"active_c", "archived_c"} {
 		if _, err := store.db.Exec(
-			`INSERT INTO concept_states (learner_id, concept, p_mastery, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, card_state, last_review, next_review, p_learn, p_forget, p_slip, p_guess, theta, pfa_successes, pfa_failures)
-			 VALUES (?, ?, 0.5, 5, 5, 1, 1, 1, 0, 'review', ?, ?, 0.15, 0.1, 0.1, 0.2, 0, 0, 0)`,
+			`INSERT INTO concept_states (learner_id, concept, p_mastery, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, card_state, last_review, next_review, p_learn, p_forget, p_slip, p_guess, theta)
+			 VALUES (?, ?, 0.5, 5, 5, 1, 1, 1, 0, 'review', ?, ?, 0.15, 0.1, 0.1, 0.2, 0)`,
 			"L2", c, past, past,
 		); err != nil {
 			t.Fatal(err)

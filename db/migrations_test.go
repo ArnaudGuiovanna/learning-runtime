@@ -95,6 +95,109 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 }
 
+// TestMigrate_DropsPFAColumns is the regression guard for issue #55.
+// Two scenarios are exercised in the same test so that the assertion
+// holds regardless of whether a deployed DB started fresh (post-#55) or
+// upgraded from a pre-#55 schema that still had the columns:
+//
+//  1. Fresh DB: schema.sql no longer declares pfa_successes / pfa_failures.
+//     After Migrate(), table_info(concept_states) must not list them.
+//  2. Upgrade DB: the columns are inserted manually before Migrate(),
+//     simulating a pre-#55 database. Migrate() must drop them via the
+//     incremental ALTER TABLE ... DROP COLUMN entries (idempotent).
+//
+// If either column reappears in either scenario the test fails — that
+// catches accidental re-introduction in schema.sql and accidental
+// removal of the DROP COLUMN migration entries.
+func TestMigrate_DropsPFAColumns(t *testing.T) {
+	pfaCols := []string{"pfa_successes", "pfa_failures"}
+
+	hasColumn := func(t *testing.T, db *sql.DB, table, col string) bool {
+		t.Helper()
+		rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+		if err != nil {
+			t.Fatalf("PRAGMA table_info(%s): %v", table, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				cid     int
+				name    string
+				ctype   string
+				notnull int
+				dflt    sql.NullString
+				pk      int
+			)
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				t.Fatalf("scan table_info row: %v", err)
+			}
+			if name == col {
+				return true
+			}
+		}
+		return rows.Err() == nil && false
+	}
+
+	// Scenario 1: fresh DB.
+	t.Run("fresh", func(t *testing.T) {
+		dsn := fmt.Sprintf("file:migrate_pfa_fresh_%d?mode=memory&cache=shared", testDBCounter+10100)
+		testDBCounter++
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		t.Cleanup(func() { db.Close() })
+		if err := Migrate(db); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		for _, col := range pfaCols {
+			if hasColumn(t, db, "concept_states", col) {
+				t.Errorf("concept_states.%s must not exist in fresh schema", col)
+			}
+		}
+	})
+
+	// Scenario 2: pre-#55 DB upgraded.
+	t.Run("upgrade_from_pre_55", func(t *testing.T) {
+		dsn := fmt.Sprintf("file:migrate_pfa_upgrade_%d?mode=memory&cache=shared", testDBCounter+10200)
+		testDBCounter++
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		t.Cleanup(func() { db.Close() })
+
+		// First migration brings the schema up to current.
+		if err := Migrate(db); err != nil {
+			t.Fatalf("first Migrate: %v", err)
+		}
+		// Re-introduce the legacy columns to simulate a pre-#55 DB.
+		for _, col := range pfaCols {
+			if _, err := db.Exec(fmt.Sprintf(
+				"ALTER TABLE concept_states ADD COLUMN %s REAL DEFAULT 0.0", col,
+			)); err != nil {
+				t.Fatalf("seed legacy column %s: %v", col, err)
+			}
+			if !hasColumn(t, db, "concept_states", col) {
+				t.Fatalf("seed column %s should exist", col)
+			}
+		}
+		// Second migration must drop them again — idempotent.
+		if err := Migrate(db); err != nil {
+			t.Fatalf("second Migrate: %v", err)
+		}
+		for _, col := range pfaCols {
+			if hasColumn(t, db, "concept_states", col) {
+				t.Errorf("concept_states.%s should have been dropped by Migrate", col)
+			}
+		}
+		// Third migration must remain a no-op (no panic, no error).
+		if err := Migrate(db); err != nil {
+			t.Fatalf("third Migrate (idempotent): %v", err)
+		}
+	})
+}
+
 // TestOpenDB_Memory exercises the OpenDB helper. OpenDB appends `?_pragma=...`
 // to the path before opening, so we use a file-backed temp DB to keep the DSN
 // shape simple.

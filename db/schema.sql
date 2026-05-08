@@ -51,8 +51,6 @@ CREATE TABLE IF NOT EXISTS concept_states (
     p_slip         REAL DEFAULT 0.1,
     p_guess        REAL DEFAULT 0.2,
     theta          REAL DEFAULT 0.0,
-    pfa_successes  REAL DEFAULT 0.0,
-    pfa_failures   REAL DEFAULT 0.0,
     updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(learner_id, concept)
 );

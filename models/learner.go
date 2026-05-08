@@ -36,8 +36,6 @@ type ConceptState struct {
 	PSlip         float64
 	PGuess        float64
 	Theta         float64
-	PFASuccesses  float64
-	PFAFailures   float64
 	UpdatedAt     time.Time
 }
 
