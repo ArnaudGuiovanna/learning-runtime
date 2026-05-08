@@ -83,6 +83,21 @@ func applyInteraction(
 	}
 	priorNextReview := cs.NextReview
 
+	// ── BKT update — non-canonical, project-specific heuristic that
+	// ramps slip/guess by error_type. Computed up front (it only reads
+	// from the prior snapshot) so the (slipUsed, guessUsed) values can
+	// be persisted on the interaction row below for deterministic
+	// replay (issue #51 / #8). The PMastery write-back to `cs` happens
+	// in the merged-result block at the end of the function.
+	bktState := algorithms.BKTState{
+		PMastery: priorPMastery,
+		PLearn:   priorPLearn,
+		PForget:  priorPForget,
+		PSlip:    priorPSlip,
+		PGuess:   priorPGuess,
+	}
+	bktState, slipUsed, guessUsed := algorithms.BKTUpdateHeuristicSlipByErrorType(bktState, input.Success, input.ErrorType)
+
 	// Build and persist the interaction row.
 	interaction := &models.Interaction{
 		LearnerID:      learnerID,
@@ -97,6 +112,8 @@ func applyInteraction(
 		SelfInitiated:  input.SelfInitiated,
 		CalibrationID:  input.CalibrationID,
 		DomainID:       input.DomainID,
+		BKTSlip:        &slipUsed,
+		BKTGuess:       &guessUsed,
 		CreatedAt:      now,
 	}
 
@@ -114,16 +131,6 @@ func applyInteraction(
 	if err := deps.Store.CreateInteraction(interaction); err != nil {
 		return nil, fmt.Errorf("applyInteraction: create interaction: %w", err)
 	}
-
-	// ── BKT update — error-type-aware. Reads from prior snapshot. ──
-	bktState := algorithms.BKTState{
-		PMastery: priorPMastery,
-		PLearn:   priorPLearn,
-		PForget:  priorPForget,
-		PSlip:    priorPSlip,
-		PGuess:   priorPGuess,
-	}
-	bktState = algorithms.BKTUpdateWithErrorType(bktState, input.Success, input.ErrorType)
 
 	// ── FSRS update — reads from prior snapshot. ───────────────────
 	rating := algorithms.Good

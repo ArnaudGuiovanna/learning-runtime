@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS interactions (
     is_proactive_review INTEGER DEFAULT 0,
     misconception_type    TEXT,
     misconception_detail  TEXT,
+    -- bkt_slip / bkt_guess: the slip/guess parameters the non-canonical
+    -- error-type-aware heuristic (algorithms.BKTUpdateHeuristicSlipByErrorType)
+    -- fed into the BKT update for this observation. Logged so the run can
+    -- be replayed. Nullable: pre-issue-#51 rows have no record. (#51 / #8)
+    bkt_slip      REAL,
+    bkt_guess     REAL,
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

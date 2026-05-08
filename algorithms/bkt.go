@@ -55,13 +55,25 @@ func BKTUpdate(state BKTState, correct bool) BKTState {
 	return result
 }
 
-// BKTUpdateWithErrorType adjusts BKT parameters based on error type before updating.
+// BKTUpdateHeuristicSlipByErrorType adjusts BKT slip/guess parameters based on
+// the error type before applying a standard BKT update. NOTE: this is a
+// PROJECT-SPECIFIC HEURISTIC, not part of canonical BKT (Corbett & Anderson
+// 1995, "Knowledge Tracing: Modeling the Acquisition of Procedural
+// Knowledge"). The literature treats slip and guess as fixed per-skill
+// parameters; ramping them per-observation by an externally-supplied error
+// label has no source in the BKT corpus and is a heuristic introduced here.
+// The function is named to keep the deviation explicit at every call-site.
+//
 // SYNTAX_ERROR: careless mistake — higher slip, less penalizing to mastery.
 // KNOWLEDGE_GAP: genuine lack of understanding — lower guess, more penalizing.
-// LOGIC_ERROR or empty: standard BKT update.
-func BKTUpdateWithErrorType(state BKTState, correct bool, errorType string) BKTState {
+// LOGIC_ERROR or empty: standard BKT update (no heuristic ramp).
+//
+// The returned (slipUsed, guessUsed) values are the parameters the heuristic
+// fed into BKTUpdate for this observation; callers should log them to the
+// interaction audit trail so the run can be replayed deterministically.
+func BKTUpdateHeuristicSlipByErrorType(state BKTState, correct bool, errorType string) (next BKTState, slipUsed, guessUsed float64) {
 	if correct || errorType == "" {
-		return BKTUpdate(state, correct)
+		return BKTUpdate(state, correct), state.PSlip, state.PGuess
 	}
 
 	adjusted := state
@@ -76,7 +88,7 @@ func BKTUpdateWithErrorType(state BKTState, correct bool, errorType string) BKTS
 	}
 	// LOGIC_ERROR uses standard parameters
 
-	return BKTUpdate(adjusted, correct)
+	return BKTUpdate(adjusted, correct), adjusted.PSlip, adjusted.PGuess
 }
 
 func BKTIsMastered(state BKTState) bool {
