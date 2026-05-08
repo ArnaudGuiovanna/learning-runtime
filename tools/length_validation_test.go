@@ -48,10 +48,14 @@ func TestRecordInteraction_RejectsOversizedConcept(t *testing.T) {
 	}
 }
 
-func TestUpdateLearnerProfile_RejectsOversizedBackground(t *testing.T) {
+// TestUpdateLearnerProfile_RejectsOversizedObjective swapped in for the
+// previous oversized-background coverage after issue #61 dropped the
+// `background` / `level` / `learning_style` fields from the tool surface.
+// `objective` shares the same maxNoteLen cap, keeping the boundary covered.
+func TestUpdateLearnerProfile_RejectsOversizedObjective(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerUpdateLearnerProfile, "L_owner", "update_learner_profile", map[string]any{
-		"background": strings.Repeat("b", maxNoteLen+1),
+		"objective": strings.Repeat("o", maxNoteLen+1),
 	})
 	if !res.IsError {
 		t.Fatalf("expected length-cap rejection, got %q", resultText(res))

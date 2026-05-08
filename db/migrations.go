@@ -108,6 +108,25 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("data migration plearn: %w", err)
 	}
 
+	// Issue #61: scrub the legacy `level`, `background`, `learning_style`
+	// keys out of profile_json. These were write-only fields on
+	// update_learner_profile with no production reader (no consumer in
+	// motivation, concept selection, alerts, dashboard). Forward-only —
+	// the tool no longer accepts them so re-introduction is impossible
+	// without code changes. json_remove is idempotent: a second run on a
+	// scrubbed row is a no-op (the keys are already absent).
+	if _, err := db.Exec(
+		`UPDATE learners
+		 SET profile_json = json_remove(profile_json, '$.level', '$.background', '$.learning_style')
+		 WHERE profile_json IS NOT NULL
+		   AND profile_json != ''
+		   AND (json_extract(profile_json, '$.level') IS NOT NULL
+		     OR json_extract(profile_json, '$.background') IS NOT NULL
+		     OR json_extract(profile_json, '$.learning_style') IS NOT NULL)`,
+	); err != nil {
+		return fmt.Errorf("data migration drop learner profile fields: %w", err)
+	}
+
 	// Idempotent table + index creation for existing databases
 	idempotentMigrations := []string{
 		`CREATE TABLE IF NOT EXISTS oauth_codes (

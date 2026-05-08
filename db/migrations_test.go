@@ -198,6 +198,126 @@ func TestMigrate_DropsPFAColumns(t *testing.T) {
 	})
 }
 
+// TestMigrate_DropsLegacyLearnerProfileFields is the issue #61 regression
+// guard. The data migration in db/migrations.go must scrub the `level`,
+// `background` and `learning_style` keys out of pre-existing profile_json
+// blobs because no production component reads them and leaving them in the
+// blob causes an unbounded write-only key surface.
+//
+// We seed two rows that mirror the historical shape (one with all three
+// keys plus an unrelated key that must survive, one with a partial subset),
+// run Migrate, then assert json_extract returns NULL for the dropped keys
+// and the unrelated key is intact.
+func TestMigrate_DropsLegacyLearnerProfileFields(t *testing.T) {
+	dsn := fmt.Sprintf("file:migrate_drop_legacy_%d?mode=memory&cache=shared", testDBCounter+20000)
+	testDBCounter++
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	// Run an initial migration so the learners table (and profile_json
+	// column) exists, then seed legacy rows BEFORE the second migration
+	// runs the data scrub. The migration is idempotent so the seed runs
+	// after a no-op second call would also work — but seeding between
+	// two Migrate() calls makes the assertion order obvious.
+	if err := Migrate(db); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+	seed := []struct {
+		id      string
+		profile string
+	}{
+		{
+			id: "legacy_full",
+			profile: `{"level":"intermediate","background":"engineer",` +
+				`"learning_style":"visual","language":"fr","device":"laptop"}`,
+		},
+		{
+			id:      "legacy_partial",
+			profile: `{"level":"beginner","autonomy_score":0.6}`,
+		},
+		{
+			id:      "clean",
+			profile: `{"language":"en"}`,
+		},
+	}
+	for _, s := range seed {
+		_, err := db.Exec(
+			`INSERT INTO learners (id, email, password_hash, objective, profile_json) VALUES (?, ?, 'h', 'o', ?)`,
+			s.id, s.id+"@x", s.profile,
+		)
+		if err != nil {
+			t.Fatalf("seed %s: %v", s.id, err)
+		}
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("second Migrate (must scrub legacy keys): %v", err)
+	}
+
+	// Each dropped key must be absent (json_extract returns NULL) on
+	// every row.
+	droppedKeys := []string{"$.level", "$.background", "$.learning_style"}
+	for _, s := range seed {
+		for _, key := range droppedKeys {
+			var v sql.NullString
+			err := db.QueryRow(
+				`SELECT json_extract(profile_json, ?) FROM learners WHERE id = ?`,
+				key, s.id,
+			).Scan(&v)
+			if err != nil {
+				t.Fatalf("query %s %s: %v", s.id, key, err)
+			}
+			if v.Valid {
+				t.Errorf("learner %s: key %s should have been scrubbed, got %q", s.id, key, v.String)
+			}
+		}
+	}
+
+	// Unrelated keys must survive on the rows that originally carried them.
+	preserved := []struct {
+		id   string
+		key  string
+		want string
+	}{
+		{"legacy_full", "$.language", "fr"},
+		{"legacy_full", "$.device", "laptop"},
+		{"clean", "$.language", "en"},
+	}
+	for _, p := range preserved {
+		var v sql.NullString
+		err := db.QueryRow(
+			`SELECT json_extract(profile_json, ?) FROM learners WHERE id = ?`,
+			p.key, p.id,
+		).Scan(&v)
+		if err != nil {
+			t.Fatalf("query %s %s: %v", p.id, p.key, err)
+		}
+		if !v.Valid || v.String != p.want {
+			t.Errorf("learner %s: key %s should equal %q, got valid=%v value=%q", p.id, p.key, p.want, v.Valid, v.String)
+		}
+	}
+
+	// legacy_partial: autonomy_score must survive, level must be gone.
+	var auto sql.NullFloat64
+	if err := db.QueryRow(
+		`SELECT json_extract(profile_json, '$.autonomy_score') FROM learners WHERE id = 'legacy_partial'`,
+	).Scan(&auto); err != nil {
+		t.Fatalf("query autonomy_score: %v", err)
+	}
+	if !auto.Valid || auto.Float64 != 0.6 {
+		t.Errorf("legacy_partial autonomy_score should equal 0.6, got valid=%v value=%v", auto.Valid, auto.Float64)
+	}
+
+	// Idempotence: running Migrate again on already-scrubbed rows is a
+	// no-op (no error, no spurious changes).
+	if err := Migrate(db); err != nil {
+		t.Fatalf("third Migrate (idempotent on scrubbed rows): %v", err)
+	}
+}
+
 // TestOpenDB_Memory exercises the OpenDB helper. OpenDB appends `?_pragma=...`
 // to the path before opening, so we use a file-backed temp DB to keep the DSN
 // shape simple.

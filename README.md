@@ -125,7 +125,7 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 | `get_dashboard_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
 | `get_olm_snapshot` | Open Learner Model snapshot: per-concept mastery, retention, last-seen, fringe membership, anti-repeat status |
 | `get_availability_model` | Learner's time windows and session frequency |
-| `update_learner_profile` | Persist learner metadata (device, background, level, calibration bias, autonomy score) |
+| `update_learner_profile` | Persist learner metadata (device, objective, language, calibration bias, affect baseline, autonomy score) |
 
 ### Domain Management
 
