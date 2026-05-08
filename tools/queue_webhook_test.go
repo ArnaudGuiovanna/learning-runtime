@@ -136,6 +136,7 @@ func TestValidWebhookKind(t *testing.T) {
 		"daily_recap":      true,
 		"reactivation":     true,
 		"reminder":         true,
+		"mirror_message":   true,
 		"":                 false,
 		"spam":             false,
 	}

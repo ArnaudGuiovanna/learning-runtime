@@ -16,7 +16,7 @@ import (
 )
 
 type QueueWebhookMessageParams struct {
-	Kind         string `json:"kind" jsonschema:"Type de nudge : daily_motivation | daily_recap | reactivation | reminder | olm:<domain_id> (snapshot OLM par domaine)"`
+	Kind         string `json:"kind" jsonschema:"Type de nudge : daily_motivation | daily_recap | reactivation | reminder | mirror_message | olm:<domain_id> (snapshot OLM par domaine)"`
 	ScheduledFor string `json:"scheduled_for" jsonschema:"ISO 8601 timestamp UTC de la fenêtre de tir (ex: 2026-04-13T08:00:00Z)"`
 	ExpiresAt    string `json:"expires_at,omitempty" jsonschema:"ISO 8601 timestamp UTC après lequel le message ne doit plus être envoyé"`
 	Content      string `json:"content" jsonschema:"Contenu Markdown prêt à poster sur le webhook Discord (max ~300 caractères recommandé)"`
@@ -38,7 +38,7 @@ func registerQueueWebhookMessage(server *mcp.Server, deps *Deps) {
 		}
 
 		if !validWebhookKind(params.Kind) {
-			r, _ := errorResult(fmt.Sprintf("invalid kind %q (expected daily_motivation | daily_recap | reactivation | reminder)", params.Kind))
+			r, _ := errorResult(fmt.Sprintf("invalid kind %q (expected daily_motivation | daily_recap | reactivation | reminder | mirror_message | olm:<domain_id>)", params.Kind))
 			return r, nil, nil
 		}
 		if params.ScheduledFor == "" {
@@ -91,7 +91,8 @@ func validWebhookKind(k string) bool {
 	case models.WebhookKindDailyMotivation,
 		models.WebhookKindDailyRecap,
 		models.WebhookKindReactivation,
-		models.WebhookKindReminder:
+		models.WebhookKindReminder,
+		models.WebhookKindMirror:
 		return true
 	}
 	// olm:<domain_id> — used by the OLM dispatch to allow one queued

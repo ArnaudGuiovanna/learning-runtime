@@ -57,6 +57,13 @@ func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Persist & enqueue for proactive push (#59). Best-effort: a queue
+		// failure must not block the in-session pull response — Claude can
+		// still surface the mirror text even if the webhook lane is offline.
+		if _, _, err := engine.EnqueueMirrorWebhook(deps.Store, learnerID, mirror, time.Now().UTC()); err != nil {
+			deps.Logger.Warn("get_metacognitive_mirror: enqueue failed", "err", err, "learner", learnerID)
+		}
+
 		r, _ := jsonResult(map[string]interface{}{
 			"mirror": mirror,
 		})

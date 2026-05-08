@@ -138,6 +138,16 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			SessionCount:    mirrorSessionCount,
 		})
 
+		// Persist & enqueue the mirror so it can be pushed proactively via
+		// the webhook queue (#59). Per-day dedup lives in EnqueueMirrorWebhook
+		// so a learner who hits get_next_activity multiple times in a day
+		// only sees one queued nudge.
+		if mirror != nil {
+			if _, _, err := engine.EnqueueMirrorWebhook(deps.Store, learnerID, mirror, time.Now().UTC()); err != nil {
+				deps.Logger.Warn("get_next_activity: mirror enqueue failed", "err", err, "learner", learnerID)
+			}
+		}
+
 		// Tutor mode
 		var currentAffect *models.AffectState
 		if len(affects) > 0 {
