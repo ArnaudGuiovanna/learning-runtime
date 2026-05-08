@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,114 @@ func TestRecordCalibrationResult_OwnerAllowed(t *testing.T) {
 		t.Fatalf("expected actual=0.80, got %+v", saved.Actual)
 	}
 }
+
+// callRecordCalibrationRaw is the same as callRecordCalibration but accepts
+// a pre-built JSON arguments blob, so a test can inject values that the Go
+// json encoder refuses (e.g. NaN).
+func callRecordCalibrationRaw(t *testing.T, deps *Deps, learnerID string, argsJSON []byte) (*mcp.CallToolResult, error) {
+	t.Helper()
+	ctx := context.Background()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0.0.1"}, nil)
+	registerRecordCalibrationResult(server, deps)
+	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			ctx = context.WithValue(ctx, auth.LearnerIDKey, learnerID)
+			return next(ctx, method, req)
+		}
+	})
+
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "0.0.1"}, nil)
+	session, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	return session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "record_calibration_result",
+		Arguments: json.RawMessage(argsJSON),
+	})
+}
+
+// TestRecordCalibrationResult_ActualScoreOutOfRange covers the issue #83
+// gap left over from #25/#50 numeric validation: actual_score was being
+// silently persisted regardless of magnitude or finiteness, corrupting the
+// calibration bias estimate downstream. Each sub-case must be rejected
+// either at the JSON layer (NaN literal) or by validateUnitInterval.
+func TestRecordCalibrationResult_ActualScoreOutOfRange(t *testing.T) {
+	cases := []struct {
+		name string
+		// Raw JSON literal injected as actual_score so we can send NaN,
+		// which encoding/json refuses to marshal.
+		actualLiteral string
+		want          string
+	}{
+		{"negative", "-0.1", "must be in [0, 1]"},
+		{"too_large", "1.5", "must be in [0, 1]"},
+		{"nan", "NaN", "finite"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, deps := setupCalibTest(t)
+
+			predictionID := "cal_owner_" + tc.name
+			rec := &models.CalibrationRecord{
+				PredictionID: predictionID,
+				LearnerID:    "L_owner",
+				ConceptID:    "Concept_A",
+				Predicted:    0.5,
+			}
+			if err := store.CreateCalibrationPrediction(rec); err != nil {
+				t.Fatal(err)
+			}
+
+			argsJSON := []byte(fmt.Sprintf(
+				`{"prediction_id":%q,"actual_score":%s}`,
+				predictionID, tc.actualLiteral,
+			))
+			res, err := callRecordCalibrationRaw(t, deps, "L_owner", argsJSON)
+			if err != nil {
+				// NaN is not valid JSON; some validators reject it before
+				// the handler runs. That is also an acceptable rejection
+				// of a non-finite actual_score.
+				if tc.name == "nan" {
+					return
+				}
+				t.Fatalf("unexpected transport error: %v", err)
+			}
+			if !res.IsError {
+				t.Fatalf("expected error result for actual_score=%s, got success", tc.actualLiteral)
+			}
+			var text string
+			if len(res.Content) > 0 {
+				if tcc, ok := res.Content[0].(*mcp.TextContent); ok {
+					text = tcc.Text
+				}
+			}
+			if !strings.Contains(text, "actual_score") || !strings.Contains(text, tc.want) {
+				t.Fatalf("expected error mentioning actual_score and %q, got %q", tc.want, text)
+			}
+
+			// Record must NOT be mutated when validation rejects.
+			saved, err := store.GetCalibrationRecord(predictionID)
+			if err != nil {
+				t.Fatalf("get record: %v", err)
+			}
+			if saved.Actual != nil {
+				t.Fatalf("record should remain untouched, got actual=%v", *saved.Actual)
+			}
+		})
+	}
+}
+
+// _ = math.NaN keeps the math import required even when no sub-case below
+// directly references math; the test above relies on JSON-literal NaN.
+var _ = math.NaN
 
 func TestRecordCalibrationResult_ForeignLearnerRejected(t *testing.T) {
 	store, deps := setupCalibTest(t)
