@@ -90,9 +90,19 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 
 type RecordTransferResultParams struct {
 	ConceptID   string  `json:"concept_id" jsonschema:"Le concept testé"`
-	ContextType string  `json:"context_type" jsonschema:"Type de contexte du challenge"`
+	ContextType string  `json:"context_type" jsonschema:"Type de contexte du challenge: real_world, interview, teaching, debugging, creative"`
 	Score       float64 `json:"score" jsonschema:"Score de transfert entre 0 et 1"`
 	SessionID   string  `json:"session_id,omitempty" jsonschema:"ID de session (optionnel)"`
+	DomainID    string  `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+}
+
+// allowedRecordTransferContextTypes enumerates the documented context_type
+// values for record_transfer_result. Issue #96: a free-string ContextType
+// allowed orphan transfer rows ("banana", "") to pollute TRANSFER_BLOCKED
+// alerts. Kept inline here (rather than in tools/validate.go) to avoid a
+// merge conflict with the cycle-2 sibling PR that introduces validateEnum.
+var allowedRecordTransferContextTypes = []string{
+	"real_world", "interview", "teaching", "debugging", "creative",
 }
 
 func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
@@ -111,6 +121,44 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 		// value outside [0, 1] to keep transfer_score reports & the
 		// blocked < 0.50 gate meaningful (issue #25).
 		if err := validateUnitInterval("score", params.Score); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
+		// Enum guard for context_type. Without this, hallucinated labels
+		// ("banana", "") flowed into the transfer_records table and
+		// poisoned downstream TRANSFER_BLOCKED alerts (issue #96).
+		ctOK := false
+		for _, v := range allowedRecordTransferContextTypes {
+			if params.ContextType == v {
+				ctOK = true
+				break
+			}
+		}
+		if !ctOK {
+			r, _ := errorResult(fmt.Sprintf(
+				"context_type %q is invalid: must be one of: real_world, interview, teaching, debugging, creative",
+				params.ContextType,
+			))
+			return r, nil, nil
+		}
+
+		// Resolve the active domain (honoring the optional domain_id) and
+		// validate the concept against its concept list. Without this guard
+		// the tool silently inserts orphan transfer rows for hallucinated
+		// or stale concept names — see issue #96.
+		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
+		if err != nil || domain == nil {
+			if params.DomainID != "" {
+				deps.Logger.Error("record_transfer_result: domain not found by id", "err", err, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			deps.Logger.Info("record_transfer_result: no active domain — needs setup", "learner", learnerID)
+			r, _ := noActiveDomainResult()
+			return r, nil, nil
+		}
+		if err := validateConceptInDomain(domain, params.ConceptID); err != nil {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
