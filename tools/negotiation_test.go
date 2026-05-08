@@ -4,7 +4,6 @@
 package tools
 
 import (
-	"strings"
 	"testing"
 
 	"tutor-mcp/models"
@@ -25,8 +24,12 @@ func TestLearningNegotiation_NoDomain(t *testing.T) {
 	res := callTool(t, deps, registerLearningNegotiation, "L_owner", "learning_negotiation", map[string]any{
 		"session_id": "s1",
 	})
-	if !res.IsError || !strings.Contains(resultText(res), "domain not found") {
-		t.Fatalf("got %q", resultText(res))
+	// Issue #33: a missing domain (no DomainID supplied) returns the
+	// uniform needs_domain_setup jsonResult — not an errorResult — so the
+	// LLM can branch consistently across all chat-side tools.
+	out := decodeResult(t, res)
+	if got, _ := out["needs_domain_setup"].(bool); !got {
+		t.Fatalf("expected needs_domain_setup=true, got %v", out)
 	}
 }
 

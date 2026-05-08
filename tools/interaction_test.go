@@ -194,7 +194,8 @@ func TestRecordInteraction_RejectsUnknownConcept(t *testing.T) {
 
 func TestRecordInteraction_NoActiveDomain(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	// L_owner has no domain at all — record_interaction must refuse.
+	// L_owner has no domain at all — record_interaction must signal
+	// needs_domain_setup (issue #33: uniform shape across chat-side tools).
 	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
 		"concept":               "anything",
 		"activity_type":         "RECALL_EXERCISE",
@@ -203,8 +204,9 @@ func TestRecordInteraction_NoActiveDomain(t *testing.T) {
 		"confidence":            0.8,
 		"notes":                 "",
 	})
-	if !res.IsError {
-		t.Fatalf("expected error when no active domain, got %q", resultText(res))
+	out := decodeResult(t, res)
+	if got, _ := out["needs_domain_setup"].(bool); !got {
+		t.Fatalf("expected needs_domain_setup=true, got %v (raw %q)", out, resultText(res))
 	}
 }
 

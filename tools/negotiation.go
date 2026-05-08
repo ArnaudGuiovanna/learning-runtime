@@ -44,8 +44,13 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
 		if err != nil || domain == nil {
-			deps.Logger.Error("learning_negotiation: failed to resolve domain", "err", err, "learner", learnerID)
-			r, _ := errorResult("domain not found")
+			if params.DomainID != "" {
+				deps.Logger.Error("learning_negotiation: domain not found by id", "err", err, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			deps.Logger.Info("learning_negotiation: no active domain — needs setup", "learner", learnerID)
+			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
 

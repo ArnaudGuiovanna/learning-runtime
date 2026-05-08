@@ -22,8 +22,10 @@ func TestRecordSessionClose_NoAuth(t *testing.T) {
 func TestRecordSessionClose_NoDomain(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerRecordSessionClose, "L_owner", "record_session_close", map[string]any{})
-	if !res.IsError || !strings.Contains(resultText(res), "domain not found") {
-		t.Fatalf("got %q", resultText(res))
+	// Issue #33: uniform needs_domain_setup signal across chat-side tools.
+	out := decodeResult(t, res)
+	if got, _ := out["needs_domain_setup"].(bool); !got {
+		t.Fatalf("expected needs_domain_setup=true, got %v", out)
 	}
 }
 

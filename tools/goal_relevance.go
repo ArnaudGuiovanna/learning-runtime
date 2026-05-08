@@ -80,8 +80,13 @@ func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
 
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
 		if err != nil || domain == nil {
-			deps.Logger.Error("set_goal_relevance: domain not found", "err", err, "learner", learnerID)
-			r, _ := errorResult("domain not found — call init_domain first")
+			if params.DomainID != "" {
+				deps.Logger.Error("set_goal_relevance: domain not found by id", "err", err, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			deps.Logger.Info("set_goal_relevance: no active domain — needs setup", "learner", learnerID)
+			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
 
@@ -182,8 +187,13 @@ func registerGetGoalRelevance(server *mcp.Server, deps *Deps) {
 
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
 		if err != nil || domain == nil {
-			deps.Logger.Error("get_goal_relevance: domain not found", "err", err, "learner", learnerID)
-			r, _ := errorResult("domain not found — call init_domain first")
+			if params.DomainID != "" {
+				deps.Logger.Error("get_goal_relevance: domain not found by id", "err", err, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			deps.Logger.Info("get_goal_relevance: no active domain — needs setup", "learner", learnerID)
+			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
 

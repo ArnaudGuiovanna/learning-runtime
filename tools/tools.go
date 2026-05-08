@@ -93,6 +93,23 @@ func errorResult(msg string) (*mcp.CallToolResult, error) {
 	}, nil
 }
 
+// noActiveDomainResult returns the canonical "no active domain" payload that
+// every chat-side tool emits when called without an explicit DomainID and the
+// learner has no domain yet. Issue #33: a uniform shape lets the LLM branch
+// on `needs_domain_setup:true` regardless of which tool it called and recover
+// by issuing `init_domain`. For an explicit DomainID that does not match the
+// learner, callers should keep emitting errorResult("domain not found") —
+// that's a genuine dev-facing 404, not a setup precondition.
+func noActiveDomainResult() (*mcp.CallToolResult, any) {
+	payload := map[string]any{
+		"needs_domain_setup":  true,
+		"reason":              "no active domain for this learner",
+		"next_action_for_llm": "appelle init_domain(name, concepts, prerequisites)",
+	}
+	r, _ := jsonResult(payload)
+	return r, payload
+}
+
 // RegisterTools registers all MCP tools and prompts on the given server.
 func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerGetPendingAlerts(server, deps)
