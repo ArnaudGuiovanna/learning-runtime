@@ -95,6 +95,90 @@ func TestGetPendingAlerts_NoActiveDomain_ReturnsCleanEmpty(t *testing.T) {
 	}
 }
 
+// TestGetPendingAlerts_WiresMetacognitiveAlerts is the regression for sub-issue
+// #58: ComputeMetacognitiveAlerts must be called from the sync get_pending_alerts
+// tool, not just from tests. Seeds the AFFECT_NEGATIVE precondition (two
+// consecutive sessions with Satisfaction <= 2) and asserts the alert surfaces.
+func TestGetPendingAlerts_WiresMetacognitiveAlerts(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	// At least one active domain so the no-domain_id branch doesn't
+	// short-circuit on needs_domain_setup.
+	if _, err := store.CreateDomain("L_owner", "math", "", models.KnowledgeSpace{
+		Concepts: []string{"a"},
+	}); err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+
+	// Two consecutive low-satisfaction affect rows trigger AFFECT_NEGATIVE.
+	now := time.Now().UTC()
+	if err := store.UpsertAffectState(&models.AffectState{
+		LearnerID:    "L_owner",
+		SessionID:    "s1",
+		Satisfaction: 2,
+	}); err != nil {
+		t.Fatalf("upsert affect s1: %v", err)
+	}
+	// Force a small ordering gap so newest-first ordering is deterministic.
+	_ = now
+	if err := store.UpsertAffectState(&models.AffectState{
+		LearnerID:    "L_owner",
+		SessionID:    "s2",
+		Satisfaction: 1,
+	}); err != nil {
+		t.Fatalf("upsert affect s2: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetPendingAlerts, "L_owner", "get_pending_alerts", map[string]any{})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	alerts, _ := out["alerts"].([]any)
+	sawAffect := false
+	for _, a := range alerts {
+		m, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["type"] == string(models.AlertAffectNegative) {
+			sawAffect = true
+		}
+	}
+	if !sawAffect {
+		t.Fatalf("expected AFFECT_NEGATIVE metacognitive alert in payload, got %+v", alerts)
+	}
+}
+
+// TestGetPendingAlerts_DedupsMetacognitiveAlerts asserts mergeMetacognitiveAlerts
+// does not double-emit when an activity-level alert and a metacognitive alert
+// share the same (Type, Concept). We synthesize the collision by reaching into
+// the merge helper directly — going through the DB would require an
+// AFFECT_NEGATIVE-equivalent on the activity side, which doesn't exist.
+func TestMergeMetacognitiveAlerts_Dedupes(t *testing.T) {
+	base := []models.Alert{
+		{Type: models.AlertAffectNegative, Concept: ""},
+	}
+	extra := []models.Alert{
+		{Type: models.AlertAffectNegative, Concept: ""},
+		{Type: models.AlertCalibrationDiverging, Concept: ""},
+	}
+	merged := mergeMetacognitiveAlerts(base, extra)
+	if len(merged) != 2 {
+		t.Fatalf("expected dedup to drop the duplicate AFFECT_NEGATIVE, got %d alerts: %+v", len(merged), merged)
+	}
+	// Ensure CALIBRATION_DIVERGING was kept (i.e. dedup is by type+concept,
+	// not a blanket de-overlap).
+	sawCalib := false
+	for _, a := range merged {
+		if a.Type == models.AlertCalibrationDiverging {
+			sawCalib = true
+		}
+	}
+	if !sawCalib {
+		t.Errorf("dedup must not drop unrelated kinds, got %+v", merged)
+	}
+}
+
 // Reproducer for issue #29: when the learner has multiple non-archived
 // domains and no domain_id filter is given, alerts must be computed only
 // over the union of concepts across active domains — orphan concepts

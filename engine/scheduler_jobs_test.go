@@ -96,9 +96,10 @@ func TestStart_RegistersJobsAndStops(t *testing.T) {
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// Ensure cron entries were added (4 jobs: olm, motivation, recap, cleanup).
-	if got := len(s.cron.Entries()); got != 4 {
-		t.Errorf("registered jobs = %d, want 4", got)
+	// Ensure cron entries were added (5 jobs: olm, motivation, recap,
+	// cleanup, metacog).
+	if got := len(s.cron.Entries()); got != 5 {
+		t.Errorf("registered jobs = %d, want 5", got)
 	}
 	s.Stop() // must not panic, must complete promptly
 }

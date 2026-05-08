@@ -202,6 +202,32 @@ func (s *Store) GetTransferScores(learnerID, conceptID string) ([]*models.Transf
 	return records, rows.Err()
 }
 
+// GetTransferRecordsByLearner returns every transfer probe record for the
+// learner across all concepts. Used by the metacognitive alert pipeline to
+// detect TRANSFER_BLOCKED (mastered concepts whose context-transfer scores
+// remain below 0.50 on 2+ contexts). Newest-first.
+func (s *Store) GetTransferRecordsByLearner(learnerID string) ([]*models.TransferRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, learner_id, concept_id, context_type, score, session_id, created_at
+		 FROM transfer_records WHERE learner_id = ?
+		 ORDER BY created_at DESC`,
+		learnerID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get transfer records by learner: %w", err)
+	}
+	defer rows.Close()
+	var records []*models.TransferRecord
+	for rows.Next() {
+		r := &models.TransferRecord{}
+		if err := rows.Scan(&r.ID, &r.LearnerID, &r.ConceptID, &r.ContextType, &r.Score, &r.SessionID, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan transfer record: %w", err)
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
 // ─── Autonomy Queries ───────────────────────────────────────────────────────
 
 func (s *Store) GetHintStatsForMastered(learnerID string, threshold float64) (hints int, total int, err error) {
