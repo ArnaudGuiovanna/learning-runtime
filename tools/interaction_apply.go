@@ -13,7 +13,7 @@ import (
 )
 
 // interactionInput carries the minimal fields needed to persist an
-// interaction and drive the BKT/FSRS/IRT/PFA update chain.  Fields not
+// interaction and drive the BKT/FSRS/IRT update chain.  Fields not
 // relevant to a given call site (e.g. HintsRequested for submit_answer)
 // should be left at their zero values.
 type interactionInput struct {
@@ -33,19 +33,24 @@ type interactionInput struct {
 }
 
 // applyInteraction persists the interaction and updates the learner's
-// cognitive state (BKT, FSRS, IRT, PFA) for the concept.  Returns the
+// cognitive state (BKT, FSRS, IRT) for the concept.  Returns the
 // resulting ConceptState (post-update) and an error if any persistence
 // step failed.
 //
-// The BKT → FSRS → IRT → PFA update chain is *non-commutative* on
+// The BKT → FSRS → IRT update chain is *non-commutative* on
 // `cs.Difficulty` (and in spirit on `cs.Reps` / `cs.Stability` /
 // `cs.PMastery`): IRT consumes the FSRS difficulty to compute the θ
 // step, but FSRS itself rewrites that field. Reading `cs.*` directly
 // after running each step would silently mix prior- and post-update
 // values across the chain (issue #53). To keep the chain
 // order-independent we snapshot the read-only prior values at the top,
-// run all four updates against the snapshot, and write the merged
+// run all three updates against the snapshot, and write the merged
 // result back to `cs` exactly once at the end.
+//
+// Note: PFA is intentionally NOT persisted on the concept state. The
+// PLATEAU alert in engine/alert.go recomputes a fresh PFAState from the
+// recent-interactions list on each call, so storing rolling counts
+// per-concept added schema weight without any reader (issue #55).
 func applyInteraction(
 	deps *Deps,
 	learnerID string,
@@ -60,7 +65,7 @@ func applyInteraction(
 
 	// ── Snapshot read-only prior state ──────────────────────────────
 	// All downstream algorithm steps read from this snapshot, never
-	// from `cs` directly, to keep the BKT → FSRS → IRT → PFA chain
+	// from `cs` directly, to keep the BKT → FSRS → IRT chain
 	// commutative. See doc comment above and issue #53.
 	priorPMastery := cs.PMastery
 	priorPLearn := cs.PLearn
@@ -75,8 +80,6 @@ func applyInteraction(
 	priorLapses := cs.Lapses
 	priorCardState := cs.CardState
 	priorTheta := cs.Theta
-	priorPFASuccesses := cs.PFASuccesses
-	priorPFAFailures := cs.PFAFailures
 	var priorLastReview time.Time
 	if cs.LastReview != nil {
 		priorLastReview = *cs.LastReview
@@ -163,13 +166,6 @@ func applyInteraction(
 	}
 	newTheta := algorithms.IRTUpdateTheta(priorTheta, []algorithms.IRTItem{item}, []bool{input.Success})
 
-	// ── PFA update — reads from prior snapshot. ────────────────────
-	pfaState := algorithms.PFAState{
-		Successes: priorPFASuccesses,
-		Failures:  priorPFAFailures,
-	}
-	pfaState = algorithms.PFAUpdate(pfaState, input.Success)
-
 	// ── Single write-back of the merged result. ────────────────────
 	cs.PMastery = bktState.PMastery
 	cs.Stability = fsrsCard.Stability
@@ -183,8 +179,6 @@ func applyInteraction(
 	nextReview := now.Add(time.Duration(fsrsCard.ScheduledDays) * 24 * time.Hour)
 	cs.NextReview = &nextReview
 	cs.Theta = newTheta
-	cs.PFASuccesses = pfaState.Successes
-	cs.PFAFailures = pfaState.Failures
 
 	// Persist updated concept state.
 	if err := deps.Store.UpsertConceptState(cs); err != nil {

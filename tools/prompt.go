@@ -51,7 +51,7 @@ OUTILS DISPONIBLES :
 - get_learner_context(domain_id?) : contexte de session, liste des domaines, progress_narrative
 - get_pending_alerts(domain_id?) : alertes critiques
 - get_next_activity(domain_id?) : prochaine activité optimale + miroir métacognitif + tutor_mode + motivation_brief
-- record_interaction(concept, success, confidence, error_type?, hints_requested?, self_initiated?, calibration_id?, domain_id?) : enregistre + met à jour BKT/FSRS/IRT/PFA
+- record_interaction(concept, success, confidence, error_type?, hints_requested?, self_initiated?, calibration_id?, domain_id?) : enregistre + met à jour BKT/FSRS/IRT
 - record_affect(session_id, energy?, confidence?, satisfaction?, perceived_difficulty?, next_session_intent?) : check-in émotionnel début/fin de session
 - record_session_close(domain_id?, implementation_intention?) : clôture la session, retourne recap_brief (wins, struggles, prompt_for_implementation_intent)
 - queue_webhook_message(kind, scheduled_for, content, expires_at?, priority?) : mettre en queue un nudge que le scheduler postera sur le webhook Discord (daily_motivation | daily_recap | reactivation | reminder)

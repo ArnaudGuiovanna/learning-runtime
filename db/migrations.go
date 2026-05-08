@@ -85,6 +85,15 @@ func Migrate(db *sql.DB) error {
 		// captured at write time").
 		`ALTER TABLE interactions ADD COLUMN bkt_slip REAL`,
 		`ALTER TABLE interactions ADD COLUMN bkt_guess REAL`,
+		// Issue #55: PFA persisted state was written but never consumed —
+		// engine/alert.go recomputes PFA in-memory from the interactions
+		// list each call. Drop the dead columns. Forward-only: there is
+		// no "down" migration. The errors are swallowed by the loop's
+		// `_, _ = db.Exec(m)` so re-running on a DB where the columns
+		// are already gone is a no-op (idempotent). DROP COLUMN requires
+		// SQLite >= 3.35; modernc.org/sqlite v1.47 ships above that.
+		`ALTER TABLE concept_states DROP COLUMN pfa_successes`,
+		`ALTER TABLE concept_states DROP COLUMN pfa_failures`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors
