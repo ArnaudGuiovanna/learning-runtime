@@ -73,6 +73,7 @@ type Interaction struct {
 	IsProactiveReview   bool
 	MisconceptionType   string
 	MisconceptionDetail string
+	DomainID            string // optional, blank for pre-issue-#24 rows
 	CreatedAt           time.Time
 }
 

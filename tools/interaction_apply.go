@@ -29,7 +29,7 @@ type interactionInput struct {
 	CalibrationID       string
 	MisconceptionType   string
 	MisconceptionDetail string
-	DomainID            string // informational only; not stored on interaction row
+	DomainID            string // persisted on the interaction row (issue #24)
 }
 
 // applyInteraction persists the interaction and updates the learner's
@@ -61,6 +61,7 @@ func applyInteraction(
 		HintsRequested: input.HintsRequested,
 		SelfInitiated:  input.SelfInitiated,
 		CalibrationID:  input.CalibrationID,
+		DomainID:       input.DomainID,
 		CreatedAt:      now,
 	}
 

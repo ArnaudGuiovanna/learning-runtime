@@ -67,6 +67,10 @@ func Migrate(db *sql.DB) error {
 		// DROP COLUMN requires SQLite >= 3.35 (modernc.org/sqlite ships above).
 		`ALTER TABLE learners ADD COLUMN chat_mode_enabled INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE learners DROP COLUMN chat_mode_enabled`,
+		// Issue #24: persist domain_id on interaction rows so two domains
+		// sharing a concept name can be told apart in audits and downstream
+		// analytics. Nullable: pre-existing rows stay NULL (origin unknown).
+		`ALTER TABLE interactions ADD COLUMN domain_id TEXT`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors

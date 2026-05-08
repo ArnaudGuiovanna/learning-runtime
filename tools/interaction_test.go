@@ -166,6 +166,62 @@ func TestRecordInteraction_MisconceptionIgnoredOnSuccess(t *testing.T) {
 	}
 }
 
+// Issue #24: domain_id parameter must be honored — i.e. resolved (not silently
+// ignored) and persisted on the interaction row so audits can tell apart
+// progress on the same concept name across two domains.
+func TestRecordInteraction_DomainIDIsPersistedOnRow(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"domain_id":             d.ID,
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 4.0,
+		"confidence":            0.7,
+		"notes":                 "",
+	})
+	if res.IsError {
+		t.Fatalf("expected success, got %q", resultText(res))
+	}
+
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if len(recents) != 1 {
+		t.Fatalf("expected 1 interaction row, got %d", len(recents))
+	}
+	if got := recents[0].DomainID; got != d.ID {
+		t.Errorf("DomainID = %q, want %q", got, d.ID)
+	}
+}
+
+// Issue #24: an explicit domain_id pointing at someone else's domain must be
+// rejected — concept membership validation runs against the resolved domain
+// and a foreign domain has no overlap with the learner's concept set.
+func TestRecordInteraction_DomainIDRejectsForeignDomain(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+	foreign, err := store.CreateDomain("L_other", "shared", "", models.KnowledgeSpace{
+		Concepts: []string{"a"},
+	})
+	if err != nil {
+		t.Fatalf("create foreign domain: %v", err)
+	}
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"domain_id":             foreign.ID,
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 4.0,
+		"confidence":            0.7,
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected errorResult on foreign domain_id, got %q", resultText(res))
+	}
+}
+
 func TestRecordInteraction_RejectsUnknownConcept(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	// makeOwnerDomain creates a domain with concepts ["a","b"].

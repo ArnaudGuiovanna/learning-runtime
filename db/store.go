@@ -636,17 +636,18 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 
 // ─── Interactions ─────────────────────────────────────────────────────────────
 
-const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, created_at`
+const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, created_at`
 
 func (s *Store) CreateInteraction(i *models.Interaction) error {
 	i.CreatedAt = time.Now().UTC()
 	result, err := s.db.Exec(
-		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.LearnerID, i.Concept, i.ActivityType, boolToInt(i.Success),
 		i.ResponseTime, i.Confidence, i.ErrorType, i.Notes,
 		i.HintsRequested, boolToInt(i.SelfInitiated), i.CalibrationID, boolToInt(i.IsProactiveReview),
 		nullString(i.MisconceptionType), nullString(i.MisconceptionDetail),
+		nullString(i.DomainID),
 		i.CreatedAt,
 	)
 	if err != nil {
@@ -705,12 +706,12 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 	for rows.Next() {
 		i := &models.Interaction{}
 		var successInt, selfInitInt, proactiveInt int
-		var errorType, calibrationID, misconceptionType, misconceptionDetail sql.NullString
+		var errorType, calibrationID, misconceptionType, misconceptionDetail, domainID sql.NullString
 		if err := rows.Scan(
 			&i.ID, &i.LearnerID, &i.Concept, &i.ActivityType,
 			&successInt, &i.ResponseTime, &i.Confidence, &errorType, &i.Notes,
 			&i.HintsRequested, &selfInitInt, &calibrationID, &proactiveInt,
-			&misconceptionType, &misconceptionDetail,
+			&misconceptionType, &misconceptionDetail, &domainID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan interaction row: %w", err)
@@ -729,6 +730,9 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 		}
 		if misconceptionDetail.Valid {
 			i.MisconceptionDetail = misconceptionDetail.String
+		}
+		if domainID.Valid {
+			i.DomainID = domainID.String
 		}
 		interactions = append(interactions, i)
 	}
