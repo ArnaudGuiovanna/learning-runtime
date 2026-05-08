@@ -78,6 +78,13 @@ func (s *Scheduler) Start() error {
 	if _, err := s.cron.AddFunc("0 21 * * *", s.sendDailyRecap); err != nil {
 		return fmt.Errorf("add daily recap job: %w", err)
 	}
+	// Mirror messages: once at 12h UTC. Dispatches any metacognitive mirror
+	// nudges queued during sessions (#59). One per learner per day, dedup'd
+	// at the alert layer (MIRROR_MESSAGE) so an in-session enqueue + the
+	// scheduler tick can't double-fire.
+	if _, err := s.cron.AddFunc("0 12 * * *", s.sendMirrorMessages); err != nil {
+		return fmt.Errorf("add mirror messages job: %w", err)
+	}
 	// Cleanup: hourly.
 	if _, err := s.cron.AddFunc("0 * * * *", s.cleanupExpiredData); err != nil {
 		return fmt.Errorf("add cleanup job: %w", err)
@@ -91,7 +98,7 @@ func (s *Scheduler) Start() error {
 	}
 
 	s.cron.Start()
-	s.logger.Info("scheduler started", "jobs", "olm(13h), motivation(8h), recap(21h), cleanup(1h), metacog(30m)")
+	s.logger.Info("scheduler started", "jobs", "olm(13h), motivation(8h), recap(21h), mirror(12h), cleanup(1h), metacog(30m)")
 	return nil
 }
 
@@ -424,6 +431,83 @@ func embedFromQueueItem(item *models.WebhookQueueItem, urgency models.AlertUrgen
 // (WasAlertSentToday + CreateScheduledAlert). Single source of truth so the
 // two call sites cannot drift apart.
 const alertKindOLM = "OLM"
+
+// ─── Metacognitive Mirror Daily Dispatch ────────────────────────────────────
+
+// sendMirrorMessages dispatches any pending metacognitive mirror nudges
+// queued during sessions (engine.EnqueueMirrorWebhook). Mirror content is
+// JSON (pattern + message + open question), decoded into a readable embed.
+// Dedup at the alert layer (MirrorAlertKind) so an in-session enqueue won't
+// race with the scheduler tick on the same day.
+func (s *Scheduler) sendMirrorMessages() {
+	learners, err := s.store.GetActiveLearners()
+	if err != nil {
+		s.logger.Error("scheduler: mirror get learners", "err", err)
+		return
+	}
+	now := time.Now().UTC()
+
+	for _, learner := range learners {
+		if learner.WebhookURL == "" {
+			continue
+		}
+		avail, _ := s.store.GetAvailability(learner.ID)
+		if avail != nil && avail.DoNotDisturb {
+			continue
+		}
+
+		// The in-session emission already records a scheduled_alert with
+		// MirrorAlertKind for dedup. WasAlertSentToday catches both the
+		// in-session enqueue AND any prior tick today.
+		if sent, _ := s.store.WasAlertSentToday(learner.ID, MirrorAlertKind); sent {
+			// We still want to mark queued items as sent so they don't
+			// pile up — best-effort dequeue + mark.
+			if item, _ := s.store.DequeueNextPending(learner.ID, models.WebhookKindMirror, now, 30*time.Minute); item != nil {
+				_ = s.store.MarkWebhookSent(item.ID, now)
+			}
+			continue
+		}
+
+		item, err := s.store.DequeueNextPending(learner.ID, models.WebhookKindMirror, now, 30*time.Minute)
+		if err != nil {
+			s.logger.Error("scheduler: mirror dequeue", "err", err, "learner", learner.ID)
+			continue
+		}
+		if item == nil || item.Content == "" {
+			continue
+		}
+
+		embed := mirrorEmbedFromContent(item.Content)
+		if err := s.sendDiscordEmbed(learner.WebhookURL, discordPayload{Embeds: []discordEmbed{embed}}); err != nil {
+			s.logger.Error("scheduler: mirror webhook", "err", err, "learner", learner.ID)
+			_ = s.store.MarkWebhookFailed(item.ID)
+			continue
+		}
+		_ = s.store.MarkWebhookSent(item.ID, now)
+		_ = s.store.CreateScheduledAlert(learner.ID, MirrorAlertKind, "", now)
+		s.logger.Info("scheduler: mirror dispatched", "learner", learner.ID)
+	}
+}
+
+// mirrorEmbedFromContent renders a queued MirrorWebhookContent payload into
+// a Discord embed. Falls back to using the raw content as the description
+// when the payload isn't valid JSON (e.g. a manual queue_webhook_message call
+// posted plain text under kind=mirror_message).
+func mirrorEmbedFromContent(content string) discordEmbed {
+	var payload MirrorWebhookContent
+	desc := content
+	if err := json.Unmarshal([]byte(content), &payload); err == nil && payload.Message != "" {
+		desc = payload.Message
+		if payload.OpenQuestion != "" {
+			desc += "\n\n" + payload.OpenQuestion
+		}
+	}
+	return discordEmbed{
+		Title:       "🪞 Reflet du jour",
+		Description: desc,
+		Color:       0x9B59B6,
+	}
+}
 
 // fromExportedEmbed converts engine.DiscordEmbed (used by FormatOLMEmbed for
 // testability) to scheduler.discordEmbed. Same shape; plain field copy.

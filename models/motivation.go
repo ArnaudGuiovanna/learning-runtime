@@ -150,6 +150,10 @@ const (
 	WebhookKindDailyRecap      = "daily_recap"
 	WebhookKindReactivation    = "reactivation"
 	WebhookKindReminder        = "reminder"
+	// WebhookKindMirror carries a metacognitive mirror message authored by
+	// engine.DetectMirrorPattern. Persisted into webhook_message_queue so
+	// the scheduler can push it proactively (see #59 / engine.EnqueueMirrorWebhook).
+	WebhookKindMirror = "mirror_message"
 )
 
 // Webhook queue statuses.

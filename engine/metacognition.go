@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -268,6 +269,98 @@ func DetectMirrorPattern(input MirrorInput) *models.MirrorMessage {
 	}
 
 	return nil
+}
+
+// ─── Mirror webhook persistence ─────────────────────────────────────────────
+
+// MirrorAlertKind is the alert tag used by EnqueueMirrorWebhook for daily
+// dedup checks (WasAlertSentToday + CreateScheduledAlert). Single source of
+// truth — the scheduler reuses it via its dispatchQueued path.
+const MirrorAlertKind = "MIRROR_MESSAGE"
+
+// mirrorWebhookStore is the narrow surface EnqueueMirrorWebhook needs from
+// *db.Store. Keeping it as an interface lets the call sites (and tests) wire
+// up a real or mock store without dragging the whole Store API into engine.
+type mirrorWebhookStore interface {
+	WasAlertSentToday(learnerID, alertType string) (bool, error)
+	EnqueueWebhookMessage(learnerID, kind, content string, scheduledFor, expiresAt time.Time, priority int) (int64, error)
+	CreateScheduledAlert(learnerID, alertType, concept string, scheduledAt time.Time) error
+}
+
+// MirrorWebhookContent is the JSON shape persisted into webhook_message_queue.content
+// for a mirror nudge. Keeping the structured fields (pattern + open question)
+// alongside the human-readable line lets the dispatcher and any downstream
+// consumer reconstruct the full mirror without re-running detection.
+type MirrorWebhookContent struct {
+	Pattern      string `json:"pattern"`
+	Message      string `json:"message"`
+	OpenQuestion string `json:"open_question"`
+}
+
+// EnqueueMirrorWebhook persists an emitted mirror message into the shared
+// webhook_message_queue so it can be pushed proactively by the scheduler.
+//
+// Behaviour:
+//   - Returns (0, false, nil) on a no-op (mirror is nil, or one was already
+//     enqueued for this learner today — per-day dedup mirrors the pattern
+//     used by the OLM and daily-motivation dispatchers).
+//   - On enqueue success, records a scheduled_alerts row tagged MirrorAlertKind
+//     so subsequent calls within the same UTC day short-circuit.
+//   - The message content is JSON-encoded so the scheduler can render the
+//     full mirror (pattern + open question) when it dispatches.
+//
+// scheduledFor defaults to `now`; the message expires 24h later (mirrors are
+// time-sensitive — a stale dependency-pattern nudge is noise, not signal).
+func EnqueueMirrorWebhook(store mirrorWebhookStore, learnerID string, mirror *models.MirrorMessage, now time.Time) (int64, bool, error) {
+	if store == nil || mirror == nil || learnerID == "" {
+		return 0, false, nil
+	}
+
+	// Per-day dedup: if a mirror was already pushed today for this learner,
+	// don't enqueue another one. Same pattern as OLM / DAILY_MOTIVATION.
+	sent, err := store.WasAlertSentToday(learnerID, MirrorAlertKind)
+	if err != nil {
+		return 0, false, fmt.Errorf("mirror dedup check: %w", err)
+	}
+	if sent {
+		return 0, false, nil
+	}
+
+	payload := MirrorWebhookContent{
+		Pattern:      mirror.Pattern,
+		Message:      mirror.Message,
+		OpenQuestion: mirror.OpenQuestion,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, false, fmt.Errorf("marshal mirror payload: %w", err)
+	}
+
+	scheduledFor := now.UTC()
+	expiresAt := scheduledFor.Add(24 * time.Hour)
+	id, err := store.EnqueueWebhookMessage(
+		learnerID,
+		models.WebhookKindMirror,
+		string(body),
+		scheduledFor,
+		expiresAt,
+		0, // priority: mirrors share the same lane as other proactive nudges
+	)
+	if err != nil {
+		return 0, false, fmt.Errorf("enqueue mirror webhook: %w", err)
+	}
+
+	// Record the alert so the dedup check above blocks subsequent same-day
+	// emissions. Stored under the same alert_type the scheduler will mark
+	// when the message is actually dispatched.
+	if err := store.CreateScheduledAlert(learnerID, MirrorAlertKind, "", now.UTC()); err != nil {
+		// The webhook is already in the queue — log via error return so the
+		// caller can surface it, but treat enqueue as success (dedup will
+		// just not work today; better than losing the nudge entirely).
+		return id, true, fmt.Errorf("record mirror alert: %w", err)
+	}
+
+	return id, true, nil
 }
 
 // ─── Tutor Mode ─────────────────────────────────────────────────────────────
