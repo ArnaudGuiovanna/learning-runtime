@@ -84,7 +84,132 @@ func validateConcepts(concepts []string, prereqs map[string][]string) error {
 			}
 		}
 	}
+
+	// Issue #62: the prerequisite graph MUST be a DAG. A cycle would make
+	// algorithms/kst.go ComputeFrontier and the concept_selector loop —
+	// every node in the cycle is `locked` because its prereq chain
+	// transitively depends on itself, and learners can never make
+	// progress. Reject up-front with a descriptive MCP error.
+	if cycle := findPrereqCycle(concepts, prereqs); len(cycle) > 0 {
+		return fmt.Errorf("prerequisite graph contains a cycle: %s", formatCycle(cycle))
+	}
 	return nil
+}
+
+// findPrereqCycle runs an iterative DFS with white/gray/black coloring on
+// the prerequisite graph and, if it finds a back-edge, returns the nodes
+// forming the cycle (in dependency order, with the closing node repeated
+// at the end for clarity). Returns nil if the graph is a DAG.
+//
+// Edge convention: prereqs[c] = [p1, p2] encodes p1 -> c and p2 -> c
+// (a prereq points at the concept it unlocks). We DFS in that direction
+// so a discovered back-edge is reported as `pk -> ... -> pk`.
+func findPrereqCycle(concepts []string, prereqs map[string][]string) []string {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // on the current DFS stack
+		black = 2 // fully explored
+	)
+
+	// Build the forward adjacency list (prereq -> dependent). Only
+	// include nodes that appear in `concepts` to stay aligned with the
+	// universe check above.
+	adj := make(map[string][]string, len(concepts))
+	for dependent, ps := range prereqs {
+		for _, p := range ps {
+			adj[p] = append(adj[p], dependent)
+		}
+	}
+
+	color := make(map[string]int, len(concepts))
+	parent := make(map[string]string, len(concepts))
+
+	// Self-loops are degenerate cycles that DFS reports correctly, but
+	// surfacing them explicitly keeps the error message readable.
+	for dependent, ps := range prereqs {
+		for _, p := range ps {
+			if p == dependent {
+				return []string{dependent, dependent}
+			}
+		}
+	}
+
+	var cycleStart, cycleEnd string
+	var found bool
+
+	// Iterative DFS; each stack frame holds the node and its next-child index.
+	type frame struct {
+		node string
+		idx  int
+	}
+
+	for _, start := range concepts {
+		if color[start] != white {
+			continue
+		}
+		stack := []frame{{node: start, idx: 0}}
+		color[start] = gray
+
+		for len(stack) > 0 && !found {
+			top := &stack[len(stack)-1]
+			children := adj[top.node]
+			if top.idx >= len(children) {
+				color[top.node] = black
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			child := children[top.idx]
+			top.idx++
+
+			switch color[child] {
+			case white:
+				color[child] = gray
+				parent[child] = top.node
+				stack = append(stack, frame{node: child, idx: 0})
+			case gray:
+				// Back-edge: top.node -> child closes a cycle starting at child.
+				cycleStart = child
+				cycleEnd = top.node
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return nil
+	}
+
+	// Reconstruct the cycle by walking parents from cycleEnd back to cycleStart.
+	path := []string{cycleEnd}
+	for n := cycleEnd; n != cycleStart; {
+		p, ok := parent[n]
+		if !ok {
+			break
+		}
+		n = p
+		path = append(path, n)
+	}
+	// Reverse so we list nodes in dependency order, then close the loop.
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+		path[i], path[j] = path[j], path[i]
+	}
+	path = append(path, cycleStart)
+	return path
+}
+
+// formatCycle renders a cycle path like "a -> b -> c -> a".
+func formatCycle(cycle []string) string {
+	if len(cycle) == 0 {
+		return ""
+	}
+	out := cycle[0]
+	for _, n := range cycle[1:] {
+		out += " -> " + n
+	}
+	return out
 }
 
 func validateValueFramings(vf *ValueFramingsInput) error {
