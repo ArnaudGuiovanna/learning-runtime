@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -101,26 +102,77 @@ var (
 	trustedProxies     []*net.IPNet
 )
 
+// parseTrustedProxiesCIDRs parses a comma-separated CIDR list and returns
+// the valid net.IPNet entries. Catch-all CIDRs (0.0.0.0/0, ::/0) are rejected
+// with a slog.Warn — they would treat every direct peer as trusted, letting a
+// client spoof X-Forwarded-For at will and defeating the per-IP rate limiter.
+func parseTrustedProxiesCIDRs(raw string) []*net.IPNet {
+	if raw == "" {
+		return nil
+	}
+	var out []*net.IPNet
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		_, cidr, err := net.ParseCIDR(part)
+		if err != nil {
+			slog.Warn("invalid TRUSTED_PROXY_CIDRS entry", "value", part, "err", err)
+			continue
+		}
+		if ones, _ := cidr.Mask.Size(); ones == 0 {
+			slog.Warn("rejecting catch-all TRUSTED_PROXY_CIDRS entry — XFF would become attacker-controlled", "value", part)
+			continue
+		}
+		out = append(out, cidr)
+	}
+	return out
+}
+
 func loadTrustedProxies() []*net.IPNet {
 	trustedProxiesOnce.Do(func() {
-		raw := os.Getenv("TRUSTED_PROXY_CIDRS")
-		if raw == "" {
-			return
-		}
-		for _, part := range strings.Split(raw, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			_, cidr, err := net.ParseCIDR(part)
-			if err != nil {
-				slog.Warn("invalid TRUSTED_PROXY_CIDRS entry", "value", part, "err", err)
-				continue
-			}
-			trustedProxies = append(trustedProxies, cidr)
-		}
+		trustedProxies = parseTrustedProxiesCIDRs(os.Getenv("TRUSTED_PROXY_CIDRS"))
 	})
 	return trustedProxies
+}
+
+// shouldWarnRateLimiterMisconfig returns true when the deployment looks public
+// (https + non-loopback hostname) but TRUSTED_PROXY_CIDRS is unset — meaning
+// every request will bucket under the proxy's loopback IP, collapsing the
+// per-IP rate limiter to a single shared bucket.
+func shouldWarnRateLimiterMisconfig(baseURL, trustedProxiesEnv string) bool {
+	if trustedProxiesEnv != "" {
+		return false
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u == nil {
+		return false
+	}
+	if u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" || host == "localhost" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
+// WarnRateLimiterMisconfig emits a slog.Warn at startup if the BASE_URL points
+// to a public hostname but TRUSTED_PROXY_CIDRS is unset. In that case the
+// per-IP rate limiter cannot distinguish callers — every request shares one
+// bucket — and the auth limiter shield collapses to a single global throttle.
+func WarnRateLimiterMisconfig(baseURL string) {
+	if shouldWarnRateLimiterMisconfig(baseURL, os.Getenv("TRUSTED_PROXY_CIDRS")) {
+		slog.Warn(
+			"rate limiter cannot distinguish clients behind a reverse proxy — set TRUSTED_PROXY_CIDRS to the proxy's CIDR (e.g. 127.0.0.1/32 or 10.0.0.0/8)",
+			"base_url", baseURL,
+		)
+	}
 }
 
 func remoteIP(r *http.Request) net.IP {

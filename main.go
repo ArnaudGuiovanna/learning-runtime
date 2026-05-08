@@ -98,7 +98,10 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Rate limiters (in-process, per-IP)
+	// Rate limiters (in-process, per-IP). Warn loudly if the deployment looks
+	// public but TRUSTED_PROXY_CIDRS is unset — without it every request shares
+	// one bucket under the proxy's loopback IP (issue #37).
+	auth.WarnRateLimiterMisconfig(baseURL)
 	authLimiter := auth.NewRateLimiter(10.0/60, 10)       // 10/min for auth endpoints
 	registerLimiter := auth.NewRateLimiter(5.0/60, 5)     // 5/min for client registration
 	mcpLimiter := auth.NewRateLimiter(20.0/60, 20)        // 20/min for MCP API
