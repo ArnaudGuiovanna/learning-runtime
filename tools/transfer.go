@@ -107,6 +107,14 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Score is a unit-interval transfer rating. Reject NaN/Inf and any
+		// value outside [0, 1] to keep transfer_score reports & the
+		// blocked < 0.50 gate meaningful (issue #25).
+		if err := validateUnitInterval("score", params.Score); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
 		record := &models.TransferRecord{
 			LearnerID:   learnerID,
 			ConceptID:   params.ConceptID,

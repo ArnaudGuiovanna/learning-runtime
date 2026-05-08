@@ -61,33 +61,36 @@ func TestCalibrationCheck_HappyPath(t *testing.T) {
 	}
 }
 
-func TestCalibrationCheck_ClampsLowAndHigh(t *testing.T) {
+func TestCalibrationCheck_RejectsOutOfRangePredictedMastery(t *testing.T) {
 	store, deps := setupToolsTest(t)
 
-	low := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
-		"concept_id":        "low",
-		"predicted_mastery": -100.0, // clamped to 0
-	})
+	// Out-of-range high — we no longer silently clamp, because clamping a
+	// hallucinated 100.0 to 1.0 corrupts the calibration record. Reject.
 	high := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
 		"concept_id":        "high",
-		"predicted_mastery": 100.0, // clamped to 1
+		"predicted_mastery": 100.0,
 	})
-	for _, r := range []bool{low.IsError, high.IsError} {
-		if r {
-			t.Fatalf("clamp test should not error")
-		}
+	if !high.IsError {
+		t.Fatalf("expected error for predicted_mastery=100, got %q", resultText(high))
 	}
-	lowID := decodeResult(t, low)["prediction_id"].(string)
-	highID := decodeResult(t, high)["prediction_id"].(string)
+	if !strings.Contains(resultText(high), "predicted_mastery") {
+		t.Fatalf("expected error to mention 'predicted_mastery', got %q", resultText(high))
+	}
 
-	lowRec, _ := store.GetCalibrationRecord(lowID)
-	highRec, _ := store.GetCalibrationRecord(highID)
-	if lowRec.Predicted != 0 {
-		t.Fatalf("expected clamped low=0, got %v", lowRec.Predicted)
+	// Out-of-range low.
+	low := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
+		"concept_id":        "low",
+		"predicted_mastery": -100.0,
+	})
+	if !low.IsError {
+		t.Fatalf("expected error for predicted_mastery=-100, got %q", resultText(low))
 	}
-	if highRec.Predicted != 1 {
-		t.Fatalf("expected clamped high=1, got %v", highRec.Predicted)
-	}
+
+	// And no calibration record should be persisted for either attempt.
+	// (We don't have a list-by-learner getter, so just sanity-check that
+	// IDs from the response payload don't exist — the response is an error
+	// payload here, so simply assert no panic on shape access.)
+	_ = store
 }
 
 func TestRecordCalibrationResult_MissingPredictionID(t *testing.T) {

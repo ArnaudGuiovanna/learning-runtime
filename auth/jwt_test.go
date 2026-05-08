@@ -7,6 +7,7 @@ package auth
 import (
 	"encoding/base64"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,20 @@ func TestVerifyJWT_RejectsAlgNone(t *testing.T) {
 	setTestSecret(t)
 	if _, err := VerifyJWT(tok, "https://issuer.example"); err == nil {
 		t.Fatal("alg=none must be rejected")
+	}
+}
+
+func TestLoadJWTSecret_PlainStringErrorMentionsOpenssl(t *testing.T) {
+	// A plain (non-base64) value is the exact failure mode users hit when
+	// following the README literally — see issue #22. The error message must
+	// be actionable and point them at `openssl rand -base64 32`.
+	t.Setenv("JWT_SECRET", "hello")
+	err := LoadJWTSecret()
+	if err == nil {
+		t.Fatal("expected error for plain (non-base64) JWT_SECRET")
+	}
+	if !strings.Contains(err.Error(), "openssl rand -base64 32") {
+		t.Fatalf("error message %q must mention `openssl rand -base64 32` to be actionable", err.Error())
 	}
 }
 

@@ -23,7 +23,7 @@ func LoadJWTSecret() error {
 	}
 	decoded, err := base64.StdEncoding.DecodeString(secret)
 	if err != nil {
-		return fmt.Errorf("JWT_SECRET must be base64-encoded: %w", err)
+		return fmt.Errorf("JWT_SECRET must be base64-encoded (try: openssl rand -base64 32): %w", err)
 	}
 	jwtSecret = decoded
 	return nil

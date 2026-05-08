@@ -29,7 +29,15 @@ const (
 )
 
 // validateConcepts enforces the size caps on a concept list and its
-// prerequisite graph. Returns the first error found (one short message).
+// prerequisite graph, AND cross-checks that every prerequisite key/value
+// references a concept declared in `concepts`. The `concepts` slice is the
+// universe of valid concept names — for init_domain it is the user-supplied
+// concepts[]; for add_concepts callers must pass the merged existing+new
+// set so prereq arrows pointing at already-declared concepts remain valid.
+//
+// Without this cross-check a malformed graph silently locks concepts behind
+// unknown prereqs (concept_selector treats missing prereqs as mastery=0
+// forever — see engine/concept_selector.go).
 func validateConcepts(concepts []string, prereqs map[string][]string) error {
 	if len(concepts) > maxConceptsPerCall {
 		return fmt.Errorf("too many concepts: %d (max %d)", len(concepts), maxConceptsPerCall)
@@ -45,9 +53,24 @@ func validateConcepts(concepts []string, prereqs map[string][]string) error {
 	if len(prereqs) > maxConceptsPerCall {
 		return fmt.Errorf("too many prerequisite entries: %d (max %d)", len(prereqs), maxConceptsPerCall)
 	}
+
+	// Build the universe of declared concepts for cross-referencing.
+	// Reject duplicates: a repeated concept inflates TotalGoalRelevant
+	// and skews mastery ratios in the FSM observables (issue #27).
+	universe := make(map[string]bool, len(concepts))
+	for _, c := range concepts {
+		if universe[c] {
+			return fmt.Errorf("duplicate concept name %q", c)
+		}
+		universe[c] = true
+	}
+
 	for k, vs := range prereqs {
 		if len(k) > maxConceptNameLen {
 			return fmt.Errorf("prerequisite key too long (max %d chars)", maxConceptNameLen)
+		}
+		if !universe[k] {
+			return fmt.Errorf("prerequisite %q references concept not declared in concepts[]", k)
 		}
 		if len(vs) > maxPrereqEntriesPerNode {
 			return fmt.Errorf("too many prerequisites for %q (max %d)", k, maxPrereqEntriesPerNode)
@@ -55,6 +78,9 @@ func validateConcepts(concepts []string, prereqs map[string][]string) error {
 		for _, v := range vs {
 			if len(v) > maxConceptNameLen {
 				return fmt.Errorf("prerequisite value too long (max %d chars)", maxConceptNameLen)
+			}
+			if !universe[v] {
+				return fmt.Errorf("prerequisite %q references concept not declared in concepts[]", v)
 			}
 		}
 	}
@@ -228,12 +254,9 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult("at least one concept is required")
 			return r, nil, nil
 		}
-		if err := validateConcepts(params.Concepts, params.Prerequisites); err != nil {
-			r, _ := errorResult(err.Error())
-			return r, nil, nil
-		}
 
-		// Resolve domain
+		// Resolve domain — needed so we can validate prerequisites
+		// against the merged (existing + new) concept universe.
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
 		if err != nil {
 			deps.Logger.Error("add_concepts: failed to resolve domain", "err", err, "learner", learnerID)
@@ -241,19 +264,35 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		// Merge new concepts into existing graph
+		// Reject duplicates BEFORE merging: (a) intra-batch duplicates and
+		// (b) batch entries that already live in the existing graph. A
+		// silent skip would let the caller believe the add succeeded while
+		// inflating their TotalGoalRelevant view (issue #27).
 		existingSet := make(map[string]bool)
 		for _, c := range domain.Graph.Concepts {
 			existingSet[c] = true
 		}
+		batchSet := make(map[string]bool, len(params.Concepts))
+		for _, c := range params.Concepts {
+			if existingSet[c] || batchSet[c] {
+				r, _ := errorResult(fmt.Sprintf("duplicate concept name %q", c))
+				return r, nil, nil
+			}
+			batchSet[c] = true
+		}
 
 		added := 0
 		for _, c := range params.Concepts {
-			if !existingSet[c] {
-				domain.Graph.Concepts = append(domain.Graph.Concepts, c)
-				existingSet[c] = true
-				added++
-			}
+			domain.Graph.Concepts = append(domain.Graph.Concepts, c)
+			existingSet[c] = true
+			added++
+		}
+
+		// Validate against the MERGED universe — prereqs may legitimately
+		// reference concepts that already exist on the domain.
+		if err := validateConcepts(domain.Graph.Concepts, params.Prerequisites); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
 		}
 
 		// Merge prerequisites

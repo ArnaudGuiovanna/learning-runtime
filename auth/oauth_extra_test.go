@@ -419,11 +419,15 @@ func TestHandleToken_RefreshToken_MissingToken(t *testing.T) {
 
 func TestHandleToken_RefreshToken_UnknownToken(t *testing.T) {
 	setTestSecret(t)
-	s, _ := newTestServer(t)
+	s, store := newTestServer(t)
+	// A registered public client is required: refresh_token grant now
+	// always authenticates the client (issue #30).
+	seedClient(t, store, "cid-pub", "https://app.example/cb")
 
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", "no-such-token")
+	form.Set("client_id", "cid-pub")
 	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -440,6 +444,9 @@ func TestHandleToken_RefreshToken_UnknownToken(t *testing.T) {
 func TestHandleToken_RefreshToken_Success(t *testing.T) {
 	setTestSecret(t)
 	s, store := newTestServer(t)
+	// Public client (no secret) — required since refresh_token grant now
+	// always authenticates the client (issue #30).
+	seedClient(t, store, "cid-pub", "https://app.example/cb")
 	learner := seedLearner(t, store, "u-rt@e.com", "pw")
 	rt, err := store.CreateRefreshToken(learner)
 	if err != nil {
@@ -449,6 +456,7 @@ func TestHandleToken_RefreshToken_Success(t *testing.T) {
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", rt.Token)
+	form.Set("client_id", "cid-pub")
 	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()

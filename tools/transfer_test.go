@@ -132,6 +132,37 @@ func TestRecordTransferResult_HappyPath(t *testing.T) {
 	}
 }
 
+func TestRecordTransferResult_RejectsScoreOutsideUnitInterval(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+		"concept_id":   "calc",
+		"context_type": "real_world",
+		"score":        1.5, // legal interval is [0,1]
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for score=1.5, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "score") {
+		t.Fatalf("expected error to mention 'score', got %q", resultText(res))
+	}
+
+	// Negative also rejected.
+	resNeg := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+		"concept_id":   "calc",
+		"context_type": "real_world",
+		"score":        -0.2,
+	})
+	if !resNeg.IsError {
+		t.Fatalf("expected error for score=-0.2, got %q", resultText(resNeg))
+	}
+
+	// Nothing persisted on rejection.
+	scores, _ := store.GetTransferScores("L_owner", "calc")
+	if len(scores) != 0 {
+		t.Fatalf("expected no transfer rows, got %d", len(scores))
+	}
+}
+
 func TestRecordTransferResult_BlockedFlag(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
