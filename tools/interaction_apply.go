@@ -36,6 +36,16 @@ type interactionInput struct {
 // cognitive state (BKT, FSRS, IRT, PFA) for the concept.  Returns the
 // resulting ConceptState (post-update) and an error if any persistence
 // step failed.
+//
+// The BKT → FSRS → IRT → PFA update chain is *non-commutative* on
+// `cs.Difficulty` (and in spirit on `cs.Reps` / `cs.Stability` /
+// `cs.PMastery`): IRT consumes the FSRS difficulty to compute the θ
+// step, but FSRS itself rewrites that field. Reading `cs.*` directly
+// after running each step would silently mix prior- and post-update
+// values across the chain (issue #53). To keep the chain
+// order-independent we snapshot the read-only prior values at the top,
+// run all four updates against the snapshot, and write the merged
+// result back to `cs` exactly once at the end.
 func applyInteraction(
 	deps *Deps,
 	learnerID string,
@@ -47,6 +57,31 @@ func applyInteraction(
 	if err != nil {
 		cs = models.NewConceptState(learnerID, input.Concept)
 	}
+
+	// ── Snapshot read-only prior state ──────────────────────────────
+	// All downstream algorithm steps read from this snapshot, never
+	// from `cs` directly, to keep the BKT → FSRS → IRT → PFA chain
+	// commutative. See doc comment above and issue #53.
+	priorPMastery := cs.PMastery
+	priorPLearn := cs.PLearn
+	priorPForget := cs.PForget
+	priorPSlip := cs.PSlip
+	priorPGuess := cs.PGuess
+	priorStability := cs.Stability
+	priorDifficulty := cs.Difficulty
+	priorElapsedDays := cs.ElapsedDays
+	priorScheduledDays := cs.ScheduledDays
+	priorReps := cs.Reps
+	priorLapses := cs.Lapses
+	priorCardState := cs.CardState
+	priorTheta := cs.Theta
+	priorPFASuccesses := cs.PFASuccesses
+	priorPFAFailures := cs.PFAFailures
+	var priorLastReview time.Time
+	if cs.LastReview != nil {
+		priorLastReview = *cs.LastReview
+	}
+	priorNextReview := cs.NextReview
 
 	// Build and persist the interaction row.
 	interaction := &models.Interaction{
@@ -71,8 +106,8 @@ func applyInteraction(
 		interaction.MisconceptionDetail = input.MisconceptionDetail
 	}
 
-	// Proactive review flag.
-	if cs.NextReview != nil && cs.NextReview.After(now) && cs.CardState != "new" {
+	// Proactive review flag — derived from the prior schedule.
+	if priorNextReview != nil && priorNextReview.After(now) && priorCardState != "new" {
 		interaction.IsProactiveReview = true
 	}
 
@@ -80,18 +115,17 @@ func applyInteraction(
 		return nil, fmt.Errorf("applyInteraction: create interaction: %w", err)
 	}
 
-	// BKT update — error-type-aware.
+	// ── BKT update — error-type-aware. Reads from prior snapshot. ──
 	bktState := algorithms.BKTState{
-		PMastery: cs.PMastery,
-		PLearn:   cs.PLearn,
-		PForget:  cs.PForget,
-		PSlip:    cs.PSlip,
-		PGuess:   cs.PGuess,
+		PMastery: priorPMastery,
+		PLearn:   priorPLearn,
+		PForget:  priorPForget,
+		PSlip:    priorPSlip,
+		PGuess:   priorPGuess,
 	}
 	bktState = algorithms.BKTUpdateWithErrorType(bktState, input.Success, input.ErrorType)
-	cs.PMastery = bktState.PMastery
 
-	// FSRS ReviewCard.
+	// ── FSRS update — reads from prior snapshot. ───────────────────
 	rating := algorithms.Good
 	if !input.Success {
 		rating = algorithms.Again
@@ -101,21 +135,36 @@ func applyInteraction(
 		rating = algorithms.Hard
 	}
 
-	var lastReview time.Time
-	if cs.LastReview != nil {
-		lastReview = *cs.LastReview
-	}
 	fsrsCard := algorithms.FSRSCard{
-		Stability:     cs.Stability,
-		Difficulty:    cs.Difficulty,
-		ElapsedDays:   cs.ElapsedDays,
-		ScheduledDays: cs.ScheduledDays,
-		Reps:          cs.Reps,
-		Lapses:        cs.Lapses,
-		State:         algorithms.CardState(cs.CardState),
-		LastReview:    lastReview,
+		Stability:     priorStability,
+		Difficulty:    priorDifficulty,
+		ElapsedDays:   priorElapsedDays,
+		ScheduledDays: priorScheduledDays,
+		Reps:          priorReps,
+		Lapses:        priorLapses,
+		State:         algorithms.CardState(priorCardState),
+		LastReview:    priorLastReview,
 	}
 	fsrsCard = algorithms.ReviewCard(fsrsCard, rating, now)
+
+	// ── IRT update — reads PRIOR difficulty from the snapshot, not
+	// the FSRS-rewritten value. This is the issue #53 fix: previously
+	// IRT consumed `cs.Difficulty` after FSRS had overwritten it. ──
+	item := algorithms.IRTItem{
+		Difficulty:     algorithms.FSRSDifficultyToIRT(priorDifficulty),
+		Discrimination: 1.0,
+	}
+	newTheta := algorithms.IRTUpdateTheta(priorTheta, []algorithms.IRTItem{item}, []bool{input.Success})
+
+	// ── PFA update — reads from prior snapshot. ────────────────────
+	pfaState := algorithms.PFAState{
+		Successes: priorPFASuccesses,
+		Failures:  priorPFAFailures,
+	}
+	pfaState = algorithms.PFAUpdate(pfaState, input.Success)
+
+	// ── Single write-back of the merged result. ────────────────────
+	cs.PMastery = bktState.PMastery
 	cs.Stability = fsrsCard.Stability
 	cs.Difficulty = fsrsCard.Difficulty
 	cs.ElapsedDays = fsrsCard.ElapsedDays
@@ -126,20 +175,7 @@ func applyInteraction(
 	cs.LastReview = &now
 	nextReview := now.Add(time.Duration(fsrsCard.ScheduledDays) * 24 * time.Hour)
 	cs.NextReview = &nextReview
-
-	// IRT UpdateTheta.
-	item := algorithms.IRTItem{
-		Difficulty:     algorithms.FSRSDifficultyToIRT(cs.Difficulty),
-		Discrimination: 1.0,
-	}
-	cs.Theta = algorithms.IRTUpdateTheta(cs.Theta, []algorithms.IRTItem{item}, []bool{input.Success})
-
-	// PFA Update.
-	pfaState := algorithms.PFAState{
-		Successes: cs.PFASuccesses,
-		Failures:  cs.PFAFailures,
-	}
-	pfaState = algorithms.PFAUpdate(pfaState, input.Success)
+	cs.Theta = newTheta
 	cs.PFASuccesses = pfaState.Successes
 	cs.PFAFailures = pfaState.Failures
 
