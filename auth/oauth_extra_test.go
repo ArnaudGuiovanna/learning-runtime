@@ -448,7 +448,7 @@ func TestHandleToken_RefreshToken_Success(t *testing.T) {
 	// always authenticates the client (issue #30).
 	seedClient(t, store, "cid-pub", "https://app.example/cb")
 	learner := seedLearner(t, store, "u-rt@e.com", "pw")
-	rt, err := store.CreateRefreshToken(learner)
+	rt, err := store.CreateRefreshToken(learner, "")
 	if err != nil {
 		t.Fatalf("seed rt: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestHandleToken_RefreshToken_ConfidentialClientUnknown(t *testing.T) {
 	setTestSecret(t)
 	s, store := newTestServer(t)
 	learner := seedLearner(t, store, "u-rt2@e.com", "pw")
-	rt, err := store.CreateRefreshToken(learner)
+	rt, err := store.CreateRefreshToken(learner, "")
 	if err != nil {
 		t.Fatalf("seed rt: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestHandleToken_RefreshToken_ConfidentialClientBadSecret(t *testing.T) {
 		t.Fatalf("create confidential client: %v", err)
 	}
 	learner := seedLearner(t, store, "u-rt3@e.com", "pw")
-	rt, err := store.CreateRefreshToken(learner)
+	rt, err := store.CreateRefreshToken(learner, "")
 	if err != nil {
 		t.Fatalf("seed rt: %v", err)
 	}

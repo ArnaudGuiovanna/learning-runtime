@@ -332,7 +332,7 @@ func TestAuthorizePost_CSRFMatch_InvalidCreds(t *testing.T) {
 func TestRefreshTokenGrant_RejectsMissingClientID(t *testing.T) {
 	s, store := newTestServer(t)
 	learnerID := seedLearner(t, store, "rt-noclient@example.com", "pw")
-	rt, err := store.CreateRefreshToken(learnerID)
+	rt, err := store.CreateRefreshToken(learnerID, "")
 	if err != nil {
 		t.Fatalf("seed refresh token: %v", err)
 	}
@@ -355,5 +355,46 @@ func TestRefreshTokenGrant_RejectsMissingClientID(t *testing.T) {
 	// And the refresh token must NOT have been rotated/consumed.
 	if _, err := store.GetRefreshToken(rt.Token); err != nil {
 		t.Fatalf("refresh token must remain valid after rejected request: %v", err)
+	}
+}
+
+// TestRefreshTokenGrant_RejectsCrossClientRedemption locks down issue #30
+// part 2: a refresh token issued to client A cannot be redeemed by client B,
+// even when B authenticates with valid credentials. Without binding, an
+// attacker who steals A's refresh token can self-register as confidential
+// client B and redeem the token transparently.
+func TestRefreshTokenGrant_RejectsCrossClientRedemption(t *testing.T) {
+	setTestSecret(t)
+	s, store := newTestServer(t)
+	// Two valid clients in the store.
+	seedClient(t, store, "client-A", "https://a.example/cb")
+	seedClient(t, store, "client-B", "https://b.example/cb")
+	learnerID := seedLearner(t, store, "rt-bound@example.com", "pw")
+	// Bind the refresh token to client-A.
+	rt, err := store.CreateRefreshToken(learnerID, "client-A")
+	if err != nil {
+		t.Fatalf("seed refresh token: %v", err)
+	}
+
+	// Client B presents A's refresh token with valid B credentials.
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {rt.Token},
+		"client_id":     {"client-B"},
+	}
+	req := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.HandleToken(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 invalid_grant on cross-client redemption, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_grant") {
+		t.Fatalf("body missing invalid_grant: %q", rec.Body.String())
+	}
+	// Token must NOT have been rotated.
+	if _, err := store.GetRefreshToken(rt.Token); err != nil {
+		t.Fatalf("refresh token must remain valid after rejected cross-client redemption: %v", err)
 	}
 }

@@ -80,6 +80,7 @@ type Interaction struct {
 type RefreshToken struct {
 	Token     string
 	LearnerID string
+	ClientID  string // optional, blank for pre-issue-#30 tokens
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }

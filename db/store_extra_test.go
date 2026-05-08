@@ -146,7 +146,7 @@ func TestGetActiveLearners(t *testing.T) {
 
 func TestRefreshTokenLifecycle(t *testing.T) {
 	store := setupTestDB(t)
-	rt, err := store.CreateRefreshToken("L1")
+	rt, err := store.CreateRefreshToken("L1", "client-A")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

@@ -71,6 +71,12 @@ func Migrate(db *sql.DB) error {
 		// sharing a concept name can be told apart in audits and downstream
 		// analytics. Nullable: pre-existing rows stay NULL (origin unknown).
 		`ALTER TABLE interactions ADD COLUMN domain_id TEXT`,
+		// Issue #30 part 2: bind refresh_token rows to the issuing client
+		// so a stolen token cannot be redeemed by a different (e.g. self-
+		// registered confidential) client. Nullable: pre-existing rows
+		// stay NULL and bypass the binding check (compat with v0.2 tokens
+		// that were issued before the migration).
+		`ALTER TABLE refresh_tokens ADD COLUMN client_id TEXT`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors

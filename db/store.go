@@ -199,7 +199,12 @@ func (s *Store) UpdateLearnerProfile(learnerID, profileJSON string) error {
 
 // ─── Refresh Tokens ───────────────────────────────────────────────────────────
 
-func (s *Store) CreateRefreshToken(learnerID string) (*models.RefreshToken, error) {
+// CreateRefreshToken issues a refresh token bound to (learnerID, clientID).
+// clientID may be empty for legacy callers — issue #30 part 2 introduces the
+// binding so a stolen token cannot be redeemed by a different (e.g. self-
+// registered confidential) client. Pre-existing rows have NULL client_id and
+// the refresh-grant handler treats NULL as "any client" for backward compat.
+func (s *Store) CreateRefreshToken(learnerID, clientID string) (*models.RefreshToken, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return nil, fmt.Errorf("generate token: %w", err)
@@ -209,8 +214,8 @@ func (s *Store) CreateRefreshToken(learnerID string) (*models.RefreshToken, erro
 	expiresAt := now.Add(30 * 24 * time.Hour)
 
 	_, err := s.db.Exec(
-		`INSERT INTO refresh_tokens (token, learner_id, expires_at, created_at) VALUES (?, ?, ?, ?)`,
-		token, learnerID, expiresAt, now,
+		`INSERT INTO refresh_tokens (token, learner_id, client_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		token, learnerID, nullString(clientID), expiresAt, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create refresh token: %w", err)
@@ -218,6 +223,7 @@ func (s *Store) CreateRefreshToken(learnerID string) (*models.RefreshToken, erro
 	return &models.RefreshToken{
 		Token:     token,
 		LearnerID: learnerID,
+		ClientID:  clientID,
 		ExpiresAt: expiresAt,
 		CreatedAt: now,
 	}, nil
@@ -225,13 +231,17 @@ func (s *Store) CreateRefreshToken(learnerID string) (*models.RefreshToken, erro
 
 func (s *Store) GetRefreshToken(token string) (*models.RefreshToken, error) {
 	rt := &models.RefreshToken{}
+	var clientID sql.NullString
 	err := s.db.QueryRow(
-		`SELECT token, learner_id, expires_at, created_at
+		`SELECT token, learner_id, client_id, expires_at, created_at
 		 FROM refresh_tokens WHERE token = ? AND expires_at > ?`,
 		token, time.Now().UTC(),
-	).Scan(&rt.Token, &rt.LearnerID, &rt.ExpiresAt, &rt.CreatedAt)
+	).Scan(&rt.Token, &rt.LearnerID, &clientID, &rt.ExpiresAt, &rt.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get refresh token: %w", err)
+	}
+	if clientID.Valid {
+		rt.ClientID = clientID.String
 	}
 	return rt, nil
 }

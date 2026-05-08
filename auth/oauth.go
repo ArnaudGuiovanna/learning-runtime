@@ -429,7 +429,9 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 		return
 	}
 
-	rt, err := s.store.CreateRefreshToken(authCode.LearnerID)
+	// Bind the refresh token to the authenticated client (issue #30 part 2)
+	// so a stolen token redeemed by a different client is rejected later.
+	rt, err := s.store.CreateRefreshToken(authCode.LearnerID, clientID)
 	if err != nil {
 		s.logger.Error("create refresh token failed", "err", err)
 		writeTokenError(w, "server_error", http.StatusInternalServerError)
@@ -471,6 +473,15 @@ func (s *OAuthServer) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Client binding (issue #30 part 2): a refresh token issued to client A
+	// cannot be redeemed by client B. NULL client_id is a pre-issue-#30
+	// legacy row — accept it once, then the rotated token gets bound below.
+	if rt.ClientID != "" && rt.ClientID != clientID {
+		s.logger.Warn("refresh_token client mismatch — possible token theft", "rt_client", rt.ClientID, "auth_client", clientID)
+		writeTokenError(w, "invalid_grant", http.StatusBadRequest)
+		return
+	}
+
 	// Delete old refresh token (rotation).
 	if err := s.store.DeleteRefreshToken(refreshToken); err != nil {
 		s.logger.Error("delete refresh token failed", "err", err)
@@ -485,7 +496,7 @@ func (s *OAuthServer) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	newRT, err := s.store.CreateRefreshToken(rt.LearnerID)
+	newRT, err := s.store.CreateRefreshToken(rt.LearnerID, clientID)
 	if err != nil {
 		s.logger.Error("create refresh token failed", "err", err)
 		writeTokenError(w, "server_error", http.StatusInternalServerError)
