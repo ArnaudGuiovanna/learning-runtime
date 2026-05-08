@@ -16,7 +16,7 @@ import (
 )
 
 type QueueWebhookMessageParams struct {
-	Kind         string `json:"kind" jsonschema:"Type de nudge : daily_motivation | daily_recap | reactivation | reminder"`
+	Kind         string `json:"kind" jsonschema:"Type de nudge : daily_motivation | daily_recap | reactivation | reminder | olm:<domain_id> (snapshot OLM par domaine)"`
 	ScheduledFor string `json:"scheduled_for" jsonschema:"ISO 8601 timestamp UTC de la fenêtre de tir (ex: 2026-04-13T08:00:00Z)"`
 	ExpiresAt    string `json:"expires_at,omitempty" jsonschema:"ISO 8601 timestamp UTC après lequel le message ne doit plus être envoyé"`
 	Content      string `json:"content" jsonschema:"Contenu Markdown prêt à poster sur le webhook Discord (max ~300 caractères recommandé)"`

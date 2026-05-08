@@ -63,7 +63,7 @@ func main() {
 	// Create MCP server
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "tutor-mcp",
-		Version: "0.2.0",
+		Version: "0.3.0",
 	}, nil)
 
 	// Register tools
