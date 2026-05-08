@@ -37,8 +37,7 @@ func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 		// README contract for the Alert Engine is that orphan concept
 		// history (states/interactions on concepts no longer in any
 		// active domain — e.g. survivors of a deleted domain) must NEVER
-		// surface as alerts. Mirrors the multi-domain filter pattern in
-		// get_cockpit_state.
+		// surface as alerts.
 		if params.DomainID != "" {
 			// Single-domain branch: explicit domain_id given, scope to
 			// that domain's concepts (or refuse if the lookup fails or

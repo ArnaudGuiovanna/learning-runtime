@@ -98,10 +98,9 @@ func TestGetPendingAlerts_NoActiveDomain_ReturnsCleanEmpty(t *testing.T) {
 // Reproducer for issue #29: when the learner has multiple non-archived
 // domains and no domain_id filter is given, alerts must be computed only
 // over the union of concepts across active domains — orphan concepts
-// (e.g. survivors of a deleted domain) must be filtered out, mirroring
-// get_cockpit_state's multi-domain pattern. Also: alerts on concepts
-// belonging to *any* active domain must surface (i.e. the handler
-// shouldn't pick a single arbitrary domain in this case).
+// (e.g. survivors of a deleted domain) must be filtered out. Also: alerts
+// on concepts belonging to *any* active domain must surface (i.e. the
+// handler shouldn't pick a single arbitrary domain in this case).
 func TestGetPendingAlerts_MultipleActiveDomains_FiltersOutOrphan(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	// Two active domains with disjoint concept sets. D2 is created last,
