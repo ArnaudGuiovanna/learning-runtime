@@ -948,8 +948,8 @@ func TestAuthorizePost_RegisterSuccess_CreatesAndRedirects(t *testing.T) {
 	form.Set("code_challenge", "ch")
 	form.Set("code_challenge_method", "S256")
 	form.Set("email", "newuser@e.com")
-	form.Set("password", "password123")
-	form.Set("password_confirm", "password123")
+	form.Set("password", "password-1234")
+	form.Set("password_confirm", "password-1234")
 
 	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1056,7 +1056,7 @@ func TestAuthorizePost_RegisterPasswordTooShort(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Password must be at least 6 characters.") {
+	if !strings.Contains(rec.Body.String(), "Password must be at least 12 characters.") {
 		t.Fatalf("expected too-short message; got %q", rec.Body.String())
 	}
 }
@@ -1074,8 +1074,8 @@ func TestAuthorizePost_RegisterDuplicateEmail(t *testing.T) {
 	form.Set("code_challenge", "ch")
 	form.Set("code_challenge_method", "S256")
 	form.Set("email", "dup@e.com")
-	form.Set("password", "newpassword")
-	form.Set("password_confirm", "newpassword")
+	form.Set("password", "new-password-12")
+	form.Set("password_confirm", "new-password-12")
 
 	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

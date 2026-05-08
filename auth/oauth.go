@@ -22,19 +22,36 @@ import (
 	"tutor-mcp/db"
 )
 
+// bcryptCost is the work factor used for password and client_secret hashes.
+// Bumped from DefaultCost (10) to 12 in 2026-05 (issue #36): at cost 12 a
+// single hash takes ~250 ms on commodity hardware, raising the cost of an
+// offline brute-force on a leaked SQLite file by 4×. Hashes carry their cost
+// in the encoded string, so existing accounts keep working without migration.
+const bcryptCost = 12
+
+// passwordMinLen is the minimum length enforced at registration. Bcrypt
+// silently truncates to 72 bytes, hence passwordMaxLen.
+const (
+	passwordMinLen = 12
+	passwordMaxLen = 72
+)
+
 // OAuthServer implements the OAuth 2.1 authorization server.
 type OAuthServer struct {
-	store   *db.Store
-	baseURL string
-	logger  *slog.Logger
+	store         *db.Store
+	baseURL       string
+	logger        *slog.Logger
+	loginFailures *LoginFailureTracker
 }
 
-// NewOAuthServer creates a new OAuthServer.
+// NewOAuthServer creates a new OAuthServer. The login-failure tracker locks
+// out an email after 5 password mismatches in 10 minutes (issue #36).
 func NewOAuthServer(store *db.Store, baseURL string, logger *slog.Logger) *OAuthServer {
 	return &OAuthServer{
-		store:   store,
-		baseURL: baseURL,
-		logger:  logger,
+		store:         store,
+		baseURL:       baseURL,
+		logger:        logger,
+		loginFailures: NewLoginFailureTracker(5, 10*time.Minute),
 	}
 }
 
@@ -232,8 +249,14 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			renderAuthPage(w, data, "Passwords do not match.", "register")
 			return
 		}
-		if len(password) < 6 {
-			renderAuthPage(w, data, "Password must be at least 6 characters.", "register")
+		if len(password) < passwordMinLen {
+			renderAuthPage(w, data, fmt.Sprintf("Password must be at least %d characters.", passwordMinLen), "register")
+			return
+		}
+		if len(password) > passwordMaxLen {
+			// Bcrypt silently truncates at 72 bytes, so a longer password
+			// gives the user a false sense of strength. Reject explicitly.
+			renderAuthPage(w, data, fmt.Sprintf("Password must be at most %d characters.", passwordMaxLen), "register")
 			return
 		}
 
@@ -243,7 +266,7 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 		if err != nil {
 			s.logger.Error("bcrypt hash failed", "err", err)
 			renderAuthPage(w, data, "Internal error. Please try again.", "register")
@@ -257,16 +280,28 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 		}
 		learnerID = learner.ID
 	} else {
-		// Login flow
+		// Login flow.
+		// Per-account lockout (issue #36): refuse new attempts when the email
+		// has accumulated too many recent failures, regardless of source IP.
+		// The per-IP authLimiter still runs in front; this guard catches the
+		// distributed-source brute-force the IP limiter cannot see.
+		if !s.loginFailures.Allow(email) {
+			s.logger.Warn("login locked out by failure tracker (per-account threshold reached)")
+			renderAuthPage(w, data, "Too many failed attempts. Try again in a few minutes.", "login")
+			return
+		}
 		existing, err := s.store.GetLearnerByEmail(email)
 		if err != nil {
+			s.loginFailures.Record(email)
 			renderAuthPage(w, data, "Invalid email or password.", "login")
 			return
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash), []byte(password)); err != nil {
+			s.loginFailures.Record(email)
 			renderAuthPage(w, data, "Invalid email or password.", "login")
 			return
 		}
+		s.loginFailures.Reset(email)
 		learnerID = existing.ID
 	}
 
@@ -600,7 +635,7 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 			return
 		}
-		hash, herr := bcrypt.GenerateFromPassword([]byte(clientSecret), bcrypt.DefaultCost)
+		hash, herr := bcrypt.GenerateFromPassword([]byte(clientSecret), bcryptCost)
 		if herr != nil {
 			s.logger.Error("bcrypt client secret failed", "err", herr)
 			http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
