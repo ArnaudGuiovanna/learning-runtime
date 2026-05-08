@@ -59,188 +59,311 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tutor MCP</title>
+  <title>tutor/mcp — sign in</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --cream-1: #FCFAF7;
+      --cream-2: #F5F0EA;
+      --terracotta: #e8804a;
+      --terracotta-deep: #d97757;
+      --terracotta-shadow: #c46a3c;
+      --lavender: #b496c8;
+      --ink: #1c1a18;
+      --ink-soft: #5a5249;
+      --ink-mute: #7a7370;
+    }
+
+    html, body { min-height: 100vh; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f1117;
-      color: #e2e8f0;
-      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Inter Tight", "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(135deg, var(--cream-1) 0%, var(--cream-2) 100%);
+      position: relative;
+      overflow-x: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    /* Decorative blobs from banner.svg */
+    body::before, body::after {
+      content: "";
+      position: fixed;
+      pointer-events: none;
+      border-radius: 50%;
+      filter: blur(80px);
+      z-index: 0;
+    }
+    body::before {
+      width: 60vw;
+      height: 60vw;
+      top: -20vw;
+      right: -20vw;
+      background: radial-gradient(circle, rgba(232,128,74,0.16) 0%, rgba(232,128,74,0) 65%);
+    }
+    body::after {
+      width: 50vw;
+      height: 50vw;
+      bottom: -15vw;
+      left: -15vw;
+      background: radial-gradient(circle, rgba(180,150,200,0.12) 0%, rgba(180,150,200,0) 65%);
+    }
+
+    .shell {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .eyebrow {
+      font-family: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.22em;
+      color: var(--ink-mute);
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .eyebrow::before {
+      content: "";
+      display: inline-block;
+      width: 1.25rem;
+      height: 1px;
+      background: var(--ink-mute);
+      opacity: 0.45;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      margin-bottom: 0.9rem;
+    }
+    .brand svg { flex: 0 0 auto; }
+    .wordmark {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .wordmark .slash { color: var(--terracotta); }
+
+    .tagline {
+      font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+      font-style: italic;
+      font-size: 1.5rem;
+      line-height: 1.15;
+      margin-bottom: 1.8rem;
+      background: linear-gradient(90deg, var(--terracotta) 0%, var(--terracotta-deep) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
     }
 
     .card {
-      background: #1a1d27;
-      border: 1px solid #2d3148;
-      border-radius: 12px;
-      padding: 2.5rem 2rem;
-      width: 100%;
-      max-width: 400px;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-    }
-
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #f8fafc;
-      margin-bottom: 0.25rem;
-    }
-
-    .logo span {
-      color: #6366f1;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(232, 128, 74, 0.32);
+      border-radius: 18px;
+      padding: 2rem 1.75rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 8px 32px rgba(28, 26, 24, 0.06);
     }
 
     .subtitle {
-      font-size: 0.85rem;
-      color: #94a3b8;
-      margin-bottom: 1.8rem;
+      font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+      font-style: italic;
+      font-size: 1.05rem;
+      color: var(--terracotta-shadow);
+      margin-bottom: 1.4rem;
     }
 
     .error-box {
-      background: #3b1a1a;
-      border: 1px solid #7f1d1d;
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      font-size: 0.875rem;
-      color: #fca5a5;
+      background: rgba(232, 128, 74, 0.08);
+      border: 1px solid rgba(232, 128, 74, 0.35);
+      border-radius: 10px;
+      padding: 0.75rem 0.95rem;
+      font-size: 0.88rem;
+      color: var(--terracotta-shadow);
       margin-bottom: 1.2rem;
     }
 
     label {
       display: block;
-      font-size: 0.8rem;
+      font-family: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.7rem;
       font-weight: 500;
-      color: #94a3b8;
-      margin-bottom: 0.35rem;
-      margin-top: 1rem;
+      color: var(--ink-soft);
+      margin-bottom: 0.4rem;
+      margin-top: 1.05rem;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.18em;
     }
-
-    label:first-of-type {
-      margin-top: 0;
-    }
+    label:first-of-type { margin-top: 0; }
 
     input[type="email"],
     input[type="password"] {
       width: 100%;
-      background: #0f1117;
-      border: 1px solid #2d3148;
-      border-radius: 8px;
-      padding: 0.6rem 0.85rem;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(122, 115, 112, 0.3);
+      border-radius: 10px;
+      padding: 0.7rem 0.9rem;
       font-size: 0.95rem;
-      color: #e2e8f0;
+      font-family: inherit;
+      color: var(--ink);
       outline: none;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
     }
+    input[type="email"]::placeholder,
+    input[type="password"]::placeholder { color: rgba(122, 115, 112, 0.55); }
 
     input:focus {
-      border-color: #6366f1;
+      border-color: var(--terracotta);
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(232, 128, 74, 0.18);
     }
 
     button[type="submit"] {
       margin-top: 1.6rem;
       width: 100%;
-      background: #6366f1;
+      background: linear-gradient(180deg, var(--terracotta) 0%, #d97742 100%);
       color: #fff;
       border: none;
-      border-radius: 8px;
-      padding: 0.7rem;
-      font-size: 1rem;
+      border-radius: 10px;
+      padding: 0.78rem;
+      font-size: 0.98rem;
       font-weight: 600;
+      letter-spacing: -0.01em;
       cursor: pointer;
-      transition: background 0.15s;
+      transition: transform 0.08s, box-shadow 0.15s, filter 0.15s;
+      box-shadow: 0 2px 0 rgba(196, 106, 60, 0.25), 0 6px 16px rgba(232, 128, 74, 0.25);
     }
-
-    button[type="submit"]:hover {
-      background: #4f52cc;
-    }
+    button[type="submit"]:hover { filter: brightness(1.04); }
+    button[type="submit"]:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(196, 106, 60, 0.25), 0 3px 10px rgba(232, 128, 74, 0.22); }
 
     .toggle {
       margin-top: 1.4rem;
       text-align: center;
-      font-size: 0.85rem;
-      color: #94a3b8;
+      font-size: 0.88rem;
+      color: var(--ink-soft);
     }
-
     .toggle a {
-      color: #6366f1;
+      color: var(--terracotta-shadow);
       text-decoration: none;
-      font-weight: 500;
+      font-weight: 600;
       cursor: pointer;
+      border-bottom: 1px dashed rgba(196, 106, 60, 0.4);
+      padding-bottom: 1px;
     }
+    .toggle a:hover { color: var(--terracotta); border-bottom-color: var(--terracotta); }
 
-    .toggle a:hover {
-      text-decoration: underline;
+    .footnote {
+      margin-top: 1.5rem;
+      font-family: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: var(--ink-mute);
+      text-align: center;
+      opacity: 0.7;
     }
 
     .hidden { display: none; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">Learning <span>Runtime</span></div>
+  <div class="shell">
+    <div class="eyebrow">OPEN&nbsp;SOURCE&nbsp;&nbsp;·&nbsp;&nbsp;MODEL&nbsp;CONTEXT&nbsp;PROTOCOL</div>
 
-    {{if .ErrMsg}}
-    <div class="error-box">{{.ErrMsg}}</div>
-    {{end}}
-
-    <!-- Login form -->
-    <div id="login-view">
-      <p class="subtitle">Sign in to continue.</p>
-      <form method="POST" action="/authorize">
-        <input type="hidden" name="mode" value="login" />
-        <input type="hidden" name="csrf_token"            value="{{.Data.CSRFToken}}" />
-        <input type="hidden" name="client_id"             value="{{.Data.ClientID}}" />
-        <input type="hidden" name="redirect_uri"          value="{{.Data.RedirectURI}}" />
-        <input type="hidden" name="response_type"         value="{{.Data.ResponseType}}" />
-        <input type="hidden" name="state"                 value="{{.Data.State}}" />
-        <input type="hidden" name="code_challenge"        value="{{.Data.CodeChallenge}}" />
-        <input type="hidden" name="code_challenge_method" value="{{.Data.CodeChallengeMethod}}" />
-        <input type="hidden" name="scope"                 value="{{.Data.Scope}}" />
-
-        <label for="login-email">Email</label>
-        <input id="login-email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
-
-        <label for="login-password">Password</label>
-        <input id="login-password" type="password" name="password" placeholder="••••••••" required autocomplete="current-password" />
-
-        <button type="submit">Sign in</button>
-      </form>
-      <p class="toggle">No account? <a href="#" class="toggle-link">Create one</a></p>
+    <div class="brand">
+      <!-- Neural-net node logo (from banner.svg) -->
+      <svg width="56" height="56" viewBox="0 0 100 100" aria-hidden="true">
+        <g stroke="#e8804a" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.6" fill="none">
+          <line x1="26" y1="24" x2="50" y2="56"/>
+          <line x1="72" y1="18" x2="50" y2="56"/>
+          <line x1="82" y1="46" x2="50" y2="56"/>
+          <line x1="68" y1="78" x2="50" y2="56"/>
+          <line x1="22" y1="70" x2="50" y2="56"/>
+          <line x1="44" y1="44" x2="50" y2="56"/>
+        </g>
+        <circle cx="26" cy="24" r="3.6" fill="#e8804a"/>
+        <circle cx="72" cy="18" r="2.6" fill="#e8804a"/>
+        <circle cx="82" cy="46" r="3.6" fill="#e8804a"/>
+        <circle cx="68" cy="78" r="3.6" fill="#e8804a"/>
+        <circle cx="22" cy="70" r="3.6" fill="#e8804a"/>
+        <circle cx="50" cy="56" r="5" fill="#d97757"/>
+      </svg>
+      <div class="wordmark">tutor<span class="slash">/</span>mcp</div>
     </div>
 
-    <!-- Register form -->
-    <div id="register-view" class="hidden">
-      <p class="subtitle">Create your account.</p>
-      <form method="POST" action="/authorize">
-        <input type="hidden" name="mode" value="register" />
-        <input type="hidden" name="csrf_token"            value="{{.Data.CSRFToken}}" />
-        <input type="hidden" name="client_id"             value="{{.Data.ClientID}}" />
-        <input type="hidden" name="redirect_uri"          value="{{.Data.RedirectURI}}" />
-        <input type="hidden" name="response_type"         value="{{.Data.ResponseType}}" />
-        <input type="hidden" name="state"                 value="{{.Data.State}}" />
-        <input type="hidden" name="code_challenge"        value="{{.Data.CodeChallenge}}" />
-        <input type="hidden" name="code_challenge_method" value="{{.Data.CodeChallengeMethod}}" />
-        <input type="hidden" name="scope"                 value="{{.Data.Scope}}" />
+    <div class="tagline">Self-learning is a superpower.</div>
 
-        <label for="reg-email">Email</label>
-        <input id="reg-email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+    <div class="card">
+      {{if .ErrMsg}}
+      <div class="error-box">{{.ErrMsg}}</div>
+      {{end}}
 
-        <label for="reg-password">Password</label>
-        <input id="reg-password" type="password" name="password" placeholder="••••••••" required autocomplete="new-password" />
+      <!-- Login form -->
+      <div id="login-view">
+        <p class="subtitle">Sign in to continue.</p>
+        <form method="POST" action="/authorize">
+          <input type="hidden" name="mode" value="login" />
+          <input type="hidden" name="csrf_token"            value="{{.Data.CSRFToken}}" />
+          <input type="hidden" name="client_id"             value="{{.Data.ClientID}}" />
+          <input type="hidden" name="redirect_uri"          value="{{.Data.RedirectURI}}" />
+          <input type="hidden" name="response_type"         value="{{.Data.ResponseType}}" />
+          <input type="hidden" name="state"                 value="{{.Data.State}}" />
+          <input type="hidden" name="code_challenge"        value="{{.Data.CodeChallenge}}" />
+          <input type="hidden" name="code_challenge_method" value="{{.Data.CodeChallengeMethod}}" />
+          <input type="hidden" name="scope"                 value="{{.Data.Scope}}" />
 
-        <label for="reg-confirm">Confirm password</label>
-        <input id="reg-confirm" type="password" name="password_confirm" placeholder="••••••••" required autocomplete="new-password" />
+          <label for="login-email">Email</label>
+          <input id="login-email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
 
-        <button type="submit">Create account</button>
-      </form>
-      <p class="toggle">Already have an account? <a href="#" class="toggle-link">Sign in</a></p>
+          <label for="login-password">Password</label>
+          <input id="login-password" type="password" name="password" placeholder="••••••••" required autocomplete="current-password" />
+
+          <button type="submit">Sign in →</button>
+        </form>
+        <p class="toggle">No account? <a href="#" class="toggle-link">Create one</a></p>
+      </div>
+
+      <!-- Register form -->
+      <div id="register-view" class="hidden">
+        <p class="subtitle">Create your account.</p>
+        <form method="POST" action="/authorize">
+          <input type="hidden" name="mode" value="register" />
+          <input type="hidden" name="csrf_token"            value="{{.Data.CSRFToken}}" />
+          <input type="hidden" name="client_id"             value="{{.Data.ClientID}}" />
+          <input type="hidden" name="redirect_uri"          value="{{.Data.RedirectURI}}" />
+          <input type="hidden" name="response_type"         value="{{.Data.ResponseType}}" />
+          <input type="hidden" name="state"                 value="{{.Data.State}}" />
+          <input type="hidden" name="code_challenge"        value="{{.Data.CodeChallenge}}" />
+          <input type="hidden" name="code_challenge_method" value="{{.Data.CodeChallengeMethod}}" />
+          <input type="hidden" name="scope"                 value="{{.Data.Scope}}" />
+
+          <label for="reg-email">Email</label>
+          <input id="reg-email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+
+          <label for="reg-password">Password</label>
+          <input id="reg-password" type="password" name="password" placeholder="••••••••" required autocomplete="new-password" />
+
+          <label for="reg-confirm">Confirm password</label>
+          <input id="reg-confirm" type="password" name="password_confirm" placeholder="••••••••" required autocomplete="new-password" />
+
+          <button type="submit">Create account →</button>
+        </form>
+        <p class="toggle">Already have an account? <a href="#" class="toggle-link">Sign in</a></p>
+      </div>
     </div>
+
+    <p class="footnote">tutor/mcp · open source · MIT</p>
   </div>
 
   <script nonce="{{.Nonce}}">

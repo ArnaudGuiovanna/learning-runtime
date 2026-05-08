@@ -61,7 +61,8 @@ func TestRenderAuthPage_LoginNoError(t *testing.T) {
 
 	body := rec.Body.String()
 	mustContain := []string{
-		"Learning",
+		"tutor",
+		"Self-learning is a superpower.",
 		"Sign in to continue.",
 		`action="/authorize"`,
 		`name="csrf_token"`,
