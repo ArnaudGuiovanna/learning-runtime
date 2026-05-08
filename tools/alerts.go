@@ -30,7 +30,7 @@ func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 		}
 
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
-		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, 20)
+		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, engine.DefaultRecentInteractionsWindow)
 		sessionStart, _ := deps.Store.GetSessionStart(learnerID)
 
 		// Resolve which domain(s) constrain this alert computation. The
