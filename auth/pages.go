@@ -80,7 +80,7 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
     body {
       font-family: system-ui, -apple-system, "Inter Tight", "Segoe UI", Roboto, sans-serif;
       color: var(--ink);
-      background: linear-gradient(135deg, var(--cream-1) 0%, var(--cream-2) 100%);
+      background: #ffffff;
       position: relative;
       overflow-x: hidden;
       display: flex;
@@ -89,28 +89,30 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
       padding: 2rem 1rem;
     }
 
-    /* Decorative blobs from banner.svg */
+    /* Subtle decorative blobs — same colour cues as banner.svg, lighter
+       so the page reads as predominantly white. They give the glass card
+       something to refract behind without breaking the light feel. */
     body::before, body::after {
       content: "";
       position: fixed;
       pointer-events: none;
       border-radius: 50%;
-      filter: blur(80px);
+      filter: blur(90px);
       z-index: 0;
     }
     body::before {
-      width: 60vw;
-      height: 60vw;
-      top: -20vw;
-      right: -20vw;
-      background: radial-gradient(circle, rgba(232,128,74,0.16) 0%, rgba(232,128,74,0) 65%);
+      width: 55vw;
+      height: 55vw;
+      top: -18vw;
+      right: -18vw;
+      background: radial-gradient(circle, rgba(232,128,74,0.10) 0%, rgba(232,128,74,0) 65%);
     }
     body::after {
-      width: 50vw;
-      height: 50vw;
-      bottom: -15vw;
-      left: -15vw;
-      background: radial-gradient(circle, rgba(180,150,200,0.12) 0%, rgba(180,150,200,0) 65%);
+      width: 45vw;
+      height: 45vw;
+      bottom: -14vw;
+      left: -14vw;
+      background: radial-gradient(circle, rgba(180,150,200,0.08) 0%, rgba(180,150,200,0) 65%);
     }
 
     .shell {
@@ -168,13 +170,16 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
     }
 
     .card {
-      background: rgba(255, 255, 255, 0.72);
-      border: 1px solid rgba(232, 128, 74, 0.32);
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(232, 128, 74, 0.22);
       border-radius: 18px;
       padding: 2rem 1.75rem;
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      box-shadow: 0 8px 32px rgba(28, 26, 24, 0.06);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        0 1px 2px rgba(28, 26, 24, 0.04),
+        0 12px 36px rgba(28, 26, 24, 0.06);
     }
 
     .subtitle {
@@ -271,7 +276,25 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
       letter-spacing: 0.08em;
       color: var(--ink-mute);
       text-align: center;
-      opacity: 0.7;
+      opacity: 0.75;
+      line-height: 1.7;
+    }
+    .footnote .built-by {
+      font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+      font-style: italic;
+      font-size: 0.85rem;
+      letter-spacing: 0;
+      color: var(--ink-soft);
+    }
+    .footnote .built-by a {
+      color: var(--terracotta-shadow);
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(196, 106, 60, 0.4);
+      padding-bottom: 1px;
+    }
+    .footnote .built-by a:hover {
+      color: var(--terracotta);
+      border-bottom-color: var(--terracotta);
     }
 
     .hidden { display: none; }
@@ -363,7 +386,10 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
       </div>
     </div>
 
-    <p class="footnote">tutor/mcp · open source · MIT</p>
+    <p class="footnote">
+      tutor/mcp · open source · MIT<br/>
+      <span class="built-by">Built by <a href="https://www.aguiovanna.fr" target="_blank" rel="noopener noreferrer">Arnaud Guiovanna</a></span>
+    </p>
   </div>
 
   <script nonce="{{.Nonce}}">
