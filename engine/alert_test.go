@@ -30,7 +30,10 @@ func TestComputeAlertsForgetting(t *testing.T) {
 }
 
 func TestComputeAlertsMasteryReady(t *testing.T) {
-	states := []*models.ConceptState{{Concept: "basics", PMastery: 0.90, CardState: "review"}}
+	// Stability=1.0, ElapsedDays=1 → retention ≈ 0.90 (well above 0.40), so the
+	// FORGETTING/MASTERY_READY arbitration introduced for sub-issue #54 does not
+	// suppress MASTERY_READY here.
+	states := []*models.ConceptState{{Concept: "basics", PMastery: 0.90, Stability: 1.0, ElapsedDays: 1, CardState: "review"}}
 	alerts := ComputeAlerts(states, nil, time.Time{})
 	found := false
 	for _, a := range alerts {
@@ -40,6 +43,113 @@ func TestComputeAlertsMasteryReady(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected MASTERY_READY for basics")
+	}
+}
+
+// TestComputeAlertsMasteryForgettingArbitration covers the four corners of the
+// (PMastery × retention) matrix to verify the alert-level arbitration rule:
+// FORGETTING at UrgencyCritical (retention < 0.30) suppresses MASTERY_READY for
+// the same concept. FORGETTING at UrgencyWarning (0.30 ≤ retention < 0.40) does
+// NOT suppress — the learner is in a nuanced "almost mastered, slightly stale"
+// state that warrants both nudges.
+//
+// Threshold rationale: retention < 0.30 corresponds to the existing
+// UrgencyCritical band defined in ComputeAlerts (engine/alert.go). Retuning the
+// suppression cutoff means changing both that constant and the comment in
+// ComputeAlerts together.
+func TestComputeAlertsMasteryForgettingArbitration(t *testing.T) {
+	// Retention closed-form: (1 + (19/81)*elapsed/stability)^(-0.5)
+	//   elapsed=1,  stability=1.0  → retention ≈ 0.900 (>= 0.40)
+	//   elapsed=5,  stability=0.2  → retention ≈ 0.382 (in [0.30, 0.40))
+	//   elapsed=5,  stability=0.1  → retention ≈ 0.280 (< 0.30)
+	masteryHigh := 0.90 // >= MasteryBKT() (0.85)
+	masteryLow := 0.50  // <  MasteryBKT()
+
+	cases := []struct {
+		name             string
+		pMastery         float64
+		stability        float64
+		elapsedDays      int
+		wantForgetting   bool
+		wantForgettingUrgency models.AlertUrgency
+		wantMasteryReady bool
+	}{
+		{
+			name:             "high mastery + high retention → only MASTERY_READY",
+			pMastery:         masteryHigh,
+			stability:        1.0,
+			elapsedDays:      1,
+			wantForgetting:   false,
+			wantMasteryReady: true,
+		},
+		{
+			name:                  "high mastery + warning retention → both alerts kept",
+			pMastery:              masteryHigh,
+			stability:             0.2,
+			elapsedDays:           5,
+			wantForgetting:        true,
+			wantForgettingUrgency: models.UrgencyWarning,
+			wantMasteryReady:      true,
+		},
+		{
+			name:                  "high mastery + critical retention → only FORGETTING (arbitration)",
+			pMastery:              masteryHigh,
+			stability:             0.1,
+			elapsedDays:           5,
+			wantForgetting:        true,
+			wantForgettingUrgency: models.UrgencyCritical,
+			wantMasteryReady:      false,
+		},
+		{
+			name:                  "low mastery + critical retention → only FORGETTING",
+			pMastery:              masteryLow,
+			stability:             0.1,
+			elapsedDays:           5,
+			wantForgetting:        true,
+			wantForgettingUrgency: models.UrgencyCritical,
+			wantMasteryReady:      false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			states := []*models.ConceptState{
+				{
+					Concept:     "arbitration_concept",
+					Stability:   tc.stability,
+					ElapsedDays: tc.elapsedDays,
+					PMastery:    tc.pMastery,
+					CardState:   "review",
+				},
+			}
+			alerts := ComputeAlerts(states, nil, time.Time{})
+
+			gotForgetting := false
+			gotForgettingUrgency := models.AlertUrgency("")
+			gotMasteryReady := false
+			for _, a := range alerts {
+				if a.Concept != "arbitration_concept" {
+					continue
+				}
+				switch a.Type {
+				case models.AlertForgetting:
+					gotForgetting = true
+					gotForgettingUrgency = a.Urgency
+				case models.AlertMasteryReady:
+					gotMasteryReady = true
+				}
+			}
+
+			if gotForgetting != tc.wantForgetting {
+				t.Errorf("FORGETTING presence: got %v, want %v", gotForgetting, tc.wantForgetting)
+			}
+			if tc.wantForgetting && gotForgettingUrgency != tc.wantForgettingUrgency {
+				t.Errorf("FORGETTING urgency: got %s, want %s", gotForgettingUrgency, tc.wantForgettingUrgency)
+			}
+			if gotMasteryReady != tc.wantMasteryReady {
+				t.Errorf("MASTERY_READY presence: got %v, want %v", gotMasteryReady, tc.wantMasteryReady)
+			}
+		})
 	}
 }
 
