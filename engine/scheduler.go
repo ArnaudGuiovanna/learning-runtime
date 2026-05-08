@@ -82,9 +82,16 @@ func (s *Scheduler) Start() error {
 	if _, err := s.cron.AddFunc("0 * * * *", s.cleanupExpiredData); err != nil {
 		return fmt.Errorf("add cleanup job: %w", err)
 	}
+	// Metacognitive alerts: every 30 minutes. Each alert kind is fired at
+	// most once per learner per UTC day via WasAlertSentToday so the cron
+	// cadence only controls *latency* (worst case 30 min between the state
+	// being met and the webhook firing), not frequency-of-spam.
+	if _, err := s.cron.AddFunc("*/30 * * * *", s.dispatchMetacognitiveAlerts); err != nil {
+		return fmt.Errorf("add metacognitive alerts job: %w", err)
+	}
 
 	s.cron.Start()
-	s.logger.Info("scheduler started", "jobs", "olm(13h), motivation(8h), recap(21h), cleanup(1h)")
+	s.logger.Info("scheduler started", "jobs", "olm(13h), motivation(8h), recap(21h), cleanup(1h), metacog(30m)")
 	return nil
 }
 

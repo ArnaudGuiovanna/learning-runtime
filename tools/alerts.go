@@ -80,6 +80,29 @@ func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 
 		alerts := engine.ComputeAlerts(states, interactions, sessionStart)
 
+		// Metacognitive alerts (DEPENDENCY_INCREASING, CALIBRATION_DIVERGING,
+		// AFFECT_NEGATIVE, TRANSFER_BLOCKED) are cross-domain learner-level
+		// signals. They are computed alongside the activity-level alerts
+		// above and merged before returning. Errors fetching any single
+		// input are tolerated — the missing input simply skips its branch
+		// inside ComputeMetacognitiveAlerts (defensive: a corrupt affect
+		// row shouldn't block the whole alert payload).
+		affects, _ := deps.Store.GetRecentAffectStates(learnerID, 10)
+		var autonomyScores []float64
+		for _, a := range affects {
+			autonomyScores = append(autonomyScores, a.AutonomyScore)
+		}
+		calibBias, _ := deps.Store.GetCalibrationBias(learnerID, 20)
+		transfers, _ := deps.Store.GetTransferRecordsByLearner(learnerID)
+		metaAlerts := engine.ComputeMetacognitiveAlerts(
+			autonomyScores,
+			calibBias,
+			affects,
+			interactions,
+			engine.WithTransferData(states, transfers),
+		)
+		alerts = mergeMetacognitiveAlerts(alerts, metaAlerts)
+
 		hasCritical := false
 		for _, a := range alerts {
 			if a.Urgency == models.UrgencyCritical {
@@ -98,4 +121,28 @@ func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 		})
 		return r, nil, nil
 	})
+}
+
+// mergeMetacognitiveAlerts appends meta alerts to the activity-level alert
+// list while deduping on (Type, Concept). The Type is the alert kind
+// (DEPENDENCY_INCREASING, CALIBRATION_DIVERGING, AFFECT_NEGATIVE,
+// TRANSFER_BLOCKED) and Concept disambiguates per-concept TRANSFER_BLOCKED
+// entries (the other three are learner-wide and carry an empty concept).
+// This guards against double-emit if ComputeAlerts ever starts producing
+// the same kinds, and against duplicates if this function is called twice
+// in the same payload assembly.
+func mergeMetacognitiveAlerts(base, extra []models.Alert) []models.Alert {
+	seen := make(map[string]bool, len(base))
+	for _, a := range base {
+		seen[string(a.Type)+"|"+a.Concept] = true
+	}
+	for _, a := range extra {
+		key := string(a.Type) + "|" + a.Concept
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		base = append(base, a)
+	}
+	return base
 }
