@@ -1,6 +1,9 @@
 package algorithms
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestBKTUpdateCorrect(t *testing.T) {
 	state := BKTState{PMastery: 0.5, PLearn: 0.3, PForget: 0.05, PSlip: 0.1, PGuess: 0.2}
@@ -90,6 +93,70 @@ func TestBKTUpdateWithErrorType(t *testing.T) {
 			}
 			if got < 0 || got > 1 {
 				t.Errorf("PMastery out of [0,1]: %f", got)
+			}
+		})
+	}
+}
+
+// TestBKTUpdateNoNaNOrInfOnDegenerateInputs verifies BKTUpdate never returns
+// NaN or Inf when the input parameters make the marginal observation
+// probability collapse to zero (e.g. PMastery=0 with PGuess=0 on a "correct"
+// observation). Without a guard the Bayesian division 0/0 yields NaN, which
+// then poisons every downstream consumer.
+func TestBKTUpdateNoNaNOrInfOnDegenerateInputs(t *testing.T) {
+	tests := []struct {
+		name    string
+		state   BKTState
+		correct bool
+	}{
+		{
+			// pCorrect = (1-0)*0 + 0*1 = 0  → 0/0 = NaN before the guard.
+			name:    "correct with PMastery=0 and PGuess=0",
+			state:   BKTState{PMastery: 0, PLearn: 0.3, PForget: 0.05, PSlip: 0, PGuess: 0},
+			correct: true,
+		},
+		{
+			// pCorrect = 0*1 + 1*0 = 0  → 0/0 = NaN before the guard.
+			name:    "correct with PMastery=1 and PSlip=1, PGuess=0",
+			state:   BKTState{PMastery: 1, PLearn: 0.3, PForget: 0.05, PSlip: 1, PGuess: 0},
+			correct: true,
+		},
+		{
+			// pIncorrect = 0*0 + 0*1 = 0  → 0/0 = NaN before the guard.
+			name:    "incorrect with PMastery=0, PSlip=0, PGuess=1",
+			state:   BKTState{PMastery: 0, PLearn: 0.3, PForget: 0.05, PSlip: 0, PGuess: 1},
+			correct: false,
+		},
+		{
+			// pIncorrect = 0*1 + 0*0 = 0  → 0/0 = NaN before the guard.
+			name:    "incorrect with PMastery=1, PSlip=0, PGuess=1",
+			state:   BKTState{PMastery: 1, PLearn: 0.3, PForget: 0.05, PSlip: 0, PGuess: 1},
+			correct: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BKTUpdate(tc.state, tc.correct)
+			if math.IsNaN(got.PMastery) || math.IsInf(got.PMastery, 0) {
+				t.Errorf("PMastery is NaN/Inf: %v", got.PMastery)
+			}
+			if got.PMastery < 0 || got.PMastery > 1 {
+				t.Errorf("PMastery out of [0,1]: %v", got.PMastery)
+			}
+		})
+	}
+}
+
+// TestBKTUpdateWithErrorTypeNoNaNOrInf is the same guard at the
+// BKTUpdateWithErrorType layer — KNOWLEDGE_GAP/SYNTAX_ERROR mutate inputs
+// before delegating, so we want to make sure the guard still holds end-to-end.
+func TestBKTUpdateWithErrorTypeNoNaNOrInf(t *testing.T) {
+	degenerate := BKTState{PMastery: 0, PLearn: 0.3, PForget: 0.05, PSlip: 0, PGuess: 0}
+	for _, et := range []string{"", "LOGIC_ERROR", "SYNTAX_ERROR", "KNOWLEDGE_GAP", "UNKNOWN"} {
+		t.Run("errorType="+et, func(t *testing.T) {
+			got := BKTUpdateWithErrorType(degenerate, true, et)
+			if math.IsNaN(got.PMastery) || math.IsInf(got.PMastery, 0) {
+				t.Errorf("PMastery NaN/Inf for errorType=%q: %v", et, got.PMastery)
 			}
 		})
 	}

@@ -280,6 +280,95 @@ func TestInitialDifficultyClamped(t *testing.T) {
 	}
 }
 
+// TestNextForgetStabilityNoNaNOrInfOnDegenerateInputs verifies
+// nextForgetStability never returns NaN or +Inf when difficulty is at or
+// below zero. Without a guard, math.Pow(0, -w[12]) is +Inf and math.Pow(neg,
+// non-integer) is NaN, both of which corrupt FSRSCard.Stability.
+func TestNextForgetStabilityNoNaNOrInfOnDegenerateInputs(t *testing.T) {
+	tests := []struct {
+		name string
+		d    float64
+		s    float64
+		r    float64
+	}{
+		{"zero difficulty", 0, 2, 0.5},
+		{"negative difficulty", -3, 2, 0.5},
+		{"zero stability", 5, 0, 0.5},
+		{"negative stability", 5, -1, 0.5},
+		{"all-zero", 0, 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextForgetStability(tc.d, tc.s, tc.r)
+			if math.IsNaN(got) || math.IsInf(got, 0) {
+				t.Errorf("nextForgetStability(%f,%f,%f) = %f, want finite", tc.d, tc.s, tc.r, got)
+			}
+			if got < 0 {
+				t.Errorf("nextForgetStability(%f,%f,%f) = %f, want >= 0", tc.d, tc.s, tc.r, got)
+			}
+		})
+	}
+}
+
+// TestNextRecallStabilityNoNaNOrInfOnDegenerateInputs verifies
+// nextRecallStability never returns NaN or Inf when stability collapses to
+// zero. math.Pow(0, -w[9]) is +Inf, which would propagate into a NaN once
+// multiplied by the surrounding s=0 factor.
+func TestNextRecallStabilityNoNaNOrInfOnDegenerateInputs(t *testing.T) {
+	tests := []struct {
+		name string
+		d, s, r float64
+		rating  Rating
+	}{
+		{"zero stability + Good", 5, 0, 0.5, Good},
+		{"zero stability + Hard", 5, 0, 0.5, Hard},
+		{"zero stability + Easy", 5, 0, 0.5, Easy},
+		{"negative stability + Good", 5, -1, 0.5, Good},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextRecallStability(tc.d, tc.s, tc.r, tc.rating)
+			if math.IsNaN(got) || math.IsInf(got, 0) {
+				t.Errorf("nextRecallStability(%f,%f,%f,%d) = %f, want finite", tc.d, tc.s, tc.r, tc.rating, got)
+			}
+		})
+	}
+}
+
+// TestReviewCardNoNaNOrInfOnDegenerateInputs is an end-to-end guard: a Review
+// card with d=0 receiving Again routes through nextForgetStability and would
+// surface +Inf in newCard.Stability without the guard.
+func TestReviewCardNoNaNOrInfOnDegenerateInputs(t *testing.T) {
+	now := time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		card   FSRSCard
+		rating Rating
+	}{
+		{
+			name:   "review with zero difficulty + Again",
+			card:   FSRSCard{State: Review, Stability: 5, Difficulty: 0, LastReview: now.AddDate(0, 0, -3)},
+			rating: Again,
+		},
+		{
+			name:   "review with negative difficulty + Again",
+			card:   FSRSCard{State: Review, Stability: 5, Difficulty: -2, LastReview: now.AddDate(0, 0, -3)},
+			rating: Again,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ReviewCard(tc.card, tc.rating, now)
+			if math.IsNaN(got.Stability) || math.IsInf(got.Stability, 0) {
+				t.Errorf("Stability = %f, want finite", got.Stability)
+			}
+			if math.IsNaN(got.Difficulty) || math.IsInf(got.Difficulty, 0) {
+				t.Errorf("Difficulty = %f, want finite", got.Difficulty)
+			}
+		})
+	}
+}
+
 func TestNextDifficultyClamped(t *testing.T) {
 	// Even with extreme inputs, nextDifficulty must remain in [1, 10].
 	tests := []struct {

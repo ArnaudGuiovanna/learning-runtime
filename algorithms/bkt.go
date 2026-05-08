@@ -12,6 +12,14 @@ type BKTState struct {
 	PGuess   float64
 }
 
+// bktEpsilon is the minimum allowed marginal probability used to clamp the
+// Bayesian denominator in BKTUpdate. With degenerate inputs (e.g.
+// PMastery=0 and PGuess=0 on a "correct" observation), pCorrect collapses to
+// zero and the 0/0 division yields NaN, poisoning every downstream consumer.
+// Clamping to a small positive number preserves the standard update path for
+// sane inputs and short-circuits the NaN without behaviour change.
+const bktEpsilon = 1e-9
+
 // Mastery thresholds are exposed via accessors in thresholds.go (MasteryBKT,
 // MasteryKST, MasteryMid). The bascule REGULATION_THRESHOLD=on collapses
 // them to a single 0.85 — see docs/regulation-design/07-threshold-resolver.md.
@@ -22,11 +30,23 @@ func BKTUpdate(state BKTState, correct bool) BKTState {
 		pCorrectMastery := 1.0 - state.PSlip
 		pCorrectNotMastery := state.PGuess
 		pCorrect := pCorrectMastery*state.PMastery + pCorrectNotMastery*(1-state.PMastery)
+		// Guard against pCorrect==0 (e.g. PMastery=0 ∧ PGuess=0) which would
+		// produce a NaN. Clamping to bktEpsilon makes the posterior fall back
+		// to ~0, which is the correct limit when the observation has zero
+		// modelled probability under either hypothesis.
+		if pCorrect < bktEpsilon {
+			pCorrect = bktEpsilon
+		}
 		pMasteryGivenObs = pCorrectMastery * state.PMastery / pCorrect
 	} else {
 		pIncorrectMastery := state.PSlip
 		pIncorrectNotMastery := 1.0 - state.PGuess
 		pIncorrect := pIncorrectMastery*state.PMastery + pIncorrectNotMastery*(1-state.PMastery)
+		// Same guard as above for the incorrect branch (e.g. PMastery=0 ∧
+		// PGuess=1, or PMastery=1 ∧ PSlip=0).
+		if pIncorrect < bktEpsilon {
+			pIncorrect = bktEpsilon
+		}
 		pMasteryGivenObs = pIncorrectMastery * state.PMastery / pIncorrect
 	}
 	newPMastery := pMasteryGivenObs*(1-state.PForget) + (1-pMasteryGivenObs)*state.PLearn
