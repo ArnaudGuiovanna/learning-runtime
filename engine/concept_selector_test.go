@@ -350,6 +350,63 @@ func TestSelectConcept_Maintenance_TieBreakAlphabetical(t *testing.T) {
 	}
 }
 
+// Issue #93: selectMaintenance must restrict candidates to concepts present
+// in the active domain's graph. ConceptState rows are loaded per learner
+// (cross-domain in storage), so a concept mastered in another domain (e.g.
+// "x" in D1) must NOT surface as a MAINTENANCE candidate when the active
+// domain is D2 (concepts {a, b}). With goal_relevance=nil this regression
+// would silently pick "x" because urgency alone treats all mastered
+// states equally.
+func TestSelectConcept_Maintenance_FiltersByActiveDomainGraph_Issue93(t *testing.T) {
+	// "x" belongs to a different domain (D1). It is mastered AND highly
+	// urgent (low stability, high elapsed) so without the domain filter it
+	// would dominate the active-domain selection.
+	csX := reviewedCS("x", 0.95)
+	csX.Stability = 1
+	csX.ElapsedDays = 100 // very high urgency
+
+	// "a" is the only legitimate candidate (present in active D2 graph).
+	csA := reviewedCS("a", 0.95)
+	csA.Stability = 30
+	csA.ElapsedDays = 1 // modest urgency
+
+	// "b" is in the active domain but not yet mastered.
+	csB := reviewedCS("b", 0.30)
+
+	activeGraph := graphFlat("a", "b") // active domain = D2
+	sel, err := SelectConcept(models.PhaseMaintenance,
+		[]*models.ConceptState{csX, csA, csB}, activeGraph, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sel.NoFringe {
+		t.Fatalf("expected a maintenance pick from active domain, got NoFringe")
+	}
+	if sel.Concept == "x" {
+		t.Fatalf("issue #93 regressed: cross-domain concept %q selected; expected only active-domain concepts", sel.Concept)
+	}
+	if sel.Concept != "a" {
+		t.Fatalf("expected 'a' (only mastered active-domain concept), got %q", sel.Concept)
+	}
+}
+
+// Issue #93: when every mastered concept belongs to another domain, the
+// active domain has nothing to maintain → NoFringe (not a wrong pick).
+func TestSelectConcept_Maintenance_AllMasteredFromOtherDomain_NoFringe_Issue93(t *testing.T) {
+	csX := reviewedCS("x", 0.95)       // D1
+	csY := reviewedCS("y", 0.95)       // D1
+	activeGraph := graphFlat("a", "b") // D2
+
+	sel, err := SelectConcept(models.PhaseMaintenance,
+		[]*models.ConceptState{csX, csY}, activeGraph, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sel.NoFringe {
+		t.Fatalf("expected NoFringe when no mastered concept is in active domain, got %+v", sel)
+	}
+}
+
 // ─── DIAGNOSTIC ────────────────────────────────────────────────────────────
 
 func TestSelectConcept_Diagnostic_PicksMaxInfoGain(t *testing.T) {

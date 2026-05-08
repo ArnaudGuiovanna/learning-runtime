@@ -80,7 +80,7 @@ func SelectConcept(
 	case models.PhaseInstruction:
 		return selectInstruction(states, graph, goalRelevance), nil
 	case models.PhaseMaintenance:
-		return selectMaintenance(states, goalRelevance), nil
+		return selectMaintenance(states, graph, goalRelevance), nil
 	case models.PhaseDiagnostic:
 		return selectDiagnostic(states), nil
 	default:
@@ -239,14 +239,36 @@ func selectInstruction(
 // CardState=="new" get urgency=0 — they are mastered by BKT but
 // have no FSRS history yet.
 //
+// Candidates are restricted to concepts present in the active
+// domain's graph (issue #93). `states` is loaded per learner
+// (cross-domain), so without this filter a concept mastered in
+// another domain could be returned as a MAINTENANCE candidate for
+// the active domain — particularly when goal_relevance is nil and
+// urgency alone drives selection. An empty graph.Concepts disables
+// the filter (preserves existing call sites that pass
+// models.KnowledgeSpace{} in unit tests).
+//
 // v2 note: the dervative form "elapsed_days/stability" would be more
 // sensitive near the decay knee; revisit if eval shows MAINTENANCE
 // missing fast-forgetting concepts.
 func selectMaintenance(
 	states []*models.ConceptState,
+	graph models.KnowledgeSpace,
 	goalRelevance map[string]float64,
 ) Selection {
 	bktThreshold := algorithms.MasteryBKT()
+
+	// Build the active-domain concept set from graph.Concepts. An
+	// empty set is treated as "no filter" so existing unit tests
+	// that pass models.KnowledgeSpace{} keep working; the
+	// orchestrator always passes a non-empty filtered graph.
+	var domainSet map[string]bool
+	if len(graph.Concepts) > 0 {
+		domainSet = make(map[string]bool, len(graph.Concepts))
+		for _, c := range graph.Concepts {
+			domainSet[c] = true
+		}
+	}
 
 	// Collect mastered concepts; sort alphabetically for deterministic
 	// tie-break.
@@ -259,6 +281,11 @@ func selectMaintenance(
 			continue
 		}
 		if cs.PMastery < bktThreshold {
+			continue
+		}
+		if domainSet != nil && !domainSet[cs.Concept] {
+			// Concept mastered in a different domain — not eligible
+			// for the active domain's MAINTENANCE pool (#93).
 			continue
 		}
 		mastered = append(mastered, cs)
