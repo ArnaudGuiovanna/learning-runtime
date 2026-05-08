@@ -16,6 +16,15 @@ import (
 func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.Interaction, sessionStart time.Time) []models.Alert {
 	var alerts []models.Alert
 
+	// criticalForgetting tracks concepts where FORGETTING fired at UrgencyCritical
+	// (retention < 0.30). These concepts skip MASTERY_READY emission below — the
+	// two alerts would otherwise be contradictory in the same get_pending_alerts
+	// response (sub-issue #54). FORGETTING at UrgencyWarning (0.30 ≤ retention <
+	// 0.40) is NOT a contradiction and both alerts are kept. Threshold rationale:
+	// the cutoff matches the existing UrgencyCritical band defined a few lines
+	// below, so retuning means changing both together.
+	criticalForgetting := make(map[string]bool)
+
 	for _, cs := range states {
 		if cs.CardState == "new" {
 			continue
@@ -31,6 +40,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 			urgency := models.UrgencyWarning
 			if retention < 0.30 {
 				urgency = models.UrgencyCritical
+				criticalForgetting[cs.Concept] = true
 			}
 			hoursLeft := 0.0
 			if retention > 0.30 {
@@ -47,7 +57,13 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 		}
 
 		// MASTERY_READY: BKT >= 0.85
-		if cs.PMastery >= algorithms.MasteryBKT() {
+		// Arbitration (sub-issue #54): if FORGETTING already fired at
+		// UrgencyCritical for this concept, suppress MASTERY_READY to avoid
+		// emitting contradictory nudges on the same tick. The action selector
+		// already prioritizes FORGETTING over mastery brackets in
+		// engine/action_selector.go; this mirrors that precedence at the alert
+		// layer so get_pending_alerts callers see a coherent recommendation.
+		if cs.PMastery >= algorithms.MasteryBKT() && !criticalForgetting[cs.Concept] {
 			alerts = append(alerts, models.Alert{
 				Type:              models.AlertMasteryReady,
 				Concept:           cs.Concept,
