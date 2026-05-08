@@ -445,6 +445,100 @@ func TestRecordInteraction_AuditRowCarriesHeuristicSlipGuess_Success(t *testing.
 	}
 }
 
+// Issue #88: activity_type must be constrained to a known enum so the LLM
+// stops guessing values from prose like "RECALL_EXERCISE, NEW_CONCEPT, etc.".
+// A free-form value like "GARBAGE" must be rejected with a clear error
+// listing the accepted values.
+func TestRecordInteraction_RejectsUnknownActivityType(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "GARBAGE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            0.8,
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for activity_type=GARBAGE, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "activity_type") {
+		t.Fatalf("expected error to mention 'activity_type', got %q", msg)
+	}
+	if !strings.Contains(msg, "must be one of") {
+		t.Fatalf("expected error to list accepted values via 'must be one of', got %q", msg)
+	}
+	// Spot-check a few canonical values are mentioned.
+	if !strings.Contains(msg, "RECALL_EXERCISE") || !strings.Contains(msg, "NEW_CONCEPT") {
+		t.Fatalf("expected error to list canonical activity types, got %q", msg)
+	}
+
+	// And nothing should have been persisted.
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 5)
+	if len(recents) != 0 {
+		t.Fatalf("expected no interactions persisted on bad activity_type, got %d", len(recents))
+	}
+}
+
+// Issue #88: error_type is also a free-form string today and must be
+// constrained to the BKT heuristic's vocabulary (SYNTAX_ERROR, LOGIC_ERROR,
+// KNOWLEDGE_GAP). The empty value remains allowed (omitted).
+func TestRecordInteraction_RejectsUnknownErrorType(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               false,
+		"response_time_seconds": 10.0,
+		"confidence":            0.4,
+		"error_type":            "GARBAGE",
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for error_type=GARBAGE, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "error_type") {
+		t.Fatalf("expected error to mention 'error_type', got %q", msg)
+	}
+	if !strings.Contains(msg, "must be one of") {
+		t.Fatalf("expected error to list accepted values via 'must be one of', got %q", msg)
+	}
+	if !strings.Contains(msg, "SYNTAX_ERROR") || !strings.Contains(msg, "KNOWLEDGE_GAP") {
+		t.Fatalf("expected error to list canonical error types, got %q", msg)
+	}
+
+	// And nothing should have been persisted.
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 5)
+	if len(recents) != 0 {
+		t.Fatalf("expected no interactions persisted on bad error_type, got %d", len(recents))
+	}
+}
+
+// Issue #88: error_type is optional — empty string must be allowed (omitted).
+func TestRecordInteraction_AllowsEmptyErrorType(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               false,
+		"response_time_seconds": 10.0,
+		"confidence":            0.4,
+		"error_type":            "", // explicitly empty — must pass
+		"notes":                 "",
+	})
+	if res.IsError {
+		t.Fatalf("expected empty error_type to pass, got %q", resultText(res))
+	}
+}
+
 func TestComputeCognitiveSignals(t *testing.T) {
 	// Less than 3 interactions → no signals.
 	fatigue, frust := computeCognitiveSignals([]*models.Interaction{
