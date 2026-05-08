@@ -47,6 +47,30 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length caps (issue #31). Without these guards a misbehaving
+		// caller could push multi-MB strings into Notes / MisconceptionDetail
+		// and bloat the interactions table, plus orphan rows that read-side
+		// filters cannot fully hide.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"concept", params.Concept, maxShortLabelLen},
+			{"activity_type", params.ActivityType, maxShortLabelLen},
+			{"error_type", params.ErrorType, maxShortLabelLen},
+			{"calibration_id", params.CalibrationID, maxShortLabelLen},
+			{"misconception_type", params.MisconceptionType, maxShortLabelLen},
+			{"misconception_detail", params.MisconceptionDetail, maxNoteLen},
+			{"notes", params.Notes, maxNoteLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		// Numeric range validation. Without these guards the BKT/FSRS chain
 		// silently absorbs garbage scores (confidence>1, negative response
 		// time, hint counts in the thousands) and corrupts the learner's

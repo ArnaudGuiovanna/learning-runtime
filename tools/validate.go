@@ -94,3 +94,25 @@ func validateNonNegativeCount(field string, v, max int) error {
 	}
 	return nil
 }
+
+// String length budgets for free-text params persisted to SQLite (issue
+// #31). Without these caps a misbehaving LLM (or an authenticated
+// learner) can post multi-MB strings, exhausting host storage and
+// poisoning downstream telemetry. The values err on the side of
+// generosity: legitimate concept names and notes are well under these.
+const (
+	maxShortLabelLen = 200    // concept names, error_type, activity_type, session_id, kind labels
+	maxNoteLen       = 4096   // notes, misconception_detail, intent prompts
+	maxLongTextLen   = 16_384 // free-form payloads (rationale, content) — last-resort cap
+)
+
+// validateString rejects strings longer than max bytes. Empty values are
+// allowed — combine with a separate "required" check if non-empty is needed.
+// The cap is byte-counted (len) on purpose: SQLite TEXT pays per byte and a
+// pathological multibyte string still has to fit.
+func validateString(field, value string, max int) error {
+	if len(value) > max {
+		return fmt.Errorf("%s exceeds max length: got %d bytes, max %d", field, len(value), max)
+	}
+	return nil
+}

@@ -40,6 +40,12 @@ func registerRecordAffect(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult("session_id is required")
 			return r, nil, nil
 		}
+		// Length cap (issue #31) — without this guard a multi-MB session_id
+		// would be silently persisted, bloating the affect/calibration tables.
+		if err := validateString("session_id", params.SessionID, maxShortLabelLen); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
 
 		// Likert-scale guards (1..4 per AffectState model docs). Each field
 		// uses omitempty so 0 means "not provided" and is allowed through;

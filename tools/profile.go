@@ -43,6 +43,29 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Length caps (issue #31). Each field is a free-text input; without
+		// these caps a misbehaving caller can inflate the profile_json blob
+		// to multiple MB, slowing every subsequent read of this learner.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"device", params.Device, maxShortLabelLen},
+			{"background", params.Background, maxNoteLen},
+			{"learning_style", params.Style, maxShortLabelLen},
+			{"objective", params.Objective, maxNoteLen},
+			{"language", params.Language, maxShortLabelLen},
+			{"level", params.Level, maxShortLabelLen},
+			{"affect_baseline", params.AffectBaseline, maxShortLabelLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		// Load existing profile
 		profile := make(map[string]interface{})
 		if learner.ProfileJSON != "" && learner.ProfileJSON != "{}" {
