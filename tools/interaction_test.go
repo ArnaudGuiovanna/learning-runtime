@@ -13,6 +13,11 @@ import (
 	"tutor-mcp/models"
 )
 
+// Compile-time guard: make sure the BKT heuristic is exposed under its new
+// renamed name. If a future refactor reverts the rename this file refuses
+// to build (issue #51).
+var _ = algorithms.BKTUpdateHeuristicSlipByErrorType
+
 func TestRecordInteraction_NoAuth(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerRecordInteraction, "", "record_interaction", map[string]any{
@@ -334,6 +339,109 @@ func TestRecordInteraction_RejectsOutOfRangeHints(t *testing.T) {
 	}
 	if !strings.Contains(resultText(res), "hints_requested") {
 		t.Fatalf("expected error to mention 'hints_requested', got %q", resultText(res))
+	}
+}
+
+// Issue #51: each interaction must persist the slip/guess values the
+// non-canonical error-type heuristic fed into the BKT update so the run
+// can be replayed deterministically. SYNTAX_ERROR ramps slip up by 0.15;
+// the row's bkt_slip column must reflect that.
+func TestRecordInteraction_AuditRowCarriesHeuristicSlipGuess_SyntaxError(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               false,
+		"response_time_seconds": 8.0,
+		"confidence":            0.4,
+		"error_type":            "SYNTAX_ERROR",
+		"notes":                 "",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if len(recents) != 1 {
+		t.Fatalf("expected 1 interaction, got %d", len(recents))
+	}
+	got := recents[0]
+	if got.BKTSlip == nil || got.BKTGuess == nil {
+		t.Fatalf("expected bkt_slip and bkt_guess to be persisted, got slip=%v guess=%v", got.BKTSlip, got.BKTGuess)
+	}
+	// Default ConceptState has PSlip=0.1; SYNTAX_ERROR ramp is +0.15 → 0.25.
+	if *got.BKTSlip < 0.249 || *got.BKTSlip > 0.251 {
+		t.Errorf("bkt_slip = %f, want ~0.25 (base 0.1 + SYNTAX_ERROR ramp 0.15)", *got.BKTSlip)
+	}
+	// Default ConceptState has PGuess=0.2 — SYNTAX_ERROR doesn't ramp guess.
+	if *got.BKTGuess < 0.199 || *got.BKTGuess > 0.201 {
+		t.Errorf("bkt_guess = %f, want ~0.20 (unchanged by SYNTAX_ERROR)", *got.BKTGuess)
+	}
+}
+
+// Issue #51: KNOWLEDGE_GAP ramps guess down by 0.10 — the audit row must
+// carry the resulting value (0.20 - 0.10 = 0.10).
+func TestRecordInteraction_AuditRowCarriesHeuristicSlipGuess_KnowledgeGap(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               false,
+		"response_time_seconds": 12.0,
+		"confidence":            0.3,
+		"error_type":            "KNOWLEDGE_GAP",
+		"notes":                 "",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if len(recents) != 1 {
+		t.Fatalf("expected 1 interaction, got %d", len(recents))
+	}
+	got := recents[0]
+	if got.BKTSlip == nil || got.BKTGuess == nil {
+		t.Fatalf("expected bkt_slip and bkt_guess to be persisted, got slip=%v guess=%v", got.BKTSlip, got.BKTGuess)
+	}
+	if *got.BKTSlip < 0.099 || *got.BKTSlip > 0.101 {
+		t.Errorf("bkt_slip = %f, want ~0.10 (unchanged by KNOWLEDGE_GAP)", *got.BKTSlip)
+	}
+	if *got.BKTGuess < 0.099 || *got.BKTGuess > 0.101 {
+		t.Errorf("bkt_guess = %f, want ~0.10 (base 0.20 - KNOWLEDGE_GAP ramp 0.10)", *got.BKTGuess)
+	}
+}
+
+// Issue #51: even a successful interaction (no heuristic ramp applied)
+// records the slip/guess values that were in effect, so replay does not
+// have to special-case missing rows.
+func TestRecordInteraction_AuditRowCarriesHeuristicSlipGuess_Success(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            0.8,
+		"notes":                 "",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if len(recents) != 1 {
+		t.Fatalf("expected 1 interaction, got %d", len(recents))
+	}
+	got := recents[0]
+	if got.BKTSlip == nil || got.BKTGuess == nil {
+		t.Fatalf("expected bkt_slip and bkt_guess to be persisted on successes too, got slip=%v guess=%v", got.BKTSlip, got.BKTGuess)
 	}
 }
 

@@ -72,6 +72,17 @@ func nullString(s string) any {
 	return s
 }
 
+// nullFloat64 returns nil when the input pointer is nil and the dereferenced
+// value otherwise. Used to write columns that distinguish "absent" from
+// "literal zero" (e.g. interactions.bkt_slip / bkt_guess on pre-issue-#51
+// rows).
+func nullFloat64(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -646,18 +657,19 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 
 // ─── Interactions ─────────────────────────────────────────────────────────────
 
-const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, created_at`
+const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, created_at`
 
 func (s *Store) CreateInteraction(i *models.Interaction) error {
 	i.CreatedAt = time.Now().UTC()
 	result, err := s.db.Exec(
-		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.LearnerID, i.Concept, i.ActivityType, boolToInt(i.Success),
 		i.ResponseTime, i.Confidence, i.ErrorType, i.Notes,
 		i.HintsRequested, boolToInt(i.SelfInitiated), i.CalibrationID, boolToInt(i.IsProactiveReview),
 		nullString(i.MisconceptionType), nullString(i.MisconceptionDetail),
 		nullString(i.DomainID),
+		nullFloat64(i.BKTSlip), nullFloat64(i.BKTGuess),
 		i.CreatedAt,
 	)
 	if err != nil {
@@ -717,11 +729,13 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 		i := &models.Interaction{}
 		var successInt, selfInitInt, proactiveInt int
 		var errorType, calibrationID, misconceptionType, misconceptionDetail, domainID sql.NullString
+		var bktSlip, bktGuess sql.NullFloat64
 		if err := rows.Scan(
 			&i.ID, &i.LearnerID, &i.Concept, &i.ActivityType,
 			&successInt, &i.ResponseTime, &i.Confidence, &errorType, &i.Notes,
 			&i.HintsRequested, &selfInitInt, &calibrationID, &proactiveInt,
 			&misconceptionType, &misconceptionDetail, &domainID,
+			&bktSlip, &bktGuess,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan interaction row: %w", err)
@@ -743,6 +757,14 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 		}
 		if domainID.Valid {
 			i.DomainID = domainID.String
+		}
+		if bktSlip.Valid {
+			v := bktSlip.Float64
+			i.BKTSlip = &v
+		}
+		if bktGuess.Valid {
+			v := bktGuess.Float64
+			i.BKTGuess = &v
 		}
 		interactions = append(interactions, i)
 	}

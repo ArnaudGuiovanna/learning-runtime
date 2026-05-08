@@ -46,7 +46,7 @@ func TestBKTUpdateClampsToOne(t *testing.T) {
 	}
 }
 
-func TestBKTUpdateWithErrorType(t *testing.T) {
+func TestBKTUpdateHeuristicSlipByErrorType(t *testing.T) {
 	base := BKTState{PMastery: 0.5, PLearn: 0.3, PForget: 0.05, PSlip: 0.1, PGuess: 0.2}
 
 	tests := []struct {
@@ -72,7 +72,8 @@ func TestBKTUpdateWithErrorType(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := BKTUpdateWithErrorType(base, tc.correct, tc.errorType).PMastery
+			next, _, _ := BKTUpdateHeuristicSlipByErrorType(base, tc.correct, tc.errorType)
+			got := next.PMastery
 			ref := standard
 			if tc.correct {
 				ref = standardCorrect
@@ -147,14 +148,16 @@ func TestBKTUpdateNoNaNOrInfOnDegenerateInputs(t *testing.T) {
 	}
 }
 
-// TestBKTUpdateWithErrorTypeNoNaNOrInf is the same guard at the
-// BKTUpdateWithErrorType layer — KNOWLEDGE_GAP/SYNTAX_ERROR mutate inputs
-// before delegating, so we want to make sure the guard still holds end-to-end.
-func TestBKTUpdateWithErrorTypeNoNaNOrInf(t *testing.T) {
+// TestBKTUpdateHeuristicSlipByErrorTypeNoNaNOrInf is the same guard at the
+// renamed heuristic layer — KNOWLEDGE_GAP/SYNTAX_ERROR mutate slip/guess
+// inputs before delegating to BKTUpdate, so we want to make sure the guard
+// still holds end-to-end. The function now returns three values; only the
+// state is checked here for finiteness.
+func TestBKTUpdateHeuristicSlipByErrorTypeNoNaNOrInf(t *testing.T) {
 	degenerate := BKTState{PMastery: 0, PLearn: 0.3, PForget: 0.05, PSlip: 0, PGuess: 0}
 	for _, et := range []string{"", "LOGIC_ERROR", "SYNTAX_ERROR", "KNOWLEDGE_GAP", "UNKNOWN"} {
 		t.Run("errorType="+et, func(t *testing.T) {
-			got := BKTUpdateWithErrorType(degenerate, true, et)
+			got, _, _ := BKTUpdateHeuristicSlipByErrorType(degenerate, true, et)
 			if math.IsNaN(got.PMastery) || math.IsInf(got.PMastery, 0) {
 				t.Errorf("PMastery NaN/Inf for errorType=%q: %v", et, got.PMastery)
 			}
@@ -162,17 +165,60 @@ func TestBKTUpdateWithErrorTypeNoNaNOrInf(t *testing.T) {
 	}
 }
 
-func TestBKTUpdateWithErrorTypeClampsParameters(t *testing.T) {
+func TestBKTUpdateHeuristicSlipByErrorTypeClampsParameters(t *testing.T) {
 	// SYNTAX_ERROR: PSlip clamped to <= 0.5 even when input is high.
 	highSlip := BKTState{PMastery: 0.5, PLearn: 0.3, PForget: 0.05, PSlip: 0.45, PGuess: 0.2}
-	got := BKTUpdateWithErrorType(highSlip, false, "SYNTAX_ERROR")
+	got, _, _ := BKTUpdateHeuristicSlipByErrorType(highSlip, false, "SYNTAX_ERROR")
 	if got.PMastery < 0 || got.PMastery > 1 {
 		t.Errorf("PMastery out of bounds: %f", got.PMastery)
 	}
 	// KNOWLEDGE_GAP: PGuess clamped to >= 0.05 even when input is low.
 	lowGuess := BKTState{PMastery: 0.5, PLearn: 0.3, PForget: 0.05, PSlip: 0.1, PGuess: 0.06}
-	got = BKTUpdateWithErrorType(lowGuess, false, "KNOWLEDGE_GAP")
+	got, _, _ = BKTUpdateHeuristicSlipByErrorType(lowGuess, false, "KNOWLEDGE_GAP")
 	if got.PMastery < 0 || got.PMastery > 1 {
 		t.Errorf("PMastery out of bounds: %f", got.PMastery)
 	}
 }
+
+// TestBKTUpdateHeuristicSlipByErrorType_ReturnsSlipGuessUsed verifies the
+// function reports the slip/guess values it actually fed into BKTUpdate so
+// callers can log them to the audit trail (issue #51).
+func TestBKTUpdateHeuristicSlipByErrorType_ReturnsSlipGuessUsed(t *testing.T) {
+	base := BKTState{PMastery: 0.5, PLearn: 0.3, PForget: 0.05, PSlip: 0.1, PGuess: 0.2}
+
+	// Correct answer: the heuristic does not adjust — we should see the
+	// input slip/guess unchanged.
+	_, slip, guess := BKTUpdateHeuristicSlipByErrorType(base, true, "SYNTAX_ERROR")
+	if !approxEqual(slip, base.PSlip, 1e-9) || !approxEqual(guess, base.PGuess, 1e-9) {
+		t.Errorf("correct answer should report base params, got slip=%f guess=%f", slip, guess)
+	}
+
+	// Empty errorType: standard BKT — base params reported.
+	_, slip, guess = BKTUpdateHeuristicSlipByErrorType(base, false, "")
+	if !approxEqual(slip, base.PSlip, 1e-9) || !approxEqual(guess, base.PGuess, 1e-9) {
+		t.Errorf("empty errorType should report base params, got slip=%f guess=%f", slip, guess)
+	}
+
+	// SYNTAX_ERROR: slip ramps up by 0.15 (clamped).
+	_, slip, guess = BKTUpdateHeuristicSlipByErrorType(base, false, "SYNTAX_ERROR")
+	if !approxEqual(slip, 0.25, 1e-9) {
+		t.Errorf("SYNTAX_ERROR should ramp slip to 0.25, got %f", slip)
+	}
+	if !approxEqual(guess, base.PGuess, 1e-9) {
+		t.Errorf("SYNTAX_ERROR should leave guess at base, got %f", guess)
+	}
+
+	// KNOWLEDGE_GAP: guess ramps down by 0.10 (clamped).
+	_, slip, guess = BKTUpdateHeuristicSlipByErrorType(base, false, "KNOWLEDGE_GAP")
+	if !approxEqual(slip, base.PSlip, 1e-9) {
+		t.Errorf("KNOWLEDGE_GAP should leave slip at base, got %f", slip)
+	}
+	if !approxEqual(guess, 0.10, 1e-9) {
+		t.Errorf("KNOWLEDGE_GAP should ramp guess to 0.10, got %f", guess)
+	}
+}
+
+// Compile-time guard: the public symbol exposed to call-sites must be the new
+// "Heuristic" name. If someone reverts the rename this test file refuses to
+// build — that is the point (issue #51).
+var _ = BKTUpdateHeuristicSlipByErrorType

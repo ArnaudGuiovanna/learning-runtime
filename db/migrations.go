@@ -77,6 +77,14 @@ func Migrate(db *sql.DB) error {
 		// stay NULL and bypass the binding check (compat with v0.2 tokens
 		// that were issued before the migration).
 		`ALTER TABLE refresh_tokens ADD COLUMN client_id TEXT`,
+		// Issue #51: log the slip/guess values that the non-canonical
+		// error-type-aware heuristic (algorithms.BKTUpdateHeuristicSlipByErrorType)
+		// actually fed into the BKT update on each interaction so the
+		// run can be replayed deterministically. Nullable: pre-existing
+		// rows have no record (NULL means "unknown / heuristic not
+		// captured at write time").
+		`ALTER TABLE interactions ADD COLUMN bkt_slip REAL`,
+		`ALTER TABLE interactions ADD COLUMN bkt_guess REAL`,
 	}
 	for _, m := range alterMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors
