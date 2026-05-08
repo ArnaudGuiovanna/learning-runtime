@@ -10,7 +10,29 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 )
+
+// formActionOriginFromRedirectURI returns the origin (scheme://host[:port])
+// of a validated redirect_uri so it can be added to the CSP form-action
+// allowlist. The CSP form-action directive applies to the entire request
+// chain — including the 302 the server returns after a successful login —
+// so without listing the redirect_uri origin alongside 'self', the browser
+// silently blocks the navigation to e.g. claude.ai/api/mcp/auth_callback
+// and the OAuth flow stalls (issue: claude.ai never POSTs /token).
+//
+// Returns "" if the URI fails to parse; the caller falls back to 'self'
+// only, which still works for first-party callback URLs on the same host.
+func formActionOriginFromRedirectURI(redirectURI string) string {
+	if redirectURI == "" {
+		return ""
+	}
+	u, err := url.Parse(redirectURI)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
 
 type authPageData struct {
 	ClientID            string
@@ -254,9 +276,20 @@ func renderAuthPage(w http.ResponseWriter, data authPageData, errMsg string, mod
 	// Strict CSP: only same-origin resources; inline scripts must carry our
 	// per-request nonce. style-src keeps 'unsafe-inline' for the page's
 	// inline <style> block — style injection is not credential-exfil-grade.
+	//
+	// form-action must include the redirect_uri origin in addition to 'self':
+	// the directive applies to the entire submission chain, so the 302 we
+	// return to claude.ai (or any other client) after a successful login
+	// would otherwise be blocked client-side. The redirect_uri has already
+	// been validated against the registered list at this point, so listing
+	// its origin here cannot widen the attack surface.
+	formAction := "'self'"
+	if origin := formActionOriginFromRedirectURI(data.RedirectURI); origin != "" {
+		formAction = "'self' " + origin
+	}
 	w.Header().Set("Content-Security-Policy", fmt.Sprintf(
-		"default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-		nonce,
+		"default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action %s; base-uri 'none'; frame-ancestors 'none'",
+		nonce, formAction,
 	))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {

@@ -157,6 +157,41 @@ func TestRenderAuthPage_NonceDifferentPerCall(t *testing.T) {
 	}
 }
 
+func TestRenderAuthPage_CSPFormActionIncludesRedirectURIOrigin(t *testing.T) {
+	rec := httptest.NewRecorder()
+	renderAuthPage(rec, authPageData{
+		ClientID:    "cid",
+		RedirectURI: "https://claude.ai/api/mcp/auth_callback",
+		CSRFToken:   "tok",
+	}, "", "login")
+	csp := rec.Header().Get("Content-Security-Policy")
+	// The directive must include the redirect_uri origin in addition to
+	// 'self' so the browser allows the post-login 302 to follow through to
+	// the OAuth client's callback (issue: claude.ai never POSTs /token
+	// because form-action 'self' silently blocked the redirect).
+	if !strings.Contains(csp, "form-action 'self' https://claude.ai;") {
+		t.Fatalf("form-action must allow redirect_uri origin, got CSP: %s", csp)
+	}
+}
+
+func TestFormActionOriginFromRedirectURI(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"https://claude.ai/api/mcp/auth_callback", "https://claude.ai"},
+		{"http://localhost:9999/cb", "http://localhost:9999"},
+		{"https://callback.mistral.ai/oauth/callback?x=1", "https://callback.mistral.ai"},
+		{"", ""},
+		{"not-a-url", ""},
+		{"/relative/only", ""},
+	}
+	for _, tc := range cases {
+		if got := formActionOriginFromRedirectURI(tc.in); got != tc.want {
+			t.Errorf("formActionOriginFromRedirectURI(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRenderAuthPage_HTMLEscapesUserData(t *testing.T) {
 	rec := httptest.NewRecorder()
 	renderAuthPage(rec, authPageData{
