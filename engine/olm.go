@@ -169,7 +169,7 @@ func BuildOLMSnapshot(store *db.Store, learnerID, domainID string) (*OLMSnapshot
 			domainStates = append(domainStates, cs)
 		}
 	}
-	recent, _ := store.GetRecentInteractionsByLearner(learnerID, 20)
+	recent, _ := store.GetRecentInteractionsByLearner(learnerID, DefaultRecentInteractionsWindow)
 	var domainInteractions []*models.Interaction
 	for _, in := range recent {
 		if domainConceptSet[in.Concept] {
