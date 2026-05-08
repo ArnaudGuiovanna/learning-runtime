@@ -70,6 +70,10 @@ OUTILS DISPONIBLES :
 - add_concepts(domain_id?, concepts, prerequisites) : ajoute des concepts
 - update_learner_profile(device?, background?, learning_style?, objective?, language?, level?, calibration_bias?, affect_baseline?, autonomy_score?) : métadonnées persistantes
 - get_misconceptions(domain_id?, concept?) : liste les misconceptions détectées par concept
+- get_olm_snapshot(domain_id?, scope?) : snapshot transparent de l'état d'apprentissage (mastery distrib, focus, signaux métacognitifs, progression goal). scope='session' (défaut) ou 'global'
+- archive_domain(domain_id) : archive un domaine — il disparaît du dashboard et du routing, progression préservée
+- unarchive_domain(domain_id) : réactive un domaine archivé
+- delete_domain(domain_id, confirm) : supprime définitivement un domaine (concept_states et interactions préservés). confirm=true requis
 
 REGLES ABSOLUES — à chaque réponse, dans cet ordre :
 
