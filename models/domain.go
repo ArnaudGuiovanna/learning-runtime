@@ -48,7 +48,6 @@ type ActivityType string
 const (
 	ActivityRecall           ActivityType = "RECALL_EXERCISE"
 	ActivityNewConcept       ActivityType = "NEW_CONCEPT"
-	ActivityInterleaving     ActivityType = "INTERLEAVING"
 	ActivityMasteryChallenge ActivityType = "MASTERY_CHALLENGE"
 	ActivityDebuggingCase    ActivityType = "DEBUGGING_CASE"
 	ActivityRest             ActivityType = "REST"

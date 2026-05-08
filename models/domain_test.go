@@ -5,6 +5,9 @@
 package models
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"sort"
 	"testing"
 )
@@ -180,5 +183,52 @@ func TestUncoveredConcepts_MalformedJSONTreatsAllAsUncovered(t *testing.T) {
 	got := d.UncoveredConcepts()
 	if len(got) != 1 || got[0] != "A" {
 		t.Errorf("malformed JSON: want [A], got %v", got)
+	}
+}
+
+// ─── ActivityType public surface ───────────────────────────────────────────
+
+// TestActivityType_NoInterleaving is a regression guard for sub-issue #64.
+//
+// `ActivityInterleaving` ("INTERLEAVING") was declared in models/domain.go
+// but never emitted by any production code path (router, action selector).
+// It was removed as dead code rather than implementing Rohrer-style
+// interleaving (out of scope). This test parses the package source and
+// asserts that no constant of type ActivityType equals the literal
+// "INTERLEAVING" — failing if the dead type is ever re-introduced.
+func TestActivityType_NoInterleaving(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "domain.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse domain.go: %v", err)
+	}
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range vs.Names {
+				if name.Name == "ActivityInterleaving" {
+					t.Fatalf("models.ActivityInterleaving must not be " +
+						"declared (sub-issue #64: removed as unused " +
+						"dead code; no production path emits it)")
+				}
+			}
+			for _, val := range vs.Values {
+				bl, ok := val.(*ast.BasicLit)
+				if !ok || bl.Kind != token.STRING {
+					continue
+				}
+				if bl.Value == `"INTERLEAVING"` {
+					t.Fatalf(`ActivityType literal "INTERLEAVING" must not ` +
+						`be declared (sub-issue #64)`)
+				}
+			}
+		}
 	}
 }
