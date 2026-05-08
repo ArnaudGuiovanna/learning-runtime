@@ -19,13 +19,20 @@ import (
 // write-only metadata that bloated the profile_json blob without informing
 // any decision. The forward-only migration in db/migrations.go scrubs the keys
 // out of existing rows so a re-introduction won't silently inherit stale data.
+// CalibrationBias and AutonomyScore are *float64 (issue #89) so that nil
+// distinguishes "caller did not supply this field" from a legitimate 0
+// value. `calibration_bias=0` is perfect calibration; `autonomy_score=0` is
+// fully dependent — both are values the system itself produces and the LLM
+// must be able to push through this tool. Matches the pointer pattern used
+// for ImplementationIntention in record_session_close. The ,omitempty on
+// the JSON tag is dropped because nil already serialises to absent.
 type UpdateLearnerProfileParams struct {
-	Device          string  `json:"device,omitempty" jsonschema:"Appareil principal (ex: laptop, phone, tablet)"`
-	Objective       string  `json:"objective,omitempty" jsonschema:"Objectif d'apprentissage mis à jour"`
-	Language        string  `json:"language,omitempty" jsonschema:"Langue préférée pour les exercices"`
-	CalibrationBias float64 `json:"calibration_bias,omitempty" jsonschema:"Biais de calibration (positif=sur-estimé, négatif=sous-estimé)"`
-	AffectBaseline  string  `json:"affect_baseline,omitempty" jsonschema:"Baseline émotionnelle de l'apprenant"`
-	AutonomyScore   float64 `json:"autonomy_score,omitempty" jsonschema:"Score d'autonomie actuel (0-1)"`
+	Device          string   `json:"device,omitempty" jsonschema:"Appareil principal (ex: laptop, phone, tablet)"`
+	Objective       string   `json:"objective,omitempty" jsonschema:"Objectif d'apprentissage mis à jour"`
+	Language        string   `json:"language,omitempty" jsonschema:"Langue préférée pour les exercices"`
+	CalibrationBias *float64 `json:"calibration_bias,omitempty" jsonschema:"Biais de calibration (positif=sur-estimé, négatif=sous-estimé). Fournir explicitement pour écraser; omettre pour laisser inchangé. 0 = calibration parfaite."`
+	AffectBaseline  string   `json:"affect_baseline,omitempty" jsonschema:"Baseline émotionnelle de l'apprenant"`
+	AutonomyScore   *float64 `json:"autonomy_score,omitempty" jsonschema:"Score d'autonomie actuel (0-1). Fournir explicitement pour écraser; omettre pour laisser inchangé. 0 = totalement dépendant."`
 }
 
 func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
@@ -83,16 +90,18 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 			profile["language"] = params.Language
 			updated++
 		}
-		if params.CalibrationBias != 0 {
-			profile["calibration_bias"] = params.CalibrationBias
+		// nil pointer = caller omitted the field; non-nil = set this exact
+		// value (0 included). Issue #89.
+		if params.CalibrationBias != nil {
+			profile["calibration_bias"] = *params.CalibrationBias
 			updated++
 		}
 		if params.AffectBaseline != "" {
 			profile["affect_baseline"] = params.AffectBaseline
 			updated++
 		}
-		if params.AutonomyScore != 0 {
-			profile["autonomy_score"] = params.AutonomyScore
+		if params.AutonomyScore != nil {
+			profile["autonomy_score"] = *params.AutonomyScore
 			updated++
 		}
 
