@@ -35,6 +35,15 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length cap (issue #82). concept_id is echoed into the
+		// generated prompt_text via fmt.Sprintf and used to look up state;
+		// without this guard a misbehaving caller could push multi-MB
+		// strings into orchestrator output.
+		if err := validateString("concept_id", params.ConceptID, maxShortLabelLen); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
 		cs, err := deps.Store.GetConceptState(learnerID, params.ConceptID)
 		if err != nil {
 			deps.Logger.Error("feynman_challenge: failed to get concept state", "err", err, "learner", learnerID)
