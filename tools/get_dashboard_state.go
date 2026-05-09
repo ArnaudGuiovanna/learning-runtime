@@ -79,11 +79,13 @@ func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 			allDomains, derr := deps.Store.GetDomainsByLearner(learnerID, params.IncludeArchived)
 			if derr != nil {
 				deps.Logger.Error("get_dashboard_state: failed to get domains", "err", derr, "learner", learnerID)
-				r, _ := errorResult("aucun domaine configuré")
+				r, _ := errorResult("no active domain configured")
 				return r, nil, nil
 			}
 			if len(allDomains) == 0 {
-				r, _ := errorResult("aucun domaine configuré")
+				// Issue #33/#90: emit the canonical needs_domain_setup payload
+				// so the LLM can branch consistently across chat-side tools.
+				r, _ := noActiveDomainResult()
 				return r, nil, nil
 			}
 			domains = allDomains
@@ -140,7 +142,7 @@ func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 				if cp.Retention < 0.50 && cp.CardState != "new" {
 					color := "orange"
 					if cp.Retention < 0.30 {
-						color = "rouge"
+						color = "red"
 					}
 					retentionAlerts = append(retentionAlerts, map[string]interface{}{
 						"concept":   cp.Concept,
