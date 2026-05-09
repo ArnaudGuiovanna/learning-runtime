@@ -54,6 +54,20 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Issue #92: when the learner proposes a concept, validate it is part
+		// of the active domain before any plan construction. Without this
+		// guard the orchestrator silently builds an "accepted" plan around a
+		// hallucinated concept (no prereqs to break, no states to consult)
+		// and returns counts_as_self_initiated=true. Mirror the record_
+		// interaction / transfer_challenge guard pattern. LearnerConcept is
+		// optional (system_plan-only path), so only validate when non-empty.
+		if params.LearnerConcept != "" {
+			if err := validateConceptInDomain(domain, params.LearnerConcept); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 
 		domainConcepts := make(map[string]bool)
