@@ -388,8 +388,13 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 
 	s.logger.Debug("token exchange attempt", "code_len", len(code), "verifier_len", len(codeVerifier), "client_id", clientID)
 
-	if code == "" || codeVerifier == "" || clientID == "" {
-		s.logger.Debug("token exchange: missing code, verifier or client_id")
+	// Note: code_verifier is *conditionally* required (issue #114). PKCE is
+	// only enforced when the auth code was minted with a non-empty challenge,
+	// which happens for public clients (always) and for confidential clients
+	// that opted in. We therefore validate code_verifier presence later, after
+	// loading the auth code, instead of rejecting up-front.
+	if code == "" || clientID == "" {
+		s.logger.Debug("token exchange: missing code or client_id")
 		writeTokenError(w, "invalid_request", http.StatusBadRequest)
 		return
 	}
@@ -413,13 +418,36 @@ func (s *OAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Verify PKCE: SHA256(code_verifier) == code_challenge (base64url, no padding).
-	h := sha256.Sum256([]byte(codeVerifier))
-	computed := base64.RawURLEncoding.EncodeToString(h[:])
-	if subtle.ConstantTimeCompare([]byte(computed), []byte(authCode.CodeChallenge)) != 1 {
-		s.logger.Debug("token exchange: PKCE mismatch")
-		writeTokenError(w, "invalid_grant", http.StatusBadRequest)
-		return
+	// Verify PKCE only when the auth code was minted with a challenge
+	// (issue #114). Confidential clients legitimately skip PKCE at /authorize
+	// and authenticate with their client_secret instead, so requiring a
+	// verifier here would lock them out. When a challenge *was* recorded, the
+	// verifier must be supplied AND match. A public client (no stored secret)
+	// MUST always have a non-empty challenge: an empty challenge for a public
+	// client indicates a malformed state, and we refuse to issue a token —
+	// otherwise a leaked public-client auth code could be redeemed without any
+	// verifier (defense-in-depth; the /authorize gate already prevents this).
+	if authCode.CodeChallenge == "" {
+		if client.ClientSecretHash == "" {
+			s.logger.Warn("token exchange: empty PKCE challenge for public client — refusing", "client_id", clientID)
+			writeTokenError(w, "invalid_grant", http.StatusBadRequest)
+			return
+		}
+		// Confidential client that opted out of PKCE — accept. Its identity
+		// was already verified by verifyClientAuth above.
+	} else {
+		if codeVerifier == "" {
+			s.logger.Debug("token exchange: code_verifier required but missing")
+			writeTokenError(w, "invalid_request", http.StatusBadRequest)
+			return
+		}
+		h := sha256.Sum256([]byte(codeVerifier))
+		computed := base64.RawURLEncoding.EncodeToString(h[:])
+		if subtle.ConstantTimeCompare([]byte(computed), []byte(authCode.CodeChallenge)) != 1 {
+			s.logger.Debug("token exchange: PKCE mismatch")
+			writeTokenError(w, "invalid_grant", http.StatusBadRequest)
+			return
+		}
 	}
 
 	accessToken, err := GenerateJWT(s.baseURL, authCode.LearnerID)
