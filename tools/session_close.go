@@ -53,6 +53,26 @@ func registerRecordSessionClose(server *mcp.Server, deps *Deps) {
 		if params.ImplementationIntention != nil &&
 			params.ImplementationIntention.Trigger != "" &&
 			params.ImplementationIntention.Action != "" {
+			// String length caps (issue #82). Trigger / Action are user-authored
+			// if-then sentences that flow straight into implementation_intentions
+			// rows; without these guards a misbehaving caller could push multi-MB
+			// strings into the table. ScheduledFor is an ISO 8601 stamp — capped
+			// at maxShortLabelLen to bound parser cost.
+			stringFields := []struct {
+				name  string
+				value string
+				max   int
+			}{
+				{"implementation_intention.trigger", params.ImplementationIntention.Trigger, maxNoteLen},
+				{"implementation_intention.action", params.ImplementationIntention.Action, maxNoteLen},
+				{"implementation_intention.scheduled_for", params.ImplementationIntention.ScheduledFor, maxShortLabelLen},
+			}
+			for _, f := range stringFields {
+				if err := validateString(f.name, f.value, f.max); err != nil {
+					r, _ := errorResult(err.Error())
+					return r, nil, nil
+				}
+			}
 			var scheduled time.Time
 			if params.ImplementationIntention.ScheduledFor != "" {
 				if parsed, perr := time.Parse(time.RFC3339, params.ImplementationIntention.ScheduledFor); perr == nil {

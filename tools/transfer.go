@@ -37,6 +37,26 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length caps (issue #82). concept_id flows into the
+		// transfer_records query / response and context_type ends up in the
+		// persisted row label — without these guards a misbehaving caller
+		// could push multi-MB strings into the read path and bloat downstream
+		// telemetry.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"concept_id", params.ConceptID, maxShortLabelLen},
+			{"context_type", params.ContextType, maxShortLabelLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		cs, err := deps.Store.GetConceptState(learnerID, params.ConceptID)
 		if err != nil {
 			deps.Logger.Error("transfer_challenge: failed to get concept state", "err", err, "learner", learnerID)
@@ -115,6 +135,25 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 			deps.Logger.Error("record_transfer_result: auth failed", "err", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
+		}
+
+		// String length caps (issue #82). concept_id, context_type and
+		// session_id end up in transfer_records rows; without these guards a
+		// misbehaving caller could push multi-MB strings into the table.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"concept_id", params.ConceptID, maxShortLabelLen},
+			{"context_type", params.ContextType, maxShortLabelLen},
+			{"session_id", params.SessionID, maxShortLabelLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
 		}
 
 		// Score is a unit-interval transfer rating. Reject NaN/Inf and any

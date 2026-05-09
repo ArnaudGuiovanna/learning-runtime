@@ -42,6 +42,27 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length caps (issue #82). All three fields are echoed back
+		// into the JSON response (tradeoffs, accepted_plan.rationale) and
+		// learner_rationale ends up in the orchestrator-bound
+		// acceptedPlan.Rationale string. Without these guards a misbehaving
+		// caller could push multi-MB strings into orchestrator output.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"session_id", params.SessionID, maxShortLabelLen},
+			{"learner_concept", params.LearnerConcept, maxShortLabelLen},
+			{"learner_rationale", params.LearnerRationale, maxNoteLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
 		if err != nil || domain == nil {
 			if params.DomainID != "" {

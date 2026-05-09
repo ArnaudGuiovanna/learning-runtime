@@ -38,6 +38,25 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length caps (issue #82). concept_id is persisted into
+		// calibration_records and echoed into prompt_text; domain_id is
+		// resolved against the learner's domains. Without these guards a
+		// misbehaving caller could push multi-MB strings into either path.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"concept_id", params.ConceptID, maxShortLabelLen},
+			{"domain_id", params.DomainID, maxShortLabelLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		// 1-5 Likert self-assessment. Reject NaN/Inf and out-of-range values
 		// rather than silently clamping — clamping a hallucinated 100.0 to
 		// 1.0 would corrupt the calibration record. See issue #25.
