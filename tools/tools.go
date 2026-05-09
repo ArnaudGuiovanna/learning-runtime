@@ -64,6 +64,13 @@ func filterInteractionsByConcepts(interactions []*models.Interaction, set map[st
 }
 
 // resolveDomain resolves a domain by ID or falls back to the learner's most recent domain.
+//
+// Archived domains are explicitly rejected when resolved by ID: see issue #94.
+// Without this guard, callers like record_interaction would silently advance
+// BKT/FSRS state on a domain the learner has explicitly archived. Archive-
+// specific tools (archive_domain, unarchive_domain, delete_domain) do not go
+// through resolveDomain — they call store.GetDomainByID directly because they
+// legitimately need to operate on archived rows.
 func resolveDomain(store *db.Store, learnerID, domainID string) (*models.Domain, error) {
 	if domainID != "" {
 		d, err := store.GetDomainByID(domainID)
@@ -71,6 +78,9 @@ func resolveDomain(store *db.Store, learnerID, domainID string) (*models.Domain,
 			return nil, err
 		}
 		if d.LearnerID != learnerID {
+			return nil, fmt.Errorf("domain not found")
+		}
+		if d.Archived {
 			return nil, fmt.Errorf("domain not found")
 		}
 		return d, nil
