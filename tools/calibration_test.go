@@ -117,7 +117,7 @@ func TestRecordCalibrationResult_OwnerAllowed(t *testing.T) {
 	}
 
 	// Verify the record was actually updated.
-	saved, err := store.GetCalibrationRecord("cal_owner_1")
+	saved, err := store.GetCalibrationRecord("cal_owner_1", "L_owner")
 	if err != nil {
 		t.Fatalf("get record: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRecordCalibrationResult_ActualScoreOutOfRange(t *testing.T) {
 			}
 
 			// Record must NOT be mutated when validation rejects.
-			saved, err := store.GetCalibrationRecord(predictionID)
+			saved, err := store.GetCalibrationRecord(predictionID, "L_owner")
 			if err != nil {
 				t.Fatalf("get record: %v", err)
 			}
@@ -233,6 +233,44 @@ func TestRecordCalibrationResult_ActualScoreOutOfRange(t *testing.T) {
 // _ = math.NaN keeps the math import required even when no sub-case below
 // directly references math; the test above relies on JSON-literal NaN.
 var _ = math.NaN
+
+// TestRecordCalibrationResult_RejectsForeignPredictionID is the issue #87
+// regression: ownership is now enforced at the DB layer, so even if the tool
+// handler skipped its (now-removed) manual check, calling the MCP tool with
+// another learner's prediction_id must error and leave the row untouched.
+func TestRecordCalibrationResult_RejectsForeignPredictionID(t *testing.T) {
+	store, deps := setupCalibTest(t)
+
+	rec := &models.CalibrationRecord{
+		PredictionID: "cal_foreign_1",
+		LearnerID:    "L_owner",
+		ConceptID:    "Concept_A",
+		Predicted:    0.40,
+	}
+	if err := store.CreateCalibrationPrediction(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := callRecordCalibration(t, deps, "L_attacker", "cal_foreign_1", 0.95)
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected IsError=true, got success")
+	}
+
+	// Row must remain unmodified — Actual still nil, owner still L_owner.
+	saved, err := store.GetCalibrationRecord("cal_foreign_1", "L_owner")
+	if err != nil {
+		t.Fatalf("get record: %v", err)
+	}
+	if saved.Actual != nil {
+		t.Fatalf("expected Actual nil after rejected foreign call, got %v", *saved.Actual)
+	}
+	if saved.LearnerID != "L_owner" {
+		t.Fatalf("LearnerID = %q want L_owner", saved.LearnerID)
+	}
+}
 
 func TestRecordCalibrationResult_ForeignLearnerRejected(t *testing.T) {
 	store, deps := setupCalibTest(t)
@@ -265,7 +303,7 @@ func TestRecordCalibrationResult_ForeignLearnerRejected(t *testing.T) {
 	}
 
 	// Verify the record was NOT modified.
-	saved, err := store.GetCalibrationRecord("cal_victim_1")
+	saved, err := store.GetCalibrationRecord("cal_victim_1", "L_owner")
 	if err != nil {
 		t.Fatalf("get record: %v", err)
 	}

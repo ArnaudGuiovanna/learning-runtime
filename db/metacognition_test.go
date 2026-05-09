@@ -167,7 +167,7 @@ func TestCalibrationLifecycle(t *testing.T) {
 		t.Fatalf("create prediction: %v", err)
 	}
 
-	got, err := store.GetCalibrationRecord("P1")
+	got, err := store.GetCalibrationRecord("P1", "L1")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -182,10 +182,10 @@ func TestCalibrationLifecycle(t *testing.T) {
 	}
 
 	// Complete the prediction.
-	if err := store.CompleteCalibrationRecord("P1", 0.8, -0.2); err != nil {
+	if err := store.CompleteCalibrationRecord("P1", "L1", 0.8, -0.2); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	got, err = store.GetCalibrationRecord("P1")
+	got, err = store.GetCalibrationRecord("P1", "L1")
 	if err != nil {
 		t.Fatalf("re-get: %v", err)
 	}
@@ -197,13 +197,78 @@ func TestCalibrationLifecycle(t *testing.T) {
 	}
 
 	// Completing missing prediction returns the "not found" error.
-	if err := store.CompleteCalibrationRecord("does-not-exist", 0, 0); err == nil {
+	if err := store.CompleteCalibrationRecord("does-not-exist", "L1", 0, 0); err == nil {
 		t.Fatal("expected error completing missing record")
 	}
 
 	// GetCalibrationRecord on missing prediction also errors.
-	if _, err := store.GetCalibrationRecord("does-not-exist"); err == nil {
+	if _, err := store.GetCalibrationRecord("does-not-exist", "L1"); err == nil {
 		t.Fatal("expected error getting missing record")
+	}
+}
+
+// TestGetCalibrationRecord_FiltersByLearnerID asserts the DB query refuses to
+// return a calibration record when the supplied learner_id does not match the
+// owner — defence-in-depth for issue #87.
+func TestGetCalibrationRecord_FiltersByLearnerID(t *testing.T) {
+	store := setupTestDB(t)
+	rec := &models.CalibrationRecord{
+		PredictionID: "P_owner",
+		LearnerID:    "learner_A",
+		ConceptID:    "C1",
+		Predicted:    0.5,
+	}
+	if err := store.CreateCalibrationPrediction(rec); err != nil {
+		t.Fatalf("create prediction: %v", err)
+	}
+
+	// Fetching with the wrong learner must error with "calibration record not found".
+	if _, err := store.GetCalibrationRecord("P_owner", "learner_B"); err == nil {
+		t.Fatal("expected error when fetching another learner's calibration record")
+	}
+
+	// Sanity: rightful owner still resolves.
+	got, err := store.GetCalibrationRecord("P_owner", "learner_A")
+	if err != nil {
+		t.Fatalf("owner fetch failed: %v", err)
+	}
+	if got.LearnerID != "learner_A" {
+		t.Errorf("LearnerID = %q want learner_A", got.LearnerID)
+	}
+}
+
+// TestCompleteCalibrationRecord_FiltersByLearnerID asserts the UPDATE refuses
+// to mutate a calibration row owned by another learner — defence-in-depth for
+// issue #87.
+func TestCompleteCalibrationRecord_FiltersByLearnerID(t *testing.T) {
+	store := setupTestDB(t)
+	rec := &models.CalibrationRecord{
+		PredictionID: "P_owner",
+		LearnerID:    "learner_A",
+		ConceptID:    "C1",
+		Predicted:    0.5,
+	}
+	if err := store.CreateCalibrationPrediction(rec); err != nil {
+		t.Fatalf("create prediction: %v", err)
+	}
+
+	// Completing as the wrong learner must error "calibration record not found".
+	if err := store.CompleteCalibrationRecord("P_owner", "learner_B", 0.5, 0.0); err == nil {
+		t.Fatal("expected error when completing another learner's calibration record")
+	}
+
+	// And the row must remain unmodified (Actual still nil).
+	got, err := store.GetCalibrationRecord("P_owner", "learner_A")
+	if err != nil {
+		t.Fatalf("owner fetch failed: %v", err)
+	}
+	if got.Actual != nil {
+		t.Errorf("expected Actual nil after rejected foreign update, got %v", *got.Actual)
+	}
+
+	// Sanity: rightful owner still completes.
+	if err := store.CompleteCalibrationRecord("P_owner", "learner_A", 0.7, -0.2); err != nil {
+		t.Fatalf("owner complete failed: %v", err)
 	}
 }
 
@@ -238,7 +303,7 @@ func TestGetCalibrationBiasAndHistory(t *testing.T) {
 		if err := store.CreateCalibrationPrediction(rec); err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if err := store.CompleteCalibrationRecord(rec.PredictionID, 0.5-d, d); err != nil {
+		if err := store.CompleteCalibrationRecord(rec.PredictionID, "L1", 0.5-d, d); err != nil {
 			t.Fatalf("complete: %v", err)
 		}
 	}

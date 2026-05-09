@@ -126,21 +126,18 @@ func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		record, err := deps.Store.GetCalibrationRecord(params.PredictionID)
+		// Ownership is enforced at the DB layer: GetCalibrationRecord returns
+		// "not found" if the prediction belongs to another learner (issue #87).
+		record, err := deps.Store.GetCalibrationRecord(params.PredictionID, learnerID)
 		if err != nil {
 			deps.Logger.Error("record_calibration_result: calibration record not found", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("prediction not found: %v", err))
 			return r, nil, nil
 		}
-		if record.LearnerID != learnerID {
-			deps.Logger.Warn("record_calibration_result: learner mismatch", "prediction_id", params.PredictionID, "learner", learnerID, "owner", record.LearnerID)
-			r, _ := errorResult("calibration record not found")
-			return r, nil, nil
-		}
 
 		delta := record.Predicted - params.ActualScore
 
-		if err := deps.Store.CompleteCalibrationRecord(params.PredictionID, params.ActualScore, delta); err != nil {
+		if err := deps.Store.CompleteCalibrationRecord(params.PredictionID, learnerID, params.ActualScore, delta); err != nil {
 			deps.Logger.Error("record_calibration_result: failed to complete calibration record", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("failed to record result: %v", err))
 			return r, nil, nil
