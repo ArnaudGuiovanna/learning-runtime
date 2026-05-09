@@ -14,7 +14,7 @@ import (
 )
 
 type GetMetacognitiveMirrorParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine de contexte (optionnel) ; le miroir est calculé au niveau apprenant et n'est pas filtré par domaine"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Si fourni, le miroir est restreint aux interactions et états de concept de ce domaine. Si absent, le calcul reste learner-wide."`
 }
 
 func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
@@ -38,6 +38,26 @@ func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		calibBias, _ := deps.Store.GetCalibrationBias(learnerID, 20)
 		affects, _ := deps.Store.GetRecentAffectStates(learnerID, 10)
+
+		// Domain filter (#95): if domain_id is supplied, restrict the
+		// concept-keyed inputs (interactions, states) to that domain's
+		// concept set. resolveDomain enforces learner ownership and
+		// rejects archived/foreign IDs. AutonomyScores stay learner-wide
+		// because they are session-keyed (from affect rows, not concept-
+		// keyed) — autonomy is a learner trait, not a domain trait.
+		if params.DomainID != "" {
+			domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
+			if err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+			conceptSet := make(map[string]bool, len(domain.Graph.Concepts))
+			for _, c := range domain.Graph.Concepts {
+				conceptSet[c] = true
+			}
+			interactions = filterInteractionsByConcepts(interactions, conceptSet)
+			states = filterStatesByConcepts(states, conceptSet)
+		}
 
 		var autonomyScores []float64
 		for _, a := range affects {
