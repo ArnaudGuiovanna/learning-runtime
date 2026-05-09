@@ -80,7 +80,7 @@ func SelectConcept(
 	case models.PhaseInstruction:
 		return selectInstruction(states, graph, goalRelevance), nil
 	case models.PhaseMaintenance:
-		return selectMaintenance(states, goalRelevance), nil
+		return selectMaintenance(states, graph, goalRelevance), nil
 	case models.PhaseDiagnostic:
 		return selectDiagnostic(states, graph), nil
 	default:
@@ -244,9 +244,26 @@ func selectInstruction(
 // missing fast-forgetting concepts.
 func selectMaintenance(
 	states []*models.ConceptState,
+	graph models.KnowledgeSpace,
 	goalRelevance map[string]float64,
 ) Selection {
 	bktThreshold := algorithms.MasteryBKT()
+
+	// Domain filter: states whose concept is absent from graph.Concepts
+	// are excluded. pf.StatesList is learner-wide, so without this guard
+	// a concept mastered in another domain leaks into the active
+	// domain's MAINTENANCE pool — particularly when goal_relevance is
+	// nil and urgency × 1.0 alone drives selection. Empty graph.Concepts
+	// = "no filter" preserves existing call sites passing
+	// models.KnowledgeSpace{}; the orchestrator always supplies a
+	// non-empty graph for the active domain. Issue #93.
+	var domainSet map[string]struct{}
+	if len(graph.Concepts) > 0 {
+		domainSet = make(map[string]struct{}, len(graph.Concepts))
+		for _, c := range graph.Concepts {
+			domainSet[c] = struct{}{}
+		}
+	}
 
 	// Collect mastered concepts; sort alphabetically for deterministic
 	// tie-break.
@@ -260,6 +277,11 @@ func selectMaintenance(
 		}
 		if cs.PMastery < bktThreshold {
 			continue
+		}
+		if domainSet != nil {
+			if _, ok := domainSet[cs.Concept]; !ok {
+				continue
+			}
 		}
 		mastered = append(mastered, cs)
 	}
