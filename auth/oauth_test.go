@@ -537,6 +537,29 @@ func TestTokenEndpoint_ConfidentialClientWithoutPKCE_Issue114(t *testing.T) {
 	if tt, _ := resp["token_type"].(string); !strings.EqualFold(tt, "bearer") {
 		t.Fatalf("token_type = %q, want bearer", tt)
 	}
+	// expires_in must be present and positive (per the user-confirmed spec).
+	exp, ok := resp["expires_in"].(float64)
+	if !ok || exp <= 0 {
+		t.Fatalf("token response missing or invalid expires_in: %+v", resp)
+	}
+
+	// The auth code must now be consumed: a second redemption with the same
+	// code must fail with invalid_grant. This guards against a regression
+	// where the conditional PKCE branch lets a code be redeemed twice.
+	form2 := url.Values{}
+	form2.Set("grant_type", "authorization_code")
+	form2.Set("code", code)
+	tokReq2 := httptest.NewRequest("POST", "/token", strings.NewReader(form2.Encode()))
+	tokReq2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokReq2.SetBasicAuth(clientID, clientSec)
+	tokRec2 := httptest.NewRecorder()
+	s.HandleToken(tokRec2, tokReq2)
+	if tokRec2.Code != http.StatusBadRequest {
+		t.Fatalf("replay status = %d, want 400 invalid_grant; body=%q", tokRec2.Code, tokRec2.Body.String())
+	}
+	if !strings.Contains(tokRec2.Body.String(), "invalid_grant") {
+		t.Fatalf("replay body missing invalid_grant: %q", tokRec2.Body.String())
+	}
 }
 
 // TestTokenEndpoint_ConfidentialClientWithoutPKCE_Issue114_ClientSecretPost
@@ -688,5 +711,73 @@ func TestTokenEndpoint_PublicClientStillRequiresPKCE(t *testing.T) {
 
 	if tokRec.Code == http.StatusOK {
 		t.Fatalf("public client without verifier must NOT receive a token; got 200 body=%q", tokRec.Body.String())
+	}
+	// Tighten the regression guard: must be a 400 with invalid_request or
+	// invalid_grant. A 5xx would mask a logic bug; a 401 would imply we
+	// somehow reached client-auth (public clients have no secret).
+	if tokRec.Code != http.StatusBadRequest {
+		t.Fatalf("public-client no-PKCE status = %d, want 400; body=%q", tokRec.Code, tokRec.Body.String())
+	}
+	body := tokRec.Body.String()
+	if !strings.Contains(body, "invalid_request") && !strings.Contains(body, "invalid_grant") {
+		t.Fatalf("public-client no-PKCE body must report invalid_request or invalid_grant: %q", body)
+	}
+	// The response must NOT contain anything that looks like a JWT or refresh
+	// token field — a sanity check that no token leaked on the rejection path.
+	if strings.Contains(body, "access_token") || strings.Contains(body, "refresh_token") {
+		t.Fatalf("rejection body unexpectedly contains token fields: %q", body)
+	}
+}
+
+// TestTokenEndpoint_ConfidentialClientWithBadSecret_NoPKCE_Rejected pairs
+// with TestHandleToken_AuthorizationCode_ConfidentialClient_BadSecret but
+// drops the (now-optional) code_verifier so the test exercises the exact
+// matrix the #114 fix changed: confidential client + WRONG secret + no
+// verifier. The bcrypt comparison in verifyClientAuth must fire BEFORE the
+// conditional PKCE branch is even reached, so the request must still be
+// rejected as invalid_client. If this test ever flips to 200, an attacker
+// who knows a confidential client_id could redeem auth codes without a
+// secret — a complete bypass.
+func TestTokenEndpoint_ConfidentialClientWithBadSecret_NoPKCE_Rejected(t *testing.T) {
+	setTestSecret(t)
+	s, store := newTestServer(t)
+	const (
+		clientID    = "cid-conf-114-badsec"
+		realSecret  = "real-secret-114"
+		wrongSecret = "wrong-secret-114"
+		redirectURI = "https://c.example/cb"
+		email       = "u-114-badsec@example.com"
+		password    = "password-correct"
+	)
+	seedConfidentialClient(t, store, clientID, redirectURI, realSecret)
+	seedLearner(t, store, email, password)
+
+	// Mint an auth code via /authorize WITHOUT PKCE (allowed for confidential).
+	code := driveAuthorizePost(t, s, clientID, redirectURI, "", "", email, password)
+
+	// /token with the WRONG client_secret and NO code_verifier.
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	tokReq := httptest.NewRequest("POST", "/token", strings.NewReader(form.Encode()))
+	tokReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokReq.SetBasicAuth(clientID, wrongSecret)
+	tokRec := httptest.NewRecorder()
+	s.HandleToken(tokRec, tokReq)
+
+	if tokRec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong-secret no-PKCE status = %d, want 401 invalid_client; body=%q", tokRec.Code, tokRec.Body.String())
+	}
+	body := tokRec.Body.String()
+	if !strings.Contains(body, "invalid_client") {
+		t.Fatalf("body missing invalid_client: %q", body)
+	}
+	// Defense-in-depth: the rejection body must not echo a JWT/refresh token
+	// or anything that resembles the supplied secret.
+	if strings.Contains(body, "access_token") || strings.Contains(body, "refresh_token") {
+		t.Fatalf("rejection body unexpectedly contains token fields: %q", body)
+	}
+	if strings.Contains(body, wrongSecret) || strings.Contains(body, realSecret) {
+		t.Fatalf("rejection body must not echo client_secret material: %q", body)
 	}
 }
