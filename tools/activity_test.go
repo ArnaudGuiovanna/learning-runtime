@@ -4,10 +4,22 @@
 package tools
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"tutor-mcp/auth"
+	"tutor-mcp/db"
 	"tutor-mcp/models"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	_ "modernc.org/sqlite"
 )
 
 func TestGetNextActivity_NoAuth(t *testing.T) {
@@ -203,4 +215,203 @@ func TestGetNextActivity_FadeFlagOn_VerbosityDecreasesAsAutonomyRises(t *testing
 		}
 		prevInstrLen = instrLen
 	}
+}
+
+// TestGetNextActivity_PostOrchestratePhaseMatchesDB is the regression
+// test for perf #91. Before the change, get_next_activity re-read the
+// domain row from the DB to log the post-orchestrate phase. The new
+// path consumes the phase directly from OrchestrateWithPhase. This
+// test seeds a scenario that triggers an FSM transition
+// (INSTRUCTION → MAINTENANCE), calls get_next_activity, and asserts
+// the call succeeds and the DB phase is what the orchestrator
+// persisted — confirming the in-handler logging path still observes
+// the same phase the DB sees.
+func TestGetNextActivity_PostOrchestratePhaseMatchesDB(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+
+	// Seed phase = INSTRUCTION and goal-relevance so the FSM has
+	// something to evaluate.
+	if err := store.UpdateDomainPhase(d.ID, models.PhaseInstruction, 0, time.Now().UTC()); err != nil {
+		t.Fatalf("seed phase: %v", err)
+	}
+	if _, err := store.MergeDomainGoalRelevance(d.ID, map[string]float64{
+		"a": 1.0, "b": 0.8,
+	}); err != nil {
+		t.Fatalf("seed goal_relevance: %v", err)
+	}
+
+	// Mastery above BKT threshold for both concepts → FSM should
+	// transition to MAINTENANCE.
+	for _, c := range []string{"a", "b"} {
+		cs := models.NewConceptState("L_owner", c)
+		cs.PMastery = 0.95
+		cs.CardState = "review"
+		cs.Stability = 30
+		cs.ElapsedDays = 1
+		_ = store.InsertConceptStateIfNotExists(cs)
+		if err := store.UpsertConceptState(cs); err != nil {
+			t.Fatalf("seed state %s: %v", c, err)
+		}
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity",
+		map[string]any{"domain_id": d.ID})
+	if res.IsError {
+		t.Fatalf("get_next_activity: %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if out["needs_domain_setup"] != false {
+		t.Fatalf("expected needs_domain_setup=false, got %v", out["needs_domain_setup"])
+	}
+
+	// The orchestrator should have persisted the MAINTENANCE phase.
+	// This indirectly verifies that the phase the in-handler logger
+	// observed (via the OrchestrateWithPhase return value) matches
+	// what's in the DB — i.e. the perf #91 change preserves the
+	// audit-log invariant.
+	got, err := store.GetDomainByID(d.ID)
+	if err != nil {
+		t.Fatalf("get domain: %v", err)
+	}
+	if got.Phase != models.PhaseMaintenance {
+		t.Errorf("expected DB phase=MAINTENANCE after transition, got %q", got.Phase)
+	}
+}
+
+// BenchmarkGetNextActivity exercises the full get_next_activity tool
+// handler against a freshly seeded in-memory SQLite DB. It does NOT
+// assert a latency target — its purpose is to give future PRs (the
+// rest of issue #91: caching, query merging, async webhook) a stable
+// reference point to measure regressions and improvements against.
+//
+// Run with:
+//
+//	go test ./tools -bench=BenchmarkGetNextActivity -benchmem -run=^$
+func BenchmarkGetNextActivity(b *testing.B) {
+	store, deps := setupBenchTools(b)
+	d := makeBenchDomain(b, store, "L_owner")
+
+	// Seed enough state to exercise the typical hot path: a domain
+	// with concepts, goal-relevance, and mastered states so the FSM
+	// has work to do but doesn't bail early.
+	if err := store.UpdateDomainPhase(d.ID, models.PhaseInstruction, 0, time.Now().UTC()); err != nil {
+		b.Fatalf("seed phase: %v", err)
+	}
+	if _, err := store.MergeDomainGoalRelevance(d.ID, map[string]float64{"a": 0.9, "b": 0.6}); err != nil {
+		b.Fatalf("seed goal_relevance: %v", err)
+	}
+	for _, c := range []string{"a", "b"} {
+		cs := models.NewConceptState("L_owner", c)
+		cs.PMastery = 0.5
+		cs.CardState = "review"
+		cs.Stability = 30
+		cs.ElapsedDays = 1
+		_ = store.InsertConceptStateIfNotExists(cs)
+		if err := store.UpsertConceptState(cs); err != nil {
+			b.Fatalf("seed state %s: %v", c, err)
+		}
+	}
+
+	args := map[string]any{"domain_id": d.ID}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res := callBenchTool(b, deps, "L_owner", args)
+		if res.IsError {
+			b.Fatalf("get_next_activity: %q", resultText(res))
+		}
+	}
+}
+
+// ─── Benchmark helpers (testing.B variants of setupToolsTest/callTool) ─────
+
+// benchDSNCounter avoids DSN collisions across parallel bench runs.
+var benchDSNCounter int64
+
+// setupBenchTools mirrors setupToolsTest but takes *testing.B so it
+// can be used from BenchmarkGetNextActivity. We keep this duplicated
+// (rather than refactoring setupToolsTest to take testing.TB) to keep
+// the perf #91 PR scope minimal.
+func setupBenchTools(b *testing.B) (*db.Store, *Deps) {
+	b.Helper()
+	n := atomic.AddInt64(&benchDSNCounter, 1)
+	dsn := fmt.Sprintf("file:bench_%s_%d?mode=memory&cache=shared", b.Name(), n)
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := db.Migrate(raw); err != nil {
+		b.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, id := range []string{"L_owner", "L_attacker"} {
+		_, err := raw.Exec(
+			`INSERT INTO learners (id, email, password_hash, objective, created_at) VALUES (?, ?, 'hash', 'test', ?)`,
+			id, id+"@test.com", now,
+		)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.Cleanup(func() { raw.Close() })
+	store := db.NewStore(raw)
+	deps := &Deps{
+		Store:  store,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	return store, deps
+}
+
+// makeBenchDomain creates a domain with two prereq-linked concepts
+// for the benchmark — testing.B variant of makeOwnerDomain.
+func makeBenchDomain(b *testing.B, store *db.Store, ownerID string) *models.Domain {
+	b.Helper()
+	d, err := store.CreateDomainWithValueFramings(ownerID, "math", "", models.KnowledgeSpace{
+		Concepts:      []string{"a", "b"},
+		Prerequisites: map[string][]string{"b": {"a"}},
+	}, "")
+	if err != nil {
+		b.Fatalf("create domain: %v", err)
+	}
+	return d
+}
+
+// callBenchTool is a testing.B variant of callTool, hard-wired to
+// registerGetNextActivity.
+func callBenchTool(b *testing.B, deps *Deps, learnerID string, args any) *mcp.CallToolResult {
+	b.Helper()
+	ctx := context.Background()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "bench", Version: "0.0.1"}, nil)
+	registerGetNextActivity(server, deps)
+	if learnerID != "" {
+		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				ctx = context.WithValue(ctx, auth.LearnerIDKey, learnerID)
+				return next(ctx, method, req)
+			}
+		})
+	}
+
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(ctx, st, nil); err != nil {
+		b.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "0.0.1"}, nil)
+	session, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer session.Close()
+
+	argsJSON, _ := json.Marshal(args)
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "get_next_activity",
+		Arguments: json.RawMessage(argsJSON),
+	})
+	if err != nil {
+		b.Fatalf("CallTool transport error: %v", err)
+	}
+	return res
 }

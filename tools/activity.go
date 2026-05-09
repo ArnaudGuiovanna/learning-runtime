@@ -94,7 +94,9 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 
 		// Route to next activity through the regulation pipeline.
-		activity, orchErr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
+		// OrchestrateWithPhase returns the post-orchestrate phase so we
+		// can audit-log it without re-reading the domain row (perf #91).
+		activity, orchPhase, orchErr := engine.OrchestrateWithPhase(deps.Store, engine.OrchestratorInput{
 			LearnerID: learnerID,
 			DomainID:  domain.ID,
 			Now:       time.Now().UTC(),
@@ -107,11 +109,11 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 
 		// Pipeline decision audit — one line per get_next_activity call.
-		// Re-read domain to surface any phase transition the orchestrator
-		// just persisted (cheap; same DB connection).
+		// Phase comes straight from the orchestrator (any FSM transition
+		// or NoFringe fallback already applied).
 		loggedPhase := "INSTRUCTION" // orchestrator's NULL fallback
-		if d, _ := deps.Store.GetDomainByID(domain.ID); d != nil && d.Phase != "" {
-			loggedPhase = string(d.Phase)
+		if orchPhase != "" {
+			loggedPhase = string(orchPhase)
 		}
 		deps.Logger.Info("pipeline decision",
 			"learner", learnerID,

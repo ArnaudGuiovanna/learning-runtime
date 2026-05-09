@@ -65,10 +65,27 @@ const orchestratorMaxRetries = 1
 // get_next_activity call. Returns a models.Activity ready for the
 // LLM-side post-processing (tutor_mode, calibration_bias,
 // motivation_brief — handled by tools/activity.go as today).
+//
+// Thin wrapper around OrchestrateWithPhase for callers that don't
+// need the post-orchestrate phase (e.g. learning_negotiation).
 func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, error) {
+	activity, _, err := OrchestrateWithPhase(store, input)
+	return activity, err
+}
+
+// OrchestrateWithPhase is identical to Orchestrate but also returns the
+// phase the orchestrator settled on (after FSM transition and any
+// NoFringe fallback). This lets callers — notably get_next_activity —
+// observe the post-orchestrate phase without re-reading the domain
+// from the DB. The returned phase is the one the activity was
+// produced under and matches what was persisted (best-effort) by
+// store.UpdateDomainPhase during the call.
+//
+// On error, the returned phase is the empty string ("").
+func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Activity, models.Phase, error) {
 	domain, err := store.GetDomainByID(input.DomainID)
 	if err != nil {
-		return models.Activity{}, fmt.Errorf("%w: %q: %v", ErrUnknownDomain, input.DomainID, err)
+		return models.Activity{}, "", fmt.Errorf("%w: %q: %v", ErrUnknownDomain, input.DomainID, err)
 	}
 
 	// 1. Read current phase ; NULL → INSTRUCTION fallback (OQ-2.1.b).
@@ -80,7 +97,7 @@ func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, err
 	// 2. Fetch observables (states, recent, misconceptions, alerts).
 	pf, err := fetchPipelineFixtures(store, domain, input)
 	if err != nil {
-		return models.Activity{}, err
+		return models.Activity{}, "", err
 	}
 
 	// 3. Build PhaseObservables and evaluate the FSM.
@@ -116,10 +133,10 @@ func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, err
 	for retry := 0; retry <= orchestratorMaxRetries; retry++ {
 		activity, sig, err := runPipeline(store, domain, pf, currentPhase, input)
 		if err != nil {
-			return models.Activity{}, err
+			return models.Activity{}, "", err
 		}
 		if !sig.IsNoFringe {
-			return activity, nil
+			return activity, currentPhase, nil
 		}
 		if fsmTransitioned || retry >= orchestratorMaxRetries {
 			break
@@ -143,7 +160,7 @@ func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, err
 		Type:         models.ActivityRest,
 		Rationale:    "pipeline_exhausted: NoFringe persistant après retry",
 		PromptForLLM: "Aucune activite eligible apres retry. Demande a l'apprenant ce qu'il souhaite faire.",
-	}, nil
+	}, currentPhase, nil
 }
 
 // pipelineSignal lets runPipeline communicate "no candidate, please
@@ -156,12 +173,12 @@ type pipelineSignal struct {
 // pipelineFixtures bundles the data fetched once per Orchestrate call
 // and reused across the FSM evaluation and the pipeline run.
 type pipelineFixtures struct {
-	StatesList     []*models.ConceptState
+	StatesList      []*models.ConceptState
 	StatesByConcept map[string]*models.ConceptState
-	GoalRelevance  map[string]float64 // nil if vector absent/parse-failed
-	ActiveMisc     map[string]bool
-	RecentConcepts []string
-	Alerts         []models.Alert
+	GoalRelevance   map[string]float64 // nil if vector absent/parse-failed
+	ActiveMisc      map[string]bool
+	RecentConcepts  []string
+	Alerts          []models.Alert
 	DiagnosticItems int // count since phase_changed_at
 }
 
