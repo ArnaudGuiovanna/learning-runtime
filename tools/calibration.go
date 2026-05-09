@@ -97,6 +97,16 @@ func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// Reject NaN/Inf and out-of-range scores rather than silently
+		// persisting them. The bias estimator (GetCalibrationBias) averages
+		// `predicted - actual`, so a single hallucinated 100.0 corrupts the
+		// rolling estimate for the learner. See issue #83 (gap left from
+		// the #25/#50 numeric-validation pass).
+		if err := validateUnitInterval("actual_score", params.ActualScore); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
 		record, err := deps.Store.GetCalibrationRecord(params.PredictionID)
 		if err != nil {
 			deps.Logger.Error("record_calibration_result: calibration record not found", "err", err, "learner", learnerID)
