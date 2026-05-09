@@ -400,6 +400,79 @@ func TestSelectConcept_Diagnostic_IgnoresGoalRelevance(t *testing.T) {
 	}
 }
 
+func TestSelectConcept_Diagnostic_FiltersByActiveDomainGraph(t *testing.T) {
+	// Regression: selectDiagnostic must restrict its candidate pool to
+	// states whose concept is in domain.Graph.Concepts. pf.StatesList is
+	// learner-wide (GetConceptStatesByLearner is not domain-scoped), so
+	// without this filter a concept mastered in another domain (or simply
+	// in another active domain's `concept_states`) leaks into the active
+	// domain's DIAGNOSTIC selection. Mirrors the MAINTENANCE filter
+	// applied via issue #93 / PR #102.
+	//
+	// Setup: active domain D2 has only "a"; "x" lives in D1 but is in
+	// the learner-wide states. "x" is at PMastery=0.5 (peak BKT
+	// info-gain), "a" at PMastery=0.2 (lower info-gain). Pre-fix the
+	// selector picks "x" because info-gain wins; post-fix "x" is
+	// excluded by the domain set and "a" is selected.
+	csA := reviewedCS("a", 0.2)
+	csA.PSlip = 0.1
+	csA.PGuess = 0.2
+	csX := reviewedCS("x", 0.5)
+	csX.PSlip = 0.1
+	csX.PGuess = 0.2
+
+	activeGraph := graphFlat("a")
+
+	sel, err := SelectConcept(
+		models.PhaseDiagnostic,
+		[]*models.ConceptState{csA, csX},
+		activeGraph,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sel.Concept == "x" {
+		t.Fatalf("cross-domain leak: DIAGNOSTIC selected %q (not in graph), expected %q", sel.Concept, "a")
+	}
+	if sel.Concept != "a" {
+		t.Errorf("expected concept=a, got %q", sel.Concept)
+	}
+}
+
+func TestSelectConcept_Diagnostic_AllCandidatesFromOtherDomain_NoFringe(t *testing.T) {
+	// Companion regression: when every non-saturated state belongs to
+	// another domain, DIAGNOSTIC must return NoFringe rather than
+	// silently returning a foreign concept. This ensures the orchestrator
+	// can react (e.g., transition or surface a needs-setup signal)
+	// instead of routing to a concept that the writer side will reject
+	// at validateConceptInDomain.
+	csY := reviewedCS("y", 0.4)
+	csY.PSlip = 0.1
+	csY.PGuess = 0.2
+	csZ := reviewedCS("z", 0.6)
+	csZ.PSlip = 0.1
+	csZ.PGuess = 0.2
+
+	activeGraph := graphFlat("a")
+
+	sel, err := SelectConcept(
+		models.PhaseDiagnostic,
+		[]*models.ConceptState{csY, csZ},
+		activeGraph,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sel.NoFringe {
+		t.Errorf("expected NoFringe when all candidates are from other domains, got %+v", sel)
+	}
+	if sel.Concept != "" {
+		t.Errorf("expected empty concept on NoFringe, got %q", sel.Concept)
+	}
+}
+
 // ─── Cas dégénérés transverses ─────────────────────────────────────────────
 
 func TestSelectConcept_NaN_PMastery_ExcludedFromAllPhases(t *testing.T) {

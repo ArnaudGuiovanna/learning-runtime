@@ -352,13 +352,25 @@ func TestOrchestrate_E2E_BroadGoal_LongInstruction_30Sessions(t *testing.T) {
 	art := runE2ESimulation(t, "broad_goal", concepts, nil, goal, 30, cfg)
 
 	// Assertion : le passage en MAINTENANCE doit être plus tardif (ou
-	// inexistant) que dans le scénario restrictif. On vérifie qu'on a
-	// passé plus de sessions en INSTRUCTION qu'en MAINTENANCE.
+	// inexistant) que dans le scénario restrictif. On vérifie que
+	// MAINTENANCE n'arrive pas avant la deuxième moitié de la
+	// simulation, que la phase finale est MAINTENANCE, et que les
+	// sessions INSTRUCTION sont substantielles. (La comparaison directe
+	// I > M était une proxy fragile : une fois `selectDiagnostic`
+	// corrigé pour respecter le gate anti-repeat — issue #93 lineage —
+	// la phase DIAGNOSTIC ne masterise plus aucun concept par accident,
+	// donc INSTRUCTION démarre plus tôt et MAINTENANCE peut accumuler
+	// plus de sessions vers la fin.)
+	if art.Summary.FirstMaintenanceAt > 0 && art.Summary.FirstMaintenanceAt < 15 {
+		t.Errorf("broad goal : MAINTENANCE arrived too early (session %d, expected >= 15)",
+			art.Summary.FirstMaintenanceAt)
+	}
+	if art.Summary.FinalPhase != string(models.PhaseMaintenance) {
+		t.Errorf("broad goal : expected final phase MAINTENANCE, got %s", art.Summary.FinalPhase)
+	}
 	instructionCount := art.Summary.PhaseDistribution[string(models.PhaseInstruction)]
-	maintenanceCount := art.Summary.PhaseDistribution[string(models.PhaseMaintenance)]
-	if maintenanceCount > instructionCount {
-		t.Errorf("broad goal : expected more INSTRUCTION than MAINTENANCE sessions, got I=%d M=%d",
-			instructionCount, maintenanceCount)
+	if instructionCount < 8 {
+		t.Errorf("broad goal : INSTRUCTION should be substantial (>= 8 sessions), got %d", instructionCount)
 	}
 }
 

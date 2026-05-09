@@ -82,7 +82,7 @@ func SelectConcept(
 	case models.PhaseMaintenance:
 		return selectMaintenance(states, goalRelevance), nil
 	case models.PhaseDiagnostic:
-		return selectDiagnostic(states), nil
+		return selectDiagnostic(states, graph), nil
 	default:
 		slog.Error("concept_selector: unknown phase",
 			"phase", string(phase))
@@ -325,7 +325,24 @@ func selectMaintenance(
 // Saturation pre-filter: P(L) <= 0.05 or >= 0.95 → info-gain ≈ 0
 // already, but excluding them up-front keeps the score interpretation
 // clean (the argmax is over genuinely ambiguous concepts only).
-func selectDiagnostic(states []*models.ConceptState) Selection {
+//
+// Domain filter: states whose concept is absent from graph.Concepts are
+// excluded. pf.StatesList is learner-wide (GetConceptStatesByLearner),
+// so without this guard a concept mastered in another domain leaks into
+// the active domain's DIAGNOSTIC selection — symmetric to the
+// MAINTENANCE leak fixed for issue #93. An empty graph.Concepts is
+// treated as "no filter" to preserve existing call sites that pass
+// models.KnowledgeSpace{}; the orchestrator always supplies a non-empty
+// graph for the active domain.
+func selectDiagnostic(states []*models.ConceptState, graph models.KnowledgeSpace) Selection {
+	var domainSet map[string]struct{}
+	if len(graph.Concepts) > 0 {
+		domainSet = make(map[string]struct{}, len(graph.Concepts))
+		for _, c := range graph.Concepts {
+			domainSet[c] = struct{}{}
+		}
+	}
+
 	var candidates []*models.ConceptState
 	for _, cs := range states {
 		if cs == nil || math.IsNaN(cs.PMastery) {
@@ -333,6 +350,11 @@ func selectDiagnostic(states []*models.ConceptState) Selection {
 		}
 		if cs.PMastery <= 0.05 || cs.PMastery >= 0.95 {
 			continue
+		}
+		if domainSet != nil {
+			if _, ok := domainSet[cs.Concept]; !ok {
+				continue
+			}
 		}
 		candidates = append(candidates, cs)
 	}
