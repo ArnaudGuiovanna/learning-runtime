@@ -342,6 +342,65 @@ func TestOrchestrateWithPhase_NoTransition_ReturnsCurrentPhase(t *testing.T) {
 	}
 }
 
+// TestOrchestrateWithPhase_NoFringeFallback_ReturnedPhaseMatchesPersisted
+// closes the gap left by the two FSM-path regressions above: the
+// post-orchestrate phase must also match the persisted DB phase when
+// the resolution comes from the *NoFringe fallback* branch (the retry
+// loop in Orchestrate, not the FSM EvaluatePhase decision).
+//
+// Scenario forces the fallback branch:
+//
+//   - Phase = MAINTENANCE in DB.
+//   - Goal_relevance covers A only ; A is unmastered (default mastery
+//     0.1 from seedOrchDomain). FSM stays in MAINTENANCE because no
+//     goal-relevant concept is "below retention" (the default state
+//     CardState=="new" short-circuits the retention check in
+//     buildObservables).
+//   - In MAINTENANCE, selectMaintenance returns NoFringe (no concept
+//     mastered → mastered pool empty). fsmTransitioned=false, so the
+//     orchestrator enters the noFringeFallbackPhase retry, switches
+//     currentPhase to INSTRUCTION, and persists via UpdateDomainPhase.
+//   - In INSTRUCTION, A is in the external fringe (mastery 0.1 < BKT,
+//     no prereqs) and eligible (rel=1.0) → activity produced.
+//
+// Both assertions then fire on the *fallback* exit path:
+//  1. gotPhase == PhaseInstruction (the fallback target — vice-versa of
+//     the docstring's INSTRUCTION→MAINTENANCE example, but exercises the
+//     same noFringeFallbackPhase code path).
+//  2. store.GetDomainByID(domainID).Phase == gotPhase (DB consistency
+//     after the fallback's UpdateDomainPhase write).
+func TestOrchestrateWithPhase_NoFringeFallback_ReturnedPhaseMatchesPersisted(t *testing.T) {
+	store := setupOrchStore(t)
+	domainID := seedOrchDomain(t, store, []string{"A"}, nil, models.PhaseMaintenance)
+	setGoalRelevance(t, store, domainID, map[string]float64{"A": 1.0})
+	// A stays at default mastery (0.1, CardState="new") — not mastered.
+	// MAINTENANCE pipeline: no mastered concept → NoFringe.
+	// FSM stays in MAINTENANCE (GoalRelevantBelowRetention=false because
+	// the default state is "new", the retention check is skipped).
+	// Fallback path → INSTRUCTION → A in fringe → activity produced.
+
+	activity, gotPhase, err := OrchestrateWithPhase(store, defaultInput(domainID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Sanity: the fallback branch produced a real activity, not the
+	// pipeline_exhausted REST escape — that would mean both phases
+	// returned NoFringe and we'd be exercising the wrong path.
+	if activity.Type == models.ActivityRest {
+		t.Fatalf("expected fallback to produce a real activity, got REST escape (rationale=%q)", activity.Rationale)
+	}
+	if gotPhase != models.PhaseInstruction {
+		t.Errorf("returned phase = %q, want INSTRUCTION (NoFringe fallback target)", gotPhase)
+	}
+	d, err := store.GetDomainByID(domainID)
+	if err != nil {
+		t.Fatalf("get domain: %v", err)
+	}
+	if d.Phase != gotPhase {
+		t.Errorf("returned phase %q does not match persisted phase %q (NoFringe fallback DB write missed)", gotPhase, d.Phase)
+	}
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 // recordSyntheticInteraction inserts a minimal interaction row so the
