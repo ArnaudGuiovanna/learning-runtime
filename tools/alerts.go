@@ -14,13 +14,17 @@ import (
 )
 
 type GetPendingAlertsParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel, utilisé le dernier domaine si absent)"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine pour cibler les alertes activité ; si absent, agrège sur tous les domaines actifs de l'apprenant"`
 }
 
 func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_pending_alerts",
-		Description: "Récupère les alertes en attente pour l'apprenant. Appeler en premier à chaque réponse.",
+		Name: "get_pending_alerts",
+		Description: "Récupère TOUTES les alertes en attente pour l'apprenant — alertes d'activité (PLATEAU, FATIGUE, …) ET alertes métacognitives (DEPENDENCY_INCREASING, CALIBRATION_DIVERGING, AFFECT_NEGATIVE, TRANSFER_BLOCKED). " +
+			"Quand appeler : EN PREMIER à chaque tour, avant tout autre outil de lecture. Si une alerte critique remonte (has_critical=true), la traiter avant de poursuivre. " +
+			"Quand NE PAS appeler : une seule fois par tour suffit ; les alertes métacognitives sont déjà incluses ici, n'appelez pas un outil séparé pour les obtenir. " +
+			"Précondition : si l'apprenant n'a aucun domaine actif, retourne needs_domain_setup=true et une liste alerts vide — appelez init_domain avant de continuer. " +
+			"Retour : {alerts: [...], has_critical: bool, needs_domain_setup: bool}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetPendingAlertsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

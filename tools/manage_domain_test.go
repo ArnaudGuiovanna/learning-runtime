@@ -214,3 +214,59 @@ func TestDeleteDomain_MissingID(t *testing.T) {
 		t.Fatalf("expected validation error")
 	}
 }
+
+// TestResolveDomain_RejectsArchived verifies that resolveDomain refuses an
+// explicit archived domain_id. Regression for #94: without this guard the
+// BKT/FSRS chain silently advances state on a domain the learner has
+// explicitly archived.
+func TestResolveDomain_RejectsArchived(t *testing.T) {
+	store, _ := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	if err := store.ArchiveDomain(d.ID, "L_owner"); err != nil {
+		t.Fatalf("archive domain: %v", err)
+	}
+
+	got, err := resolveDomain(store, "L_owner", d.ID)
+	if err == nil {
+		t.Fatalf("expected error resolving archived domain, got %+v", got)
+	}
+	if !strings.Contains(err.Error(), "archived") && !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'archived' or 'not found' error, got %q", err.Error())
+	}
+}
+
+// TestRecordInteraction_RejectsArchivedDomain is the integration-level guard
+// for #94: passing an archived domain_id to record_interaction must fail
+// rather than silently advance state on the archived domain.
+func TestRecordInteraction_RejectsArchivedDomain(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math") // concepts: ["a","b"]
+	if err := store.ArchiveDomain(d.ID, "L_owner"); err != nil {
+		t.Fatalf("archive domain: %v", err)
+	}
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"domain_id":             d.ID,
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            0.9,
+		"notes":                 "",
+	})
+	if !res.IsError {
+		t.Fatalf("expected error when targeting archived domain, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "domain not found") {
+		t.Fatalf("expected 'domain not found' error, got %q", resultText(res))
+	}
+
+	// DB state: no interaction was recorded against the archived domain.
+	recents, err := store.GetRecentInteractionsByLearner("L_owner", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recents) != 0 {
+		t.Fatalf("expected no interaction recorded on archived domain, got %d", len(recents))
+	}
+}

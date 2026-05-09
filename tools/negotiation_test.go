@@ -4,6 +4,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"tutor-mcp/models"
@@ -50,6 +51,30 @@ func TestLearningNegotiation_SystemPlanOnly(t *testing.T) {
 	}
 	if _, ok := out["learner_proposal"]; ok {
 		t.Fatalf("learner_proposal should not be present, got %v", out["learner_proposal"])
+	}
+}
+
+// TestLearningNegotiation_UnknownConceptRejected guards issue #92: a learner
+// (or hallucinating LLM) can pass a concept name that does not exist in the
+// active domain's Graph.Concepts. Without the validateConceptInDomain guard
+// the negotiation tool silently builds a plan around the non-existent concept
+// and returns accepted=true even though no prereqs exist. Mirror the
+// record_interaction / transfer_challenge guard pattern.
+func TestLearningNegotiation_UnknownConceptRejected(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math") // domain has {a, b}
+
+	res := callTool(t, deps, registerLearningNegotiation, "L_owner", "learning_negotiation", map[string]any{
+		"session_id":      "s1",
+		"learner_concept": "ghost",
+		"domain_id":       d.ID,
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for unknown concept, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "ghost") || !strings.Contains(msg, "not part of domain") {
+		t.Fatalf("expected error mentioning unknown concept and domain, got %q", msg)
 	}
 }
 

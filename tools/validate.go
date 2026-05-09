@@ -6,6 +6,7 @@ package tools
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"tutor-mcp/models"
 )
@@ -115,4 +116,48 @@ func validateString(field, value string, max int) error {
 		return fmt.Errorf("%s exceeds max length: got %d bytes, max %d", field, len(value), max)
 	}
 	return nil
+}
+
+// validateEnum rejects values that are not in the allowed set. The error
+// names the field, the offending value, and the full accepted vocabulary
+// so the calling LLM can self-correct without a round-trip to the docs.
+// Used for record_interaction.activity_type and error_type (issue #88) where
+// a free-form string forces the LLM to guess from prose hints in the schema
+// description, leading to silent persistence of typos like "RECALL" instead
+// of "RECALL_EXERCISE" — those rows then escape downstream filters that key
+// off the canonical vocabulary.
+func validateEnum(field, value string, allowed []string) error {
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s must be one of: %s (got %q)", field, strings.Join(allowed, ", "), value)
+}
+
+// allowedActivityTypes is the canonical set persisted in interactions.activity_type
+// and consumed by engine/* (motivation, metacognition, action_selector). Sourced
+// from models.ActivityType constants — keep in sync if a new ActivityType is added.
+var allowedActivityTypes = []string{
+	string(models.ActivityRecall),           // RECALL_EXERCISE
+	string(models.ActivityNewConcept),       // NEW_CONCEPT
+	string(models.ActivityMasteryChallenge), // MASTERY_CHALLENGE
+	string(models.ActivityDebuggingCase),    // DEBUGGING_CASE
+	string(models.ActivityRest),             // REST
+	string(models.ActivitySetupDomain),      // SETUP_DOMAIN
+	string(models.ActivityPractice),         // PRACTICE
+	string(models.ActivityDebugMisconception),
+	string(models.ActivityFeynmanPrompt),  // FEYNMAN_PROMPT
+	string(models.ActivityTransferProbe),  // TRANSFER_PROBE
+	string(models.ActivityCloseSession),   // CLOSE_SESSION
+}
+
+// allowedErrorTypes is the vocabulary the BKT heuristic
+// (algorithms.BKTUpdateHeuristicSlipByErrorType) branches on. Anything else
+// is silently treated as standard BKT, so accepting arbitrary labels causes
+// audit-trail noise and breaks alert.go's errorTypeCounts aggregation.
+var allowedErrorTypes = []string{
+	"SYNTAX_ERROR",
+	"LOGIC_ERROR",
+	"KNOWLEDGE_GAP",
 }

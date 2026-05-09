@@ -38,6 +38,25 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length caps (issue #82). concept_id is persisted into
+		// calibration_records and echoed into prompt_text; domain_id is
+		// resolved against the learner's domains. Without these guards a
+		// misbehaving caller could push multi-MB strings into either path.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"concept_id", params.ConceptID, maxShortLabelLen},
+			{"domain_id", params.DomainID, maxShortLabelLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		// 1-5 Likert self-assessment. Reject NaN/Inf and out-of-range values
 		// rather than silently clamping — clamping a hallucinated 100.0 to
 		// 1.0 would corrupt the calibration record. See issue #25.
@@ -97,21 +116,28 @@ func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		record, err := deps.Store.GetCalibrationRecord(params.PredictionID)
+		// Reject NaN/Inf and out-of-range scores rather than silently
+		// persisting them. The bias estimator (GetCalibrationBias) averages
+		// `predicted - actual`, so a single hallucinated 100.0 corrupts the
+		// rolling estimate for the learner. See issue #83 (gap left from
+		// the #25/#50 numeric-validation pass).
+		if err := validateUnitInterval("actual_score", params.ActualScore); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
+		// Ownership is enforced at the DB layer: GetCalibrationRecord returns
+		// "not found" if the prediction belongs to another learner (issue #87).
+		record, err := deps.Store.GetCalibrationRecord(params.PredictionID, learnerID)
 		if err != nil {
 			deps.Logger.Error("record_calibration_result: calibration record not found", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("prediction not found: %v", err))
 			return r, nil, nil
 		}
-		if record.LearnerID != learnerID {
-			deps.Logger.Warn("record_calibration_result: learner mismatch", "prediction_id", params.PredictionID, "learner", learnerID, "owner", record.LearnerID)
-			r, _ := errorResult("calibration record not found")
-			return r, nil, nil
-		}
 
 		delta := record.Predicted - params.ActualScore
 
-		if err := deps.Store.CompleteCalibrationRecord(params.PredictionID, params.ActualScore, delta); err != nil {
+		if err := deps.Store.CompleteCalibrationRecord(params.PredictionID, learnerID, params.ActualScore, delta); err != nil {
 			deps.Logger.Error("record_calibration_result: failed to complete calibration record", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("failed to record result: %v", err))
 			return r, nil, nil

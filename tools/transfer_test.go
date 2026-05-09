@@ -102,8 +102,11 @@ func TestRecordTransferResult_NoAuth(t *testing.T) {
 
 func TestRecordTransferResult_HappyPath(t *testing.T) {
 	store, deps := setupToolsTest(t)
+	// makeOwnerDomain creates a domain with concepts ["a","b"]; the
+	// transfer concept must be in the active domain (issue #96).
+	makeOwnerDomain(t, store, "L_owner", "math")
 	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
-		"concept_id":   "calc",
+		"concept_id":   "a",
 		"context_type": "real_world",
 		"score":        0.7,
 		"session_id":   "s1",
@@ -123,7 +126,7 @@ func TestRecordTransferResult_HappyPath(t *testing.T) {
 	}
 
 	// DB state — record persisted.
-	scores, err := store.GetTransferScores("L_owner", "calc")
+	scores, err := store.GetTransferScores("L_owner", "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +137,9 @@ func TestRecordTransferResult_HappyPath(t *testing.T) {
 
 func TestRecordTransferResult_RejectsScoreOutsideUnitInterval(t *testing.T) {
 	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
 	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
-		"concept_id":   "calc",
+		"concept_id":   "a",
 		"context_type": "real_world",
 		"score":        1.5, // legal interval is [0,1]
 	})
@@ -148,7 +152,7 @@ func TestRecordTransferResult_RejectsScoreOutsideUnitInterval(t *testing.T) {
 
 	// Negative also rejected.
 	resNeg := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
-		"concept_id":   "calc",
+		"concept_id":   "a",
 		"context_type": "real_world",
 		"score":        -0.2,
 	})
@@ -157,16 +161,17 @@ func TestRecordTransferResult_RejectsScoreOutsideUnitInterval(t *testing.T) {
 	}
 
 	// Nothing persisted on rejection.
-	scores, _ := store.GetTransferScores("L_owner", "calc")
+	scores, _ := store.GetTransferScores("L_owner", "a")
 	if len(scores) != 0 {
 		t.Fatalf("expected no transfer rows, got %d", len(scores))
 	}
 }
 
 func TestRecordTransferResult_BlockedFlag(t *testing.T) {
-	_, deps := setupToolsTest(t)
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
 	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
-		"concept_id":   "calc",
+		"concept_id":   "a",
 		"context_type": "real_world",
 		"score":        0.3,
 	})
@@ -176,5 +181,123 @@ func TestRecordTransferResult_BlockedFlag(t *testing.T) {
 	out := decodeResult(t, res)
 	if out["blocked"] != true {
 		t.Fatalf("expected blocked=true for low score, got %v", out["blocked"])
+	}
+}
+
+// Issue #96: record_transfer_result must reject concept_id values that are
+// not part of the resolved domain's concept set, mirroring the
+// validateConceptInDomain guard in record_interaction. Without this,
+// orphan transfer rows pollute TRANSFER_BLOCKED alerts downstream.
+func TestRecordTransferResult_RejectsUnknownConcept(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	// Domain has concepts {"a","b"}.
+	makeOwnerDomain(t, store, "L_owner", "math")
+	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+		"concept_id":   "ghost",
+		"context_type": "real_world",
+		"score":        0.2,
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for unknown concept, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "ghost") {
+		t.Fatalf("expected error to mention the unknown concept, got %q", resultText(res))
+	}
+
+	// No orphan row should have been persisted.
+	scores, _ := store.GetTransferScores("L_owner", "ghost")
+	if len(scores) != 0 {
+		t.Fatalf("orphan transfer row persisted for unknown concept: %+v", scores)
+	}
+}
+
+// Issue #96: context_type must be one of the documented enum values
+// (real_world, interview, teaching, debugging, creative). A free-string
+// value such as "banana" must be rejected with a clear enum error.
+func TestRecordTransferResult_RejectsUnknownContextType(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+		"concept_id":   "a",
+		"context_type": "banana",
+		"score":        0.2,
+	})
+	if !res.IsError {
+		t.Fatalf("expected error for unknown context_type, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "context_type") {
+		t.Fatalf("expected error to mention 'context_type', got %q", msg)
+	}
+	if !strings.Contains(msg, "real_world") || !strings.Contains(msg, "interview") {
+		t.Fatalf("expected error to enumerate the allowed values, got %q", msg)
+	}
+}
+
+// Issue #96: each of the five documented context_type enum values must be
+// accepted. Table-driven so a future schema drift shows up as a single
+// failing row rather than an opaque enum-mismatch.
+func TestRecordTransferResult_AllowsKnownContextTypes(t *testing.T) {
+	for _, ct := range []string{"real_world", "interview", "teaching", "debugging", "creative"} {
+		ct := ct
+		t.Run(ct, func(t *testing.T) {
+			store, deps := setupToolsTest(t)
+			makeOwnerDomain(t, store, "L_owner", "math")
+			res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+				"concept_id":   "a",
+				"context_type": ct,
+				"score":        0.6,
+			})
+			if res.IsError {
+				t.Fatalf("context_type=%q rejected unexpectedly: %q", ct, resultText(res))
+			}
+			out := decodeResult(t, res)
+			if out["recorded"] != true {
+				t.Fatalf("context_type=%q: expected recorded=true, got %v", ct, out)
+			}
+			scores, _ := store.GetTransferScores("L_owner", "a")
+			if len(scores) != 1 {
+				t.Fatalf("context_type=%q: expected 1 transfer row, got %d", ct, len(scores))
+			}
+		})
+	}
+}
+
+// Issue #96: an explicit domain_id pointing at someone else's domain must
+// be rejected — concept membership runs against the resolved domain, and
+// a foreign domain has no overlap with the learner's concept set.
+func TestRecordTransferResult_DomainIDRejectsForeignDomain(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+	foreign, err := store.CreateDomain("L_other", "shared", "", models.KnowledgeSpace{
+		Concepts: []string{"a"},
+	})
+	if err != nil {
+		t.Fatalf("create foreign domain: %v", err)
+	}
+
+	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+		"concept_id":   "a",
+		"domain_id":    foreign.ID,
+		"context_type": "real_world",
+		"score":        0.5,
+	})
+	if !res.IsError {
+		t.Fatalf("expected error on foreign domain_id, got %q", resultText(res))
+	}
+}
+
+// Issue #96: when no domain has been initialised the tool must emit the
+// canonical needs_domain_setup payload (mirrors record_interaction).
+func TestRecordTransferResult_NoActiveDomain(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
+		"concept_id":   "a",
+		"context_type": "real_world",
+		"score":        0.5,
+	})
+	out := decodeResult(t, res)
+	if got, _ := out["needs_domain_setup"].(bool); !got {
+		t.Fatalf("expected needs_domain_setup=true, got %v (raw %q)", out, resultText(res))
 	}
 }

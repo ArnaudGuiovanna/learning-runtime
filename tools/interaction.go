@@ -16,11 +16,11 @@ import (
 
 type RecordInteractionParams struct {
 	Concept             string  `json:"concept" jsonschema:"Le concept concerné"`
-	ActivityType        string  `json:"activity_type" jsonschema:"Type d'activité (RECALL_EXERCISE, NEW_CONCEPT, etc.)"`
+	ActivityType        string  `json:"activity_type" jsonschema:"Type d'activité — DOIT être l'une des valeurs canoniques: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
 	Success             bool    `json:"success" jsonschema:"L'exercice a été réussi"`
 	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"Temps de réponse en secondes"`
 	Confidence          float64 `json:"confidence" jsonschema:"Confiance estimée entre 0 et 1"`
-	ErrorType           string  `json:"error_type,omitempty" jsonschema:"Type d'erreur si échec: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP (optionnel)"`
+	ErrorType           string  `json:"error_type,omitempty" jsonschema:"Type d'erreur si échec — laisser vide ou utiliser exactement: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
 	Notes               string  `json:"notes" jsonschema:"Notes optionnelles sur l'interaction"`
 	DomainID            string  `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
 	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"Nombre d'indices demandés pendant l'échange (optionnel, défaut 0)"`
@@ -66,6 +66,24 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 		}
 		for _, f := range stringFields {
 			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
+		// Enum whitelist for activity_type and error_type (issue #88).
+		// Without these guards the LLM has to guess from the prose schema
+		// description ("RECALL_EXERCISE, NEW_CONCEPT, etc."), and typos
+		// like "RECALL" leak into the audit row, escape downstream filters,
+		// and silently degrade the BKT slip-by-error-type heuristic plus
+		// alert.go's errorTypeCounts aggregation.
+		if err := validateEnum("activity_type", params.ActivityType, allowedActivityTypes); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		// error_type is optional — empty string passes through unchecked.
+		if params.ErrorType != "" {
+			if err := validateEnum("error_type", params.ErrorType, allowedErrorTypes); err != nil {
 				r, _ := errorResult(err.Error())
 				return r, nil, nil
 			}

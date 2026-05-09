@@ -42,6 +42,27 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		// String length caps (issue #82). All three fields are echoed back
+		// into the JSON response (tradeoffs, accepted_plan.rationale) and
+		// learner_rationale ends up in the orchestrator-bound
+		// acceptedPlan.Rationale string. Without these guards a misbehaving
+		// caller could push multi-MB strings into orchestrator output.
+		stringFields := []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"session_id", params.SessionID, maxShortLabelLen},
+			{"learner_concept", params.LearnerConcept, maxShortLabelLen},
+			{"learner_rationale", params.LearnerRationale, maxNoteLen},
+		}
+		for _, f := range stringFields {
+			if err := validateString(f.name, f.value, f.max); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
 		if err != nil || domain == nil {
 			if params.DomainID != "" {
@@ -52,6 +73,20 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			deps.Logger.Info("learning_negotiation: no active domain — needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
+		}
+
+		// Issue #92: when the learner proposes a concept, validate it is part
+		// of the active domain before any plan construction. Without this
+		// guard the orchestrator silently builds an "accepted" plan around a
+		// hallucinated concept (no prereqs to break, no states to consult)
+		// and returns counts_as_self_initiated=true. Mirror the record_
+		// interaction / transfer_challenge guard pattern. LearnerConcept is
+		// optional (system_plan-only path), so only validate when non-empty.
+		if params.LearnerConcept != "" {
+			if err := validateConceptInDomain(domain, params.LearnerConcept); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
 		}
 
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
