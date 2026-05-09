@@ -350,6 +350,76 @@ func TestSelectConcept_Maintenance_TieBreakAlphabetical(t *testing.T) {
 	}
 }
 
+func TestSelectConcept_Maintenance_FiltersByActiveDomainGraph(t *testing.T) {
+	// Regression: selectMaintenance must restrict its mastered pool to
+	// states whose concept is in domain.Graph.Concepts. pf.StatesList is
+	// learner-wide (GetConceptStatesByLearner is not domain-scoped), so
+	// without this filter a concept mastered in another domain leaks
+	// into the active domain's MAINTENANCE selection — particularly
+	// when goal_relevance is nil and urgency × 1.0 alone drives
+	// selection. Issue #93.
+	//
+	// Setup: active domain D2 has only "a"; "x" lives in D1 but is in
+	// the learner-wide states. Both are mastered (PMastery=0.95). "x"
+	// has higher urgency (Stability=1, ElapsedDays=30) so without the
+	// filter it would win over "a" (Stability=30, ElapsedDays=1).
+	csA := reviewedCS("a", 0.95)
+	csA.Stability = 30
+	csA.ElapsedDays = 1
+	csX := reviewedCS("x", 0.95)
+	csX.Stability = 1
+	csX.ElapsedDays = 30
+
+	activeGraph := graphFlat("a")
+
+	sel, err := SelectConcept(
+		models.PhaseMaintenance,
+		[]*models.ConceptState{csA, csX},
+		activeGraph,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sel.Concept == "x" {
+		t.Fatalf("cross-domain leak: MAINTENANCE selected %q (not in graph), expected %q", sel.Concept, "a")
+	}
+	if sel.Concept != "a" {
+		t.Errorf("expected concept=a, got %q", sel.Concept)
+	}
+}
+
+func TestSelectConcept_Maintenance_AllMasteredFromOtherDomain_NoFringe(t *testing.T) {
+	// Companion regression: when every mastered state belongs to
+	// another domain, MAINTENANCE must return NoFringe rather than
+	// silently returning a foreign concept. Symmetric to the
+	// DIAGNOSTIC case above.
+	csY := reviewedCS("y", 0.95)
+	csY.Stability = 1
+	csY.ElapsedDays = 30
+	csZ := reviewedCS("z", 0.95)
+	csZ.Stability = 1
+	csZ.ElapsedDays = 30
+
+	activeGraph := graphFlat("a")
+
+	sel, err := SelectConcept(
+		models.PhaseMaintenance,
+		[]*models.ConceptState{csY, csZ},
+		activeGraph,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sel.NoFringe {
+		t.Errorf("expected NoFringe when all mastered are from other domains, got %+v", sel)
+	}
+	if sel.Concept != "" {
+		t.Errorf("expected empty concept on NoFringe, got %q", sel.Concept)
+	}
+}
+
 // ─── DIAGNOSTIC ────────────────────────────────────────────────────────────
 
 func TestSelectConcept_Diagnostic_PicksMaxInfoGain(t *testing.T) {
@@ -397,6 +467,79 @@ func TestSelectConcept_Diagnostic_IgnoresGoalRelevance(t *testing.T) {
 		[]*models.ConceptState{csA, csB}, models.KnowledgeSpace{}, gr)
 	if sel.Concept != "A" {
 		t.Errorf("v1 contract violated: DIAGNOSTIC must ignore goal_relevance; expected A, got %s", sel.Concept)
+	}
+}
+
+func TestSelectConcept_Diagnostic_FiltersByActiveDomainGraph(t *testing.T) {
+	// Regression: selectDiagnostic must restrict its candidate pool to
+	// states whose concept is in domain.Graph.Concepts. pf.StatesList is
+	// learner-wide (GetConceptStatesByLearner is not domain-scoped), so
+	// without this filter a concept mastered in another domain (or simply
+	// in another active domain's `concept_states`) leaks into the active
+	// domain's DIAGNOSTIC selection. Mirrors the MAINTENANCE filter
+	// applied via issue #93 / PR #102.
+	//
+	// Setup: active domain D2 has only "a"; "x" lives in D1 but is in
+	// the learner-wide states. "x" is at PMastery=0.5 (peak BKT
+	// info-gain), "a" at PMastery=0.2 (lower info-gain). Pre-fix the
+	// selector picks "x" because info-gain wins; post-fix "x" is
+	// excluded by the domain set and "a" is selected.
+	csA := reviewedCS("a", 0.2)
+	csA.PSlip = 0.1
+	csA.PGuess = 0.2
+	csX := reviewedCS("x", 0.5)
+	csX.PSlip = 0.1
+	csX.PGuess = 0.2
+
+	activeGraph := graphFlat("a")
+
+	sel, err := SelectConcept(
+		models.PhaseDiagnostic,
+		[]*models.ConceptState{csA, csX},
+		activeGraph,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sel.Concept == "x" {
+		t.Fatalf("cross-domain leak: DIAGNOSTIC selected %q (not in graph), expected %q", sel.Concept, "a")
+	}
+	if sel.Concept != "a" {
+		t.Errorf("expected concept=a, got %q", sel.Concept)
+	}
+}
+
+func TestSelectConcept_Diagnostic_AllCandidatesFromOtherDomain_NoFringe(t *testing.T) {
+	// Companion regression: when every non-saturated state belongs to
+	// another domain, DIAGNOSTIC must return NoFringe rather than
+	// silently returning a foreign concept. This ensures the orchestrator
+	// can react (e.g., transition or surface a needs-setup signal)
+	// instead of routing to a concept that the writer side will reject
+	// at validateConceptInDomain.
+	csY := reviewedCS("y", 0.4)
+	csY.PSlip = 0.1
+	csY.PGuess = 0.2
+	csZ := reviewedCS("z", 0.6)
+	csZ.PSlip = 0.1
+	csZ.PGuess = 0.2
+
+	activeGraph := graphFlat("a")
+
+	sel, err := SelectConcept(
+		models.PhaseDiagnostic,
+		[]*models.ConceptState{csY, csZ},
+		activeGraph,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sel.NoFringe {
+		t.Errorf("expected NoFringe when all candidates are from other domains, got %+v", sel)
+	}
+	if sel.Concept != "" {
+		t.Errorf("expected empty concept on NoFringe, got %q", sel.Concept)
 	}
 }
 
