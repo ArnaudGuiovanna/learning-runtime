@@ -24,7 +24,19 @@ type Scheduler struct {
 	cron   *cron.Cron
 	logger *slog.Logger
 	client *http.Client
+
+	// stopTimeout bounds how long Stop() waits for in-flight cron jobs to
+	// drain before forcing shutdown. Defaults to 25s (5s of margin within
+	// the 30s SIGTERM handler in main.go for database.Close() etc.).
+	// Overridable via test-only constructors so timeout-path tests don't
+	// need to wait the full production budget.
+	stopTimeout time.Duration
 }
+
+// defaultStopTimeout is the production budget for Stop() to wait for
+// in-flight jobs. Sized so that main.go's 30s SIGTERM handler still has
+// 5s of margin to close the database and finish other shutdown work.
+const defaultStopTimeout = 25 * time.Second
 
 func NewScheduler(store *db.Store, logger *slog.Logger) *Scheduler {
 	// cron.New() ships no recover middleware: an unrecovered panic in any
@@ -34,10 +46,11 @@ func NewScheduler(store *db.Store, logger *slog.Logger) *Scheduler {
 	// learner could DoS the entire tutor at scheduled job times. See #35.
 	cl := slogCronLogger{l: logger}
 	return &Scheduler{
-		store:  store,
-		cron:   cron.New(cron.WithChain(cron.Recover(cl))),
-		logger: logger,
-		client: &http.Client{Timeout: 10 * time.Second},
+		store:       store,
+		cron:        cron.New(cron.WithChain(cron.Recover(cl))),
+		logger:      logger,
+		client:      &http.Client{Timeout: 10 * time.Second},
+		stopTimeout: defaultStopTimeout,
 	}
 }
 
@@ -102,7 +115,30 @@ func (s *Scheduler) Start() error {
 	return nil
 }
 
-func (s *Scheduler) Stop() { s.cron.Stop() }
+// Stop halts the cron scheduler and waits for any in-flight jobs to drain
+// before returning, capped by s.stopTimeout (default 25s).
+//
+// robfig/cron/v3's Stop() returns a context.Context that is cancelled only
+// once all running jobs have finished. Discarding that context (the previous
+// behaviour) made Stop() effectively non-blocking, so the deferred chain in
+// main.go could run database.Close() while a cron tick was mid-iteration —
+// producing "sql: database is closed" mid-loop and silent data loss on
+// webhook_message_queue + scheduled_alerts. See issue #123.
+func (s *Scheduler) Stop() {
+	ctx := s.cron.Stop()
+	timeout := s.stopTimeout
+	if timeout <= 0 {
+		timeout = defaultStopTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+		s.logger.Warn("scheduler: in-flight jobs did not finish within budget — forcing shutdown",
+			"timeout", timeout.String())
+	}
+}
 
 // ─── Daily Motivation (8h) ──────────────────────────────────────────────────
 //
