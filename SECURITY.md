@@ -21,7 +21,7 @@ Two private channels are available:
    - Fill in the advisory form
    - This creates a private thread visible only to you and the maintainer
 
-2. **Email**: send a description to `contact@aguiovanna.fr` with the subject prefix `[tutor-mcp security]`. Include:
+2. **Email**: send a description to `arnaud@tutor-mcp.dev` with the subject prefix `[tutor-mcp security]`. Include:
    - Affected version (release tag or commit SHA)
    - Steps to reproduce
    - Expected vs observed behavior
