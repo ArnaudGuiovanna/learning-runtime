@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ArnaudGuiovanna/tutor-mcp/security/advisories/new
+    about: Report security issues privately. Do not open a public issue.
+  - name: Question / discussion
+    url: https://github.com/ArnaudGuiovanna/tutor-mcp/discussions
+    about: For open-ended questions, ideas, or design discussions.

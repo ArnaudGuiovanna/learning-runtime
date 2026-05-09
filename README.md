@@ -2,6 +2,14 @@
   <img src="docs/banner.svg" alt="tutor/mcp — Self-learning is a superpower." width="100%" />
 </p>
 
+<p align="center">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/go-1.25+-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.25+" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-server-7c3aed.svg" alt="MCP server" /></a>
+  <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/releases"><img src="https://img.shields.io/badge/release-v0.3.0--alpha.1-orange.svg" alt="Release v0.3.0-alpha.1" /></a>
+  <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/issues"><img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Status: alpha" /></a>
+</p>
+
 # Tutor MCP — Open-Source AI Tutor & Intelligent Tutoring System (ITS) for LLMs
 
 > Self-hosted **AI tutor** runtime that turns any LLM (Claude, ChatGPT, Le Chat, Gemini) into a true **Intelligent Tutoring System (ITS)** — grounded in 50 years of cognitive science (BKT, FSRS, IRT, PFA, KST) and exposed over the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Adaptive learning, spaced repetition, mastery tracking, misconception diagnosis and a metacognitive loop — for any subject, with no item bank to curate.
@@ -11,6 +19,30 @@
 Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
 > Current release: **v0.3** — the regulation pipeline (BKT-aware action selector, KST-aware concept selector, gate controller, and a pure-FSM phase orchestrator) is the single runtime engine; the legacy alert-and-router cascade has been retired.
+
+## Table of Contents
+
+- [An Intelligent Tutoring System, not a chatbot](#an-intelligent-tutoring-system-not-a-chatbot)
+- [Compatible MCP clients](#compatible-mcp-clients)
+- [Design Choice — The LLM is the Content Engine](#design-choice--the-llm-is-the-content-engine-the-runtime-is-the-its)
+- [How It Works](#how-it-works)
+- [Cognitive Science Engine](#cognitive-science-engine--bkt-fsrs-irt-pfa-kst)
+- [Regulation Pipeline (v0.3)](#regulation-pipeline-v03)
+- [MCP Tools](#mcp-tools)
+- [Alert, Motivation, Webhook engines](#alert-engine)
+- [Authentication](#authentication)
+- [Architecture](#architecture)
+- [Running](#running)
+- [Capacity & Sizing](#capacity--sizing)
+- [Server Configuration](#server-configuration)
+- [Tech Stack](#tech-stack)
+- [Operations](#operations)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Security](#security)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
+- [Author](#author)
 
 ## An Intelligent Tutoring System, not a chatbot
 
@@ -479,9 +511,49 @@ The figures below include a safety buffer (~50%) against the theoretical limits.
 
 For database backup, restore, off-host copy and service control recipes, see [OPERATIONS.md](./OPERATIONS.md). Single-user systemd-user setup is documented end-to-end.
 
+## Roadmap
+
+The current focus is the alpha-to-beta path. Active priorities are tracked on the [issue tracker](https://github.com/ArnaudGuiovanna/tutor-mcp/issues), labelled `p0` (urgent), `p1` (this sprint), `p2` (when convenient).
+
+Three algorithmic refinements are deferred to a later release — none block daily use:
+
+- [#48 PFA fidelity to Pavlik 2009](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/48) — sign of ρ, β intercept, decay term
+- [#49 IRT statistical robustness](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/49) — EAP/MAP prior to replace pure MLE
+- [#52 FSRS sub-day intervals](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/52) — hour-granularity Learning/Relearning steps
+
+The full [`CHANGELOG.md`](./CHANGELOG.md) tracks what has shipped.
+
+## Contributing
+
+Contributions are welcome. The project is single-author maintained, so small focused changes land faster than large refactors. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the workflow (fork, branch from `staging`, conventional commits, test plan in the PR), the language conventions (English in code, French in learner-facing strings), and the in-scope / out-of-scope policy.
+
+For something not yet on the issue tracker, please [open an issue](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/new/choose) before opening a PR (typo fixes excepted).
+
+## Security
+
+Please do **not** open a public issue for security vulnerabilities. See [SECURITY.md](./SECURITY.md) for the private disclosure channels (GitHub private vulnerability advisory, or email) and the operator hardening checklist.
+
+## Acknowledgments
+
+Tutor MCP stands on the shoulders of decades of cognitive-science research and a handful of open-source libraries:
+
+- **BKT** — Corbett & Anderson, *Knowledge Tracing: Modeling the Acquisition of Procedural Knowledge* (1995)
+- **FSRS** — Open-Spaced-Repetition team, [FSRS algorithm v4](https://github.com/open-spaced-repetition/fsrs4anki)
+- **IRT** — Lord & Novick, *Statistical Theories of Mental Test Scores* (1968); 2-parameter logistic model
+- **PFA** — Pavlik et al., *Performance Factors Analysis — A New Alternative to Knowledge Tracing* (2009)
+- **KST** — Falmagne & Doignon, *Learning Spaces* (2011)
+- **Hidi-Renninger interest phases** — *The Four-Phase Model of Interest Development* (2006), used by the motivation engine
+
+Runtime dependencies:
+
+- [modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk) — official MCP server SDK
+- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — pure-Go SQLite driver, no CGO required
+- [robfig/cron](https://github.com/robfig/cron) — background scheduling
+- [golang-jwt/jwt](https://github.com/golang-jwt/jwt) — JWT signing and validation
+
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+This project is licensed under the [MIT License](./LICENSE) — you can use, copy, modify, distribute, and sublicense it, including for commercial purposes, as long as the copyright notice and license text are preserved.
 
 ## Author
 
