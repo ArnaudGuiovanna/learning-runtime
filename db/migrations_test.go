@@ -471,6 +471,98 @@ func TestMigrate_ReRunIsNoOp(t *testing.T) {
 	}
 }
 
+// TestApplyMigration_NonAtomicBody_IsRolledBack_Issue118 is the regression
+// guard for issue #118. A migration body that succeeds partway and then
+// fails on a later statement must leave NO schema artefacts behind: neither
+// the partially-created tables/columns from the body nor a row in
+// schema_migrations claiming the migration succeeded. Without the
+// per-migration transaction added in #118 the first statement's effect
+// persists and operators are left with a half-migrated database.
+//
+// We synthesise a migration whose body has two statements: the first
+// creates table `issue118_x`, the second is invalid SQL. After
+// applyMigration returns an error we assert (a) the table does NOT exist,
+// and (b) schema_migrations has no row for the synthetic version.
+func TestApplyMigration_NonAtomicBody_IsRolledBack_Issue118(t *testing.T) {
+	db := openMigrateTestDB(t, "atomic_body")
+	if err := ensureSchemaMigrationsTable(db); err != nil {
+		t.Fatalf("ensureSchemaMigrationsTable: %v", err)
+	}
+
+	m := migration{
+		Version: "9999_issue118_synthetic",
+		Body: `CREATE TABLE issue118_x (a INTEGER);
+` +
+			`CREATE TABLE issue118_x INVALID SYNTAX;`,
+	}
+
+	err := applyMigration(db, m)
+	if err == nil {
+		t.Fatal("expected applyMigration to return an error for invalid second statement, got nil")
+	}
+
+	// (a) The first statement's table must NOT survive — the whole body
+	// has to be rolled back as a unit.
+	var tableName string
+	scanErr := db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='issue118_x'`,
+	).Scan(&tableName)
+	if scanErr == nil {
+		t.Errorf("table issue118_x should not exist after failed migration, but it does")
+	} else if scanErr != sql.ErrNoRows {
+		t.Fatalf("unexpected error checking table existence: %v", scanErr)
+	}
+
+	// (b) schema_migrations must not record the failed migration.
+	var version string
+	scanErr = db.QueryRow(
+		`SELECT version FROM schema_migrations WHERE version = ?`, m.Version,
+	).Scan(&version)
+	if scanErr == nil {
+		t.Errorf("schema_migrations should not contain row for failed version %q", m.Version)
+	} else if scanErr != sql.ErrNoRows {
+		t.Fatalf("unexpected error reading schema_migrations: %v", scanErr)
+	}
+}
+
+// TestApplyMigration_IgnoreExecErrors_StillRecords is the regression guard
+// for the IgnoreExecErrors path under the per-migration transaction added in
+// issue #118. When a migration's body fails (e.g. a legacy ALTER that
+// targets a column that does not exist) and IgnoreExecErrors is true, the
+// row in schema_migrations must still be inserted so subsequent runs treat
+// the migration as applied. Without careful handling, the failed body
+// statement aborts the transaction and the bookkeeping INSERT also fails.
+func TestApplyMigration_IgnoreExecErrors_StillRecords(t *testing.T) {
+	db := openMigrateTestDB(t, "ignore_exec_errors")
+	if err := ensureSchemaMigrationsTable(db); err != nil {
+		t.Fatalf("ensureSchemaMigrationsTable: %v", err)
+	}
+	// Seed a small base table so the failing ALTER has a concrete target.
+	if _, err := db.Exec(`CREATE TABLE issue118_t (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("seed base table: %v", err)
+	}
+
+	m := migration{
+		Version:          "9999_issue118_ignore_exec_errors",
+		Body:             `ALTER TABLE issue118_t DROP COLUMN does_not_exist`,
+		IgnoreExecErrors: true,
+	}
+
+	if err := applyMigration(db, m); err != nil {
+		t.Fatalf("applyMigration with IgnoreExecErrors must not return an error, got: %v", err)
+	}
+
+	var version string
+	if err := db.QueryRow(
+		`SELECT version FROM schema_migrations WHERE version = ?`, m.Version,
+	).Scan(&version); err != nil {
+		t.Fatalf("schema_migrations must record the IgnoreExecErrors migration even when body fails: %v", err)
+	}
+	if version != m.Version {
+		t.Errorf("recorded version = %q, want %q", version, m.Version)
+	}
+}
+
 // TestMigrate_DetectsChecksumDrift simulates an operator (or a corrupted
 // replica) editing a migration body after it was applied. The next call to
 // Migrate must refuse to start and surface a "checksum mismatch" error so
