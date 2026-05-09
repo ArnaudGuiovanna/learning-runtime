@@ -14,13 +14,17 @@ import (
 )
 
 type GetMetacognitiveMirrorParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine de contexte (optionnel) ; le miroir est calculé au niveau apprenant et n'est pas filtré par domaine"`
 }
 
 func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_metacognitive_mirror",
-		Description: "Retourne un message miroir factuel si un pattern de dépendance est consolidé. Null sinon.",
+		Name: "get_metacognitive_mirror",
+		Description: "Retourne un message miroir factuel si un pattern de dépendance est consolidé sur les 7 derniers jours, sinon mirror=null. Outil de réflexion métacognitive à la demande. " +
+			"Quand appeler : UNIQUEMENT hors du cycle d'activité — par exemple lors d'une demande explicite de bilan métacognitif, ou si l'apprenant interroge ses propres patterns d'apprentissage. " +
+			"Quand NE PAS appeler : si get_next_activity a déjà été appelé dans le même tour, le miroir est déjà présent dans sa clé metacognitive_mirror — un second appel ici fait du travail dupliqué (même calcul, même file webhook dédupliquée par jour). " +
+			"Précondition : aucune ; si aucun pattern n'est détecté, mirror=null est renvoyé sans erreur. " +
+			"Retour : {mirror: <objet ou null>}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetMetacognitiveMirrorParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
