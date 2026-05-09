@@ -14,7 +14,7 @@ import (
 )
 
 type GetAutonomyMetricsParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Vide = score apprenant-large; non-vide = restreint aux concepts de ce domaine (issue #95). La tendance reste cross-session."`
 }
 
 func registerGetAutonomyMetrics(server *mcp.Server, deps *Deps) {
@@ -33,6 +33,26 @@ func registerGetAutonomyMetrics(server *mcp.Server, deps *Deps) {
 		interactions, _ := deps.Store.GetInteractionsSince(learnerID, since)
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		calibBias, _ := deps.Store.GetCalibrationBias(learnerID, 20)
+
+		// Issue #95: when an explicit domain_id is given, scope the
+		// concept-keyed inputs (interactions + states) to that domain's
+		// concept set. The affects-driven Trend below is session-keyed
+		// (not concept-keyed) so it stays learner-wide — that's the
+		// intentional cross-session signal documented in the schema.
+		if params.DomainID != "" {
+			domain, domainErr := resolveDomain(deps.Store, learnerID, params.DomainID)
+			if domainErr != nil || domain == nil {
+				deps.Logger.Error("get_autonomy_metrics: domain not found", "err", domainErr, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			domainConcepts := make(map[string]bool, len(domain.Graph.Concepts))
+			for _, c := range domain.Graph.Concepts {
+				domainConcepts[c] = true
+			}
+			interactions = filterInteractionsByConcepts(interactions, domainConcepts)
+			states = filterStatesByConcepts(states, domainConcepts)
+		}
 
 		metrics := engine.ComputeAutonomyMetrics(engine.AutonomyInput{
 			Interactions:    interactions,

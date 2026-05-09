@@ -14,7 +14,7 @@ import (
 )
 
 type GetMetacognitiveMirrorParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Vide = analyse apprenant-large; non-vide = restreint aux concepts de ce domaine (issue #95)."`
 }
 
 func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
@@ -34,6 +34,28 @@ func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		calibBias, _ := deps.Store.GetCalibrationBias(learnerID, 20)
 		affects, _ := deps.Store.GetRecentAffectStates(learnerID, 10)
+
+		// Issue #95: when an explicit domain_id is given, scope the
+		// concept-keyed inputs (interactions + states) to that domain's
+		// concept set. An empty domain_id keeps the existing learner-wide
+		// behaviour so callers that pass nothing don't see a regression.
+		// Affects + autonomy scores are session-keyed (not concept-keyed),
+		// so leaving them learner-wide is intentional — they drive the
+		// dependency_increasing trend, which is a cross-session signal.
+		if params.DomainID != "" {
+			domain, domainErr := resolveDomain(deps.Store, learnerID, params.DomainID)
+			if domainErr != nil || domain == nil {
+				deps.Logger.Error("get_metacognitive_mirror: domain not found", "err", domainErr, "learner", learnerID, "domain_id", params.DomainID)
+				r, _ := errorResult("domain not found")
+				return r, nil, nil
+			}
+			domainConcepts := make(map[string]bool, len(domain.Graph.Concepts))
+			for _, c := range domain.Graph.Concepts {
+				domainConcepts[c] = true
+			}
+			interactions = filterInteractionsByConcepts(interactions, domainConcepts)
+			states = filterStatesByConcepts(states, domainConcepts)
+		}
 
 		var autonomyScores []float64
 		for _, a := range affects {
