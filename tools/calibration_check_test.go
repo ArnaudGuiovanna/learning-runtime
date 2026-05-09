@@ -46,7 +46,7 @@ func TestCalibrationCheck_HappyPath(t *testing.T) {
 		t.Fatalf("expected prediction_id starting with cal_, got %q", pid)
 	}
 
-	rec, err := store.GetCalibrationRecord(pid)
+	rec, err := store.GetCalibrationRecord(pid, "L_owner")
 	if err != nil {
 		t.Fatalf("GetCalibrationRecord: %v", err)
 	}

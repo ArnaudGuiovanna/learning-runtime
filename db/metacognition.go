@@ -94,10 +94,15 @@ func (s *Store) CreateCalibrationPrediction(r *models.CalibrationRecord) error {
 	return nil
 }
 
-func (s *Store) CompleteCalibrationRecord(predictionID string, actual, delta float64) error {
+// CompleteCalibrationRecord finalises a calibration prediction owned by the
+// supplied learner. The learner_id filter is enforced at the DB layer so that
+// any future caller cannot accidentally reintroduce the IDOR closed by issues
+// #34/#87 — defence-in-depth, mirrors Store.ArchiveDomain.
+func (s *Store) CompleteCalibrationRecord(predictionID, learnerID string, actual, delta float64) error {
 	result, err := s.db.Exec(
-		`UPDATE calibration_records SET actual = ?, delta = ? WHERE prediction_id = ?`,
-		actual, delta, predictionID,
+		`UPDATE calibration_records SET actual = ?, delta = ?
+		 WHERE prediction_id = ? AND learner_id = ?`,
+		actual, delta, predictionID, learnerID,
 	)
 	if err != nil {
 		return fmt.Errorf("complete calibration record: %w", err)
@@ -109,14 +114,22 @@ func (s *Store) CompleteCalibrationRecord(predictionID string, actual, delta flo
 	return nil
 }
 
-func (s *Store) GetCalibrationRecord(predictionID string) (*models.CalibrationRecord, error) {
+// GetCalibrationRecord fetches a calibration prediction scoped to the supplied
+// learner. The learner_id filter is enforced at the DB layer so callers cannot
+// accidentally surface another learner's row — defence-in-depth, mirrors
+// Store.ArchiveDomain.
+func (s *Store) GetCalibrationRecord(predictionID, learnerID string) (*models.CalibrationRecord, error) {
 	r := &models.CalibrationRecord{}
 	var actual, delta sql.NullFloat64
 	err := s.db.QueryRow(
 		`SELECT prediction_id, learner_id, concept_id, predicted, actual, delta, created_at
-		 FROM calibration_records WHERE prediction_id = ?`, predictionID,
+		 FROM calibration_records WHERE prediction_id = ? AND learner_id = ?`,
+		predictionID, learnerID,
 	).Scan(&r.PredictionID, &r.LearnerID, &r.ConceptID, &r.Predicted, &actual, &delta, &r.CreatedAt)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("calibration record not found: %s", predictionID)
+		}
 		return nil, fmt.Errorf("get calibration record: %w", err)
 	}
 	if actual.Valid {
