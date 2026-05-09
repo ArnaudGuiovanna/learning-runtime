@@ -74,6 +74,28 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 			}
 		}
 
+		// Numeric guards (issue #85). Without these, the chat-side LLM can
+		// push NaN/Inf or out-of-range floats into profile_json — NaN cannot
+		// survive json.Marshal at all and +Inf marshals to the literal `+Inf`
+		// which is invalid JSON, poisoning every downstream consumer that
+		// reads profile_json (motivation brief, dashboard, get_olm_snapshot).
+		// CalibrationBias / AutonomyScore are *float64 since #89 (so that 0
+		// can be distinguished from "not provided"). Skip validation when
+		// the caller omitted the field (nil pointer); validate the
+		// dereferenced value otherwise.
+		if params.CalibrationBias != nil {
+			if err := validateBoundedFinite("calibration_bias", *params.CalibrationBias, -1, 1); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+		if params.AutonomyScore != nil {
+			if err := validateUnitInterval("autonomy_score", *params.AutonomyScore); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+
 		// Load existing profile
 		profile := make(map[string]interface{})
 		if learner.ProfileJSON != "" && learner.ProfileJSON != "{}" {
