@@ -44,12 +44,16 @@ Open an issue using the **Feature request** template. Describe the user-facing p
 
 ### Language
 
-The codebase intentionally mixes English and French along a single axis: **who reads the string?**
+The codebase is English-only at the source level. This includes:
 
-- **English** for everything developers/operators read: source code, identifiers, comments, log messages, error returns, this file, every doc under `docs/`.
-- **French** for everything the **learner** ends up seeing (directly or via the LLM): MCP tool descriptions, `jsonschema` parameter descriptions, system prompts, OLM messages, learner-facing rationales.
+- All Go source: identifiers, comments, godoc, log messages, error returns.
+- All tool `Description:` fields and `jsonschema:` parameter descriptions.
+- All learner-facing strings the server composes (handler messages, recap_brief, motivation_brief, DB notifications, engine rationales).
+- All documentation under `docs/`.
 
-When in doubt: if a string is destined for the learner, write correct French with full diacritics (`é`, `è`, `à`, `ç`, …). The lint test in `tools/registration_test.go` enforces diacritic consistency.
+The tutor MCP itself is language-agnostic at runtime: the LLM mirrors the learner's language on output, persisting it via `update_learner_profile(language)` on the first turn. See `docs/i18n.md` for the contract.
+
+The lint test in `tools/registration_test.go` enforces ASCII-only in learner-facing strings.
 
 ### Formatting
 
