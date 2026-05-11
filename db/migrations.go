@@ -5,6 +5,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -207,13 +208,15 @@ var idempotentMigrations = []string{
 
 // Migrate brings the database schema up to the version expected by this build.
 //
-// On first run it creates the schema_migrations bookkeeping table, then walks
-// the ordered list returned by buildMigrations() applying any rows that are
-// not yet recorded. On subsequent runs it verifies every previously applied
-// migration's stored SHA-256 checksum still matches the in-source body, and
-// returns an error containing "checksum mismatch" if a body has drifted —
-// rollback is intentionally out of scope, drift requires manual operator
-// intervention.
+// It runs under a single SQLite BEGIN EXCLUSIVE transaction on one reserved
+// connection, so two processes starting at the same time cannot both observe a
+// missing schema_migrations row and race to insert it. On first run it creates
+// the schema_migrations bookkeeping table, then walks the ordered list returned
+// by buildMigrations() applying any rows that are not yet recorded. On
+// subsequent runs it verifies every previously applied migration's stored
+// SHA-256 checksum still matches the in-source body, and returns an error
+// containing "checksum mismatch" if a body has drifted — rollback is
+// intentionally out of scope, drift requires manual operator intervention.
 //
 // The first invocation against a pre-existing database (one created before the
 // schema_migrations table existed) re-executes every migration body. Each
@@ -222,13 +225,34 @@ var idempotentMigrations = []string{
 // that already ran does not abort startup; only the final INSERT into
 // schema_migrations is required to succeed.
 func Migrate(db *sql.DB) error {
-	if err := ensureSchemaMigrationsTable(db); err != nil {
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("migrate: reserve connection: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, `BEGIN EXCLUSIVE`); err != nil {
+		return fmt.Errorf("migrate: begin exclusive transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	if err := ensureSchemaMigrationsTableInTx(ctx, conn); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	for _, m := range buildMigrations() {
-		if err := applyMigration(db, m); err != nil {
+		if err := applyMigrationInTx(ctx, conn, m); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return fmt.Errorf("migrate: commit exclusive transaction: %w", err)
+	}
+	committed = true
 	return nil
 }
