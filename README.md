@@ -348,7 +348,27 @@ The setup has two phases: **deploy the server**, then **connect a client**.
 
 #### 1. Deploy the server
 
-**1.1 — Build and start**
+**1.1 — Install or build**
+
+Install the latest Linux release binary:
+
+```bash
+curl -fsSL https://github.com/ArnaudGuiovanna/tutor-mcp/releases/latest/download/install.sh | sh
+```
+
+To install without `sudo`, choose a writable directory:
+
+```bash
+curl -fsSL https://github.com/ArnaudGuiovanna/tutor-mcp/releases/latest/download/install.sh | TUTOR_MCP_INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+Or build from source:
+
+```bash
+go build -o tutor-mcp
+```
+
+**1.2 — Start**
 
 ```bash
 # Required
@@ -360,14 +380,14 @@ export DB_PATH=./data/runtime.db       # default: ./data/runtime.db
 export BASE_URL=https://your.domain    # public origin, no trailing slash
 export LOG_LEVEL=debug                 # debug | info | warn | error
 
-go build -o tutor-mcp && ./tutor-mcp
+tutor-mcp   # or ./tutor-mcp if you built from source in this directory
 ```
 
 > `JWT_SECRET` must be a base64-encoded value (32 random bytes recommended). Use `openssl rand -base64 32` to generate one — a plain string will be rejected.
 
 For real use, put the runtime behind a public reverse proxy with TLS — see [Server Configuration](#server-configuration).
 
-**1.2 — Verify**
+**1.3 — Verify**
 
 ```bash
 curl $BASE_URL/health   # → {"status":"ok"}
