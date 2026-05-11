@@ -499,7 +499,13 @@ func (s *Store) ActiveDomainConceptSet(learnerID string) (map[string]bool, error
 }
 
 func (s *Store) DeleteDomain(domainID, learnerID string) error {
-	result, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete domain tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.Exec(
 		`DELETE FROM domains WHERE id = ? AND learner_id = ?`,
 		domainID, learnerID,
 	)
@@ -509,6 +515,23 @@ func (s *Store) DeleteDomain(domainID, learnerID string) error {
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("domain not found")
+	}
+
+	if _, err := tx.Exec(
+		`DELETE FROM implementation_intentions WHERE learner_id = ? AND domain_id = ?`,
+		learnerID, domainID,
+	); err != nil {
+		return fmt.Errorf("delete domain implementation intentions: %w", err)
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM webhook_message_queue WHERE learner_id = ? AND kind = ?`,
+		learnerID, "olm:"+domainID,
+	); err != nil {
+		return fmt.Errorf("delete domain webhook queue: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete domain tx: %w", err)
 	}
 	return nil
 }

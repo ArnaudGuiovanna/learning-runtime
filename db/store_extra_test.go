@@ -21,14 +21,14 @@ func TestIsSafeWebhookURL(t *testing.T) {
 		{"https://discordapp.com/api/webhooks/x/y", true},
 		{"https://canary.discord.com/api/webhooks/x/y", true},
 		{"https://ptb.discordapp.com/api/webhooks/x/y", true},
-		{"http://discord.com/api/webhooks/123/abc", false},   // not https
-		{"https://example.com/api/webhooks/123/abc", false},  // wrong host
-		{"https://discord.com.evil.com/x", false},            // suffix trick
-		{"https://192.168.1.1/x", false},                     // IP literal
-		{"https://discord..com/x", false},                    // double-dot host
-		{"https://", false},                                  // empty host
-		{"::not a url::", false},                             // unparseable
-		{"", false},                                          // empty
+		{"http://discord.com/api/webhooks/123/abc", false},  // not https
+		{"https://example.com/api/webhooks/123/abc", false}, // wrong host
+		{"https://discord.com.evil.com/x", false},           // suffix trick
+		{"https://192.168.1.1/x", false},                    // IP literal
+		{"https://discord..com/x", false},                   // double-dot host
+		{"https://", false},                                 // empty host
+		{"::not a url::", false},                            // unparseable
+		{"", false},                                         // empty
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -366,6 +366,129 @@ func TestDomainCRUDAndArchive(t *testing.T) {
 	}
 	if err := store.DeleteDomain("nope", "L1"); err == nil {
 		t.Error("expected error deleting missing")
+	}
+}
+
+func TestDeleteDomainCleansAuxiliaryRowsAndKeepsPedagogicalHistory(t *testing.T) {
+	store := setupTestDB(t)
+	now := time.Now().UTC()
+
+	if _, err := store.db.Exec(
+		`INSERT INTO learners (id, email, password_hash, objective, created_at) VALUES ('L2','other@test.com','hash','test',?)`,
+		now,
+	); err != nil {
+		t.Fatalf("insert L2: %v", err)
+	}
+
+	d, err := store.CreateDomain("L1", "go", "ship feature", makeKS("Goroutines"))
+	if err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+	other, err := store.CreateDomain("L1", "rust", "ship feature", makeKS("Borrowing"))
+	if err != nil {
+		t.Fatalf("create other domain: %v", err)
+	}
+
+	if _, err := store.InsertImplementationIntention("L1", d.ID, "after coffee", "review goroutines", now); err != nil {
+		t.Fatalf("insert implementation intention: %v", err)
+	}
+	if _, err := store.InsertImplementationIntention("L1", other.ID, "after lunch", "review borrowing", now); err != nil {
+		t.Fatalf("insert other implementation intention: %v", err)
+	}
+	if _, err := store.InsertImplementationIntention("L2", d.ID, "after work", "foreign row", now); err != nil {
+		t.Fatalf("insert foreign implementation intention: %v", err)
+	}
+
+	if _, err := store.EnqueueWebhookMessage("L1", "olm:"+d.ID, "domain olm", now, time.Time{}, 0); err != nil {
+		t.Fatalf("enqueue domain olm: %v", err)
+	}
+	if _, err := store.EnqueueWebhookMessage("L1", "olm:"+other.ID, "other olm", now, time.Time{}, 0); err != nil {
+		t.Fatalf("enqueue other olm: %v", err)
+	}
+	if _, err := store.EnqueueWebhookMessage("L1", "daily_motivation", "daily", now, time.Time{}, 0); err != nil {
+		t.Fatalf("enqueue daily: %v", err)
+	}
+	if _, err := store.EnqueueWebhookMessage("L2", "olm:"+d.ID, "foreign olm", now, time.Time{}, 0); err != nil {
+		t.Fatalf("enqueue foreign olm: %v", err)
+	}
+
+	if err := store.UpsertConceptState(&models.ConceptState{
+		LearnerID: "L1",
+		Concept:   "Goroutines",
+		CardState: "review",
+		PMastery:  0.7,
+	}); err != nil {
+		t.Fatalf("upsert concept state: %v", err)
+	}
+	if err := store.CreateInteraction(&models.Interaction{
+		LearnerID:      "L1",
+		DomainID:       d.ID,
+		Concept:        "Goroutines",
+		ActivityType:   "RECALL_EXERCISE",
+		Success:        true,
+		ResponseTime:   42,
+		Confidence:     0.8,
+		Notes:          "kept after domain deletion",
+		HintsRequested: 0,
+	}); err != nil {
+		t.Fatalf("create interaction: %v", err)
+	}
+
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := store.db.QueryRow(query, args...).Scan(&n); err != nil {
+			t.Fatalf("count query failed: %v", err)
+		}
+		return n
+	}
+
+	if err := store.DeleteDomain(d.ID, "L2"); err == nil {
+		t.Fatal("expected error deleting another learner's domain")
+	}
+	if count(`SELECT COUNT(*) FROM domains WHERE id = ?`, d.ID) != 1 {
+		t.Fatal("foreign delete attempt removed the domain")
+	}
+	if count(`SELECT COUNT(*) FROM implementation_intentions WHERE learner_id = 'L2' AND domain_id = ?`, d.ID) != 1 {
+		t.Fatal("foreign delete attempt removed implementation intentions")
+	}
+	if count(`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = 'L2' AND kind = ?`, "olm:"+d.ID) != 1 {
+		t.Fatal("foreign delete attempt removed webhook queue rows")
+	}
+
+	if err := store.DeleteDomain(d.ID, "L1"); err != nil {
+		t.Fatalf("delete domain: %v", err)
+	}
+
+	if count(`SELECT COUNT(*) FROM domains WHERE id = ?`, d.ID) != 0 {
+		t.Fatal("domain row still exists")
+	}
+	if count(`SELECT COUNT(*) FROM implementation_intentions WHERE learner_id = 'L1' AND domain_id = ?`, d.ID) != 0 {
+		t.Fatal("implementation intentions for deleted domain were not removed")
+	}
+	if count(`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = 'L1' AND kind = ?`, "olm:"+d.ID) != 0 {
+		t.Fatal("webhook OLM rows for deleted domain were not removed")
+	}
+	if count(`SELECT COUNT(*) FROM implementation_intentions WHERE learner_id = 'L1' AND domain_id = ?`, other.ID) != 1 {
+		t.Fatal("implementation intentions for another domain were removed")
+	}
+	if count(`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = 'L1' AND kind = ?`, "olm:"+other.ID) != 1 {
+		t.Fatal("webhook OLM rows for another domain were removed")
+	}
+	if count(`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = 'L1' AND kind = 'daily_motivation'`) != 1 {
+		t.Fatal("unrelated webhook rows were removed")
+	}
+	if count(`SELECT COUNT(*) FROM implementation_intentions WHERE learner_id = 'L2' AND domain_id = ?`, d.ID) != 1 {
+		t.Fatal("implementation intentions for another learner were removed")
+	}
+	if count(`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = 'L2' AND kind = ?`, "olm:"+d.ID) != 1 {
+		t.Fatal("webhook rows for another learner were removed")
+	}
+	if count(`SELECT COUNT(*) FROM concept_states WHERE learner_id = 'L1' AND concept = 'Goroutines'`) != 1 {
+		t.Fatal("concept state was removed")
+	}
+	if count(`SELECT COUNT(*) FROM interactions WHERE learner_id = 'L1' AND domain_id = ?`, d.ID) != 1 {
+		t.Fatal("interaction history was removed")
 	}
 }
 
