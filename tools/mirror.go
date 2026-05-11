@@ -14,17 +14,17 @@ import (
 )
 
 type GetMetacognitiveMirrorParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Si fourni, le miroir est restreint aux interactions et états de concept de ce domaine. Si absent, le calcul reste learner-wide."`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"domain ID (optional). If provided, the mirror is restricted to interactions and concept states of that domain. If absent, the computation remains learner-wide."`
 }
 
 func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_metacognitive_mirror",
-		Description: "Retourne un message miroir factuel si un pattern de dépendance est consolidé sur les 7 derniers jours, sinon mirror=null. Outil de réflexion métacognitive à la demande. " +
-			"Quand appeler : UNIQUEMENT hors du cycle d'activité — par exemple lors d'une demande explicite de bilan métacognitif, ou si l'apprenant interroge ses propres patterns d'apprentissage. " +
-			"Quand NE PAS appeler : si get_next_activity a déjà été appelé dans le même tour, le miroir est déjà présent dans sa clé metacognitive_mirror — un second appel ici fait du travail dupliqué (même calcul, même file webhook dédupliquée par jour). " +
-			"Précondition : aucune ; si aucun pattern n'est détecté, mirror=null est renvoyé sans erreur. " +
-			"Retour : {mirror: <objet ou null>}.",
+		Description: "Return a factual mirror message if a dependency pattern is consolidated over the last 7 days, otherwise mirror=null. On-demand metacognitive reflection tool. " +
+			"When to call: ONLY outside the activity cycle — for example, on an explicit request for a metacognitive review, or when the learner asks about their own learning patterns. " +
+			"When NOT to call: if get_next_activity was already called in the same turn, the mirror is already present in its metacognitive_mirror key — a second call here duplicates work (same computation, same webhook queue deduplicated per day). " +
+			"Precondition: none; if no pattern is detected, mirror=null is returned without error. " +
+			"Returns: {mirror: <object or null>}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetMetacognitiveMirrorParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
