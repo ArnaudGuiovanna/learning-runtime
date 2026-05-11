@@ -193,7 +193,7 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			deps.Logger.Info("record_transfer_result: no active domain — needs setup", "learner", learnerID)
+			deps.Logger.Info("record_transfer_result: no active domain - needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}

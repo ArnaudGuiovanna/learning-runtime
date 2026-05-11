@@ -20,10 +20,10 @@ type GetPendingAlertsParams struct {
 func registerGetPendingAlerts(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_pending_alerts",
-		Description: "Retrieve ALL pending alerts for the learner — activity alerts (PLATEAU, FATIGUE, …) AND metacognitive alerts (DEPENDENCY_INCREASING, CALIBRATION_DIVERGING, AFFECT_NEGATIVE, TRANSFER_BLOCKED). " +
+		Description: "Retrieve ALL pending alerts for the learner - activity alerts (PLATEAU, FATIGUE, etc.) AND metacognitive alerts (DEPENDENCY_INCREASING, CALIBRATION_DIVERGING, AFFECT_NEGATIVE, TRANSFER_BLOCKED). " +
 			"When to call: FIRST each turn, before any other read tool. If a critical alert surfaces (has_critical=true), handle it before proceeding. " +
-			"When NOT to call: once per turn is sufficient; metacognitive alerts are already included here — do not call a separate tool to retrieve them. " +
-			"Precondition: if the learner has no active domain, returns needs_domain_setup=true and an empty alerts list — call init_domain before continuing. " +
+			"When NOT to call: once per turn is sufficient; metacognitive alerts are already included here - do not call a separate tool to retrieve them. " +
+			"Precondition: if the learner has no active domain, returns needs_domain_setup=true and an empty alerts list - call init_domain before continuing. " +
 			"Returns: {alerts: [...], has_critical: bool, needs_domain_setup: bool}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetPendingAlertsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)

@@ -33,7 +33,7 @@ type tradeoff struct {
 func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "learning_negotiation",
-		Description: "Expose the session plan with rationale. The learner can propose an alternative — the system accepts or explains the trade-offs.",
+		Description: "Expose the session plan with rationale. The learner can propose an alternative - the system accepts or explains the trade-offs.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params LearningNegotiationParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -70,7 +70,7 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			deps.Logger.Info("learning_negotiation: no active domain — needs setup", "learner", learnerID)
+			deps.Logger.Info("learning_negotiation: no active domain - needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
@@ -142,7 +142,7 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 					tradeoffs = append(tradeoffs, tradeoff{
 						Factor:      "retention",
 						SystemPlan:  fmt.Sprintf("reviser %s maintient retention a %.0f%%", systemConcept, currentRet*100),
-						LearnerPlan: fmt.Sprintf("reporter %s — retention tombera a %.0f%% demain", systemConcept, futureRet*100),
+						LearnerPlan: fmt.Sprintf("postpone %s - retention will drop to %.0f%% tomorrow", systemConcept, futureRet*100),
 						Delta:       currentRet - futureRet,
 					})
 				}
