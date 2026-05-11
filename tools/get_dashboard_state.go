@@ -23,8 +23,8 @@ type GetDashboardStateParams struct {
 
 type conceptProgress struct {
 	Concept   string  `json:"concept"`
-	Mastery   float64 `json:"mastery"`
-	Retention float64 `json:"retention"`
+	Mastery   float64 `json:"mastery" jsonschema:"BKT mastery probability as a 0..1 float"`
+	Retention float64 `json:"retention" jsonschema:"memory retention probability as a 0..1 float"`
 	Status    string  `json:"status"`
 	CardState string  `json:"card_state"`
 }
@@ -35,7 +35,7 @@ type domainDashboard struct {
 	Archived        bool                     `json:"archived"`
 	TotalConcepts   int                      `json:"total_concepts"`
 	MasteredCount   int                      `json:"mastered_count"`
-	ProgressPct     float64                  `json:"progress_percent"`
+	ProgressPct     float64                  `json:"progress_percent" jsonschema:"domain progress as a 0..100 percentage"`
 	Concepts        []conceptProgress        `json:"concepts"`
 	RetentionAlerts []map[string]interface{} `json:"retention_alerts"`
 	NextAction      string                   `json:"next_action"`
@@ -248,16 +248,17 @@ func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 		dependencyTrend := autonomy.Trend
 
 		r, _ := jsonResult(map[string]interface{}{
-			"domains":          domainDashboards,
-			"total_concepts":   totalConcepts,
-			"total_mastered":   totalMastered,
-			"global_progress":  globalProgress,
-			"alerts":           alerts,
-			"signal":           signal,
-			"autonomy_score":   autonomy.Score,
-			"calibration_bias": calibBias,
-			"affect_last_n":    affectLastN,
-			"dependency_trend": dependencyTrend,
+			"domains":                 domainDashboards,
+			"total_concepts":          totalConcepts,
+			"total_mastered":          totalMastered,
+			"global_progress_percent": globalProgress,
+			"global_progress":         globalProgress,
+			"alerts":                  alerts,
+			"signal":                  signal,
+			"autonomy_score":          autonomy.Score,
+			"calibration_bias":        calibBias,
+			"affect_last_n":           affectLastN,
+			"dependency_trend":        dependencyTrend,
 		})
 		return r, nil, nil
 	})

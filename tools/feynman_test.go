@@ -12,7 +12,7 @@ import (
 
 func TestFeynmanChallenge_NoAuth(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	res := callTool(t, deps, registerFeynmanChallenge, "", "feynman_challenge", map[string]any{"concept_id": "x"})
+	res := callTool(t, deps, registerFeynmanChallenge, "", "feynman_challenge", map[string]any{"concept": "x"})
 	if !res.IsError {
 		t.Fatalf("expected auth error")
 	}
@@ -20,15 +20,15 @@ func TestFeynmanChallenge_NoAuth(t *testing.T) {
 
 func TestFeynmanChallenge_MissingConcept(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept_id": ""})
-	if !res.IsError || !strings.Contains(resultText(res), "concept_id is required") {
+	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept": ""})
+	if !res.IsError || !strings.Contains(resultText(res), "concept is required") {
 		t.Fatalf("got %q", resultText(res))
 	}
 }
 
 func TestFeynmanChallenge_NotFound(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept_id": "ghost"})
+	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept": "ghost"})
 	if !res.IsError || !strings.Contains(resultText(res), "concept not found") {
 		t.Fatalf("got %q", resultText(res))
 	}
@@ -41,7 +41,7 @@ func TestFeynmanChallenge_NotMastered(t *testing.T) {
 	_ = store.InsertConceptStateIfNotExists(cs)
 	_ = store.UpsertConceptState(cs)
 
-	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept_id": "calc"})
+	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept": "calc"})
 	if res.IsError {
 		t.Fatalf("expected non-error result, got %q", resultText(res))
 	}
@@ -58,7 +58,7 @@ func TestFeynmanChallenge_EligibleHappyPath(t *testing.T) {
 	_ = store.InsertConceptStateIfNotExists(cs)
 	_ = store.UpsertConceptState(cs)
 
-	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept_id": "calc"})
+	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept": "calc"})
 	if res.IsError {
 		t.Fatalf("expected success, got %q", resultText(res))
 	}
@@ -68,5 +68,25 @@ func TestFeynmanChallenge_EligibleHappyPath(t *testing.T) {
 	}
 	if out["concept_id"] != "calc" {
 		t.Fatalf("concept_id mismatch: %v", out["concept_id"])
+	}
+	if out["concept"] != "calc" {
+		t.Fatalf("concept mismatch: %v", out["concept"])
+	}
+}
+
+func TestFeynmanChallenge_AcceptsLegacyConceptID(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	cs := models.NewConceptState("L_owner", "legacy_calc")
+	cs.PMastery = 0.95
+	_ = store.InsertConceptStateIfNotExists(cs)
+	_ = store.UpsertConceptState(cs)
+
+	res := callTool(t, deps, registerFeynmanChallenge, "L_owner", "feynman_challenge", map[string]any{"concept_id": "legacy_calc"})
+	if res.IsError {
+		t.Fatalf("expected success, got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if out["concept"] != "legacy_calc" || out["concept_id"] != "legacy_calc" {
+		t.Fatalf("expected canonical and legacy concept keys, got %v", out)
 	}
 }

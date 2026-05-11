@@ -33,6 +33,25 @@ func validateConceptInDomain(d *models.Domain, concept string) error {
 	)
 }
 
+// normalizeConceptParam canonicalizes concept-targeting tool params.
+// `concept` is the public key; `concept_id` is kept as a temporary
+// compatibility alias for older callers (issue #86).
+func normalizeConceptParam(concept, legacyConceptID string) (string, error) {
+	if err := validateString("concept", concept, maxShortLabelLen); err != nil {
+		return "", err
+	}
+	if err := validateString("concept_id", legacyConceptID, maxShortLabelLen); err != nil {
+		return "", err
+	}
+	if concept != "" && legacyConceptID != "" && concept != legacyConceptID {
+		return "", fmt.Errorf("concept and concept_id must match when both are provided")
+	}
+	if concept != "" {
+		return concept, nil
+	}
+	return legacyConceptID, nil
+}
+
 // validateUnitInterval rejects NaN/Inf and any value outside [0, 1].
 // Used for probabilities & confidence-style scores fed into BKT/FSRS/IRT
 // chains where silent clamping has historically corrupted estimator state

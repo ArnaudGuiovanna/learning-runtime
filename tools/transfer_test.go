@@ -12,7 +12,7 @@ import (
 
 func TestTransferChallenge_NoAuth(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	res := callTool(t, deps, registerTransferChallenge, "", "transfer_challenge", map[string]any{"concept_id": "x"})
+	res := callTool(t, deps, registerTransferChallenge, "", "transfer_challenge", map[string]any{"concept": "x"})
 	if !res.IsError {
 		t.Fatalf("expected auth error")
 	}
@@ -20,15 +20,15 @@ func TestTransferChallenge_NoAuth(t *testing.T) {
 
 func TestTransferChallenge_MissingConcept(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept_id": ""})
-	if !res.IsError || !strings.Contains(resultText(res), "concept_id is required") {
+	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept": ""})
+	if !res.IsError || !strings.Contains(resultText(res), "concept is required") {
 		t.Fatalf("got %q", resultText(res))
 	}
 }
 
 func TestTransferChallenge_NotFound(t *testing.T) {
 	_, deps := setupToolsTest(t)
-	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept_id": "ghost"})
+	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept": "ghost"})
 	if !res.IsError {
 		t.Fatalf("expected error for missing concept state")
 	}
@@ -41,7 +41,7 @@ func TestTransferChallenge_NotMastered(t *testing.T) {
 	_ = store.InsertConceptStateIfNotExists(cs)
 	_ = store.UpsertConceptState(cs)
 
-	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept_id": "calc"})
+	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept": "calc"})
 	if res.IsError {
 		t.Fatalf("got %q", resultText(res))
 	}
@@ -58,11 +58,17 @@ func TestTransferChallenge_DefaultContextType(t *testing.T) {
 	_ = store.InsertConceptStateIfNotExists(cs)
 	_ = store.UpsertConceptState(cs)
 
-	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept_id": "calc"})
+	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept": "calc"})
 	if res.IsError {
 		t.Fatalf("got %q", resultText(res))
 	}
 	out := decodeResult(t, res)
+	if out["concept"] != "calc" {
+		t.Fatalf("expected concept=calc, got %v", out["concept"])
+	}
+	if out["concept_id"] != "calc" {
+		t.Fatalf("expected concept_id alias=calc, got %v", out["concept_id"])
+	}
 	if out["context_type"] != "near" {
 		t.Fatalf("expected default context_type=near, got %v", out["context_type"])
 	}
@@ -82,7 +88,7 @@ func TestTransferChallenge_CustomContextType(t *testing.T) {
 	_ = store.UpsertConceptState(cs)
 
 	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{
-		"concept_id":   "calc",
+		"concept":      "calc",
 		"context_type": "interview",
 	})
 	if res.IsError {
@@ -94,10 +100,27 @@ func TestTransferChallenge_CustomContextType(t *testing.T) {
 	}
 }
 
+func TestTransferChallenge_AcceptsLegacyConceptID(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	cs := models.NewConceptState("L_owner", "legacy_calc")
+	cs.PMastery = 0.95
+	_ = store.InsertConceptStateIfNotExists(cs)
+	_ = store.UpsertConceptState(cs)
+
+	res := callTool(t, deps, registerTransferChallenge, "L_owner", "transfer_challenge", map[string]any{"concept_id": "legacy_calc"})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if out["concept"] != "legacy_calc" || out["concept_id"] != "legacy_calc" {
+		t.Fatalf("expected canonical and legacy concept keys, got %v", out)
+	}
+}
+
 func TestRecordTransferResult_NoAuth(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerRecordTransferResult, "", "record_transfer_result", map[string]any{
-		"concept_id":   "x",
+		"concept":      "x",
 		"context_type": "real_world",
 		"score":        0.5,
 	})
@@ -112,7 +135,7 @@ func TestRecordTransferResult_HappyPath(t *testing.T) {
 	// transfer concept must be in the active domain (issue #96).
 	makeOwnerDomain(t, store, "L_owner", "math")
 	res := callTool(t, deps, registerRecordTransferResult, "L_owner", "record_transfer_result", map[string]any{
-		"concept_id":   "a",
+		"concept":      "a",
 		"context_type": "real_world",
 		"score":        0.7,
 		"session_id":   "s1",

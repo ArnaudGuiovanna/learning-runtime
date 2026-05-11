@@ -37,7 +37,7 @@ const (
 
 type SetGoalRelevanceParams struct {
 	DomainID  string             `json:"domain_id,omitempty" jsonschema:"target domain ID (optional; last active domain if absent)"`
-	Relevance map[string]float64 `json:"relevance" jsonschema:"map of concept_id -> score [0,1]. Unknown concepts produce an explicit error. Incremental semantics: only provided concepts are updated."`
+	Relevance map[string]float64 `json:"relevance" jsonschema:"map of concept -> relevance score as a 0..1 float. Unknown concepts produce an explicit error. Incremental semantics: only provided concepts are updated."`
 }
 
 func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
@@ -47,7 +47,7 @@ func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "set_goal_relevance",
 		Description: "Decompose the learner's personal_goal against the domain's concepts. " +
-			"For each concept, provide a score in [0,1]: 1.0 = central to the goal, " +
+			"For each concept, provide a score in 0..1: 1.0 = central to the goal, " +
 			"0.0 = orthogonal. Incremental semantics (merge): only provided concepts are updated, " +
 			"others retain their previous score. An unknown concept (absent from the graph) returns an explicit error.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params SetGoalRelevanceParams) (*mcp.CallToolResult, any, error) {

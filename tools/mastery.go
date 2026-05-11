@@ -16,8 +16,9 @@ import (
 )
 
 type CheckMasteryParams struct {
-	Concept  string `json:"concept" jsonschema:"the concept to check for mastery"`
-	DomainID string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
+	Concept   string `json:"concept,omitempty" jsonschema:"the concept to check for mastery; canonical key for concept-targeting tools; required unless concept_id is used"`
+	ConceptID string `json:"concept_id,omitempty" jsonschema:"deprecated compatibility alias for concept; prefer concept"`
+	DomainID  string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
 func registerCheckMastery(server *mcp.Server, deps *Deps) {
@@ -32,7 +33,12 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		if params.Concept == "" {
+		concept, err := normalizeConceptParam(params.Concept, params.ConceptID)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if concept == "" {
 			r, _ := errorResult("concept is required")
 			return r, nil, nil
 		}
@@ -49,14 +55,14 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			if err := validateConceptInDomain(domain, params.Concept); err != nil {
+			if err := validateConceptInDomain(domain, concept); err != nil {
 				r, _ := errorResult(err.Error())
 				return r, nil, nil
 			}
 			domainID = domain.ID
 		}
 
-		cs, err := deps.Store.GetConceptState(learnerID, params.Concept)
+		cs, err := deps.Store.GetConceptState(learnerID, concept)
 		if err != nil {
 			deps.Logger.Error("check_mastery: failed to get concept state", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("concept state not found: %v", err))
@@ -65,23 +71,23 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 
 		bktState := algorithms.BKTState{PMastery: cs.PMastery}
 		bktMastered := algorithms.BKTIsMastered(bktState)
-		recent, err := deps.Store.GetRecentInteractions(learnerID, params.Concept, 50)
+		recent, err := deps.Store.GetRecentInteractions(learnerID, concept, 50)
 		if err != nil {
-			deps.Logger.Error("check_mastery: failed to get recent interactions", "err", err, "learner", learnerID, "concept", params.Concept)
+			deps.Logger.Error("check_mastery: failed to get recent interactions", "err", err, "learner", learnerID, "concept", concept)
 			r, _ := errorResult(fmt.Sprintf("failed to compute mastery evidence: %v", err))
 			return r, nil, nil
 		}
 		recent = filterInteractionsByDomainID(recent, domainID)
 		now := time.Now().UTC()
-		evidenceProfile := engine.BuildEvidenceProfile(learnerID, params.Concept, recent, now)
+		evidenceProfile := engine.BuildEvidenceProfile(learnerID, concept, recent, now)
 		evidenceQuality := engine.MasteryEvidenceQuality(evidenceProfile)
 		uncertainty := engine.ComputeMasteryUncertainty(cs, recent, engine.MasteryEvidenceProfile{Now: now})
-		transferRecords, err := deps.Store.GetTransferScores(learnerID, params.Concept)
+		transferRecords, err := deps.Store.GetTransferScores(learnerID, concept)
 		if err != nil {
-			deps.Logger.Warn("check_mastery: transfer profile fetch failed", "err", err, "learner", learnerID, "concept", params.Concept)
+			deps.Logger.Warn("check_mastery: transfer profile fetch failed", "err", err, "learner", learnerID, "concept", concept)
 			transferRecords = nil
 		}
-		transferProfile := engine.BuildTransferProfile(params.Concept, transferRecords)
+		transferProfile := engine.BuildTransferProfile(concept, transferRecords)
 		evidenceOK := evidenceQuality.Quality != engine.EvidenceQualityWeak
 		uncertaintyOK := uncertainty.ConfidenceLabel != engine.MasteryConfidenceLow
 		transferOK := transferProfile.ReadinessLabel != engine.TransferReadinessBlocked
@@ -101,6 +107,7 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 			r, _ := jsonResult(map[string]interface{}{
 				"mastery_ready":       false,
 				"bkt_mastery_ready":   bktMastered,
+				"mastery":             cs.PMastery,
 				"current_mastery":     cs.PMastery,
 				"threshold":           algorithms.MasteryBKT(),
 				"evidence_profile":    evidenceProfile,
@@ -115,6 +122,7 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 		r, _ := jsonResult(map[string]interface{}{
 			"mastery_ready":       true,
 			"bkt_mastery_ready":   bktMastered,
+			"mastery":             cs.PMastery,
 			"current_mastery":     cs.PMastery,
 			"evidence_profile":    evidenceProfile,
 			"evidence_quality":    evidenceQuality,
@@ -126,7 +134,7 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 						"The learner must build something complete that demonstrates transfer. "+
 						"Evaluate: autonomous application, edge-case handling, code quality. "+
 						"Do not guide - observe whether the learner can apply the concept alone.",
-					params.Concept,
+					concept,
 				),
 				"evaluation_criteria": []string{
 					"Application autonome sans aide",

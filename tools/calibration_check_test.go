@@ -11,7 +11,7 @@ import (
 func TestCalibrationCheck_NoAuth(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerCalibrationCheck, "", "calibration_check", map[string]any{
-		"concept_id":        "x",
+		"concept":           "x",
 		"predicted_mastery": 3.0,
 	})
 	if !res.IsError {
@@ -19,13 +19,13 @@ func TestCalibrationCheck_NoAuth(t *testing.T) {
 	}
 }
 
-func TestCalibrationCheck_MissingConceptID(t *testing.T) {
+func TestCalibrationCheck_MissingConcept(t *testing.T) {
 	_, deps := setupToolsTest(t)
 	res := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
-		"concept_id":        "",
+		"concept":           "",
 		"predicted_mastery": 3.0,
 	})
-	if !res.IsError || !strings.Contains(resultText(res), "concept_id is required") {
+	if !res.IsError || !strings.Contains(resultText(res), "concept is required") {
 		t.Fatalf("got %q", resultText(res))
 	}
 }
@@ -34,7 +34,7 @@ func TestCalibrationCheck_HappyPath(t *testing.T) {
 	store, deps := setupToolsTest(t)
 
 	res := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
-		"concept_id":        "calc",
+		"concept":           "calc",
 		"predicted_mastery": 4.0, // → predicted = 0.75
 	})
 	if res.IsError {
@@ -61,13 +61,34 @@ func TestCalibrationCheck_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCalibrationCheck_AcceptsLegacyConceptID(t *testing.T) {
+	store, deps := setupToolsTest(t)
+
+	res := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
+		"concept_id":        "legacy_calc",
+		"predicted_mastery": 3.0,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	pid, _ := out["prediction_id"].(string)
+	rec, err := store.GetCalibrationRecord(pid, "L_owner")
+	if err != nil {
+		t.Fatalf("GetCalibrationRecord: %v", err)
+	}
+	if rec.ConceptID != "legacy_calc" {
+		t.Fatalf("expected legacy concept_id to be recorded, got %q", rec.ConceptID)
+	}
+}
+
 func TestCalibrationCheck_RejectsOutOfRangePredictedMastery(t *testing.T) {
 	store, deps := setupToolsTest(t)
 
 	// Out-of-range high — we no longer silently clamp, because clamping a
 	// hallucinated 100.0 to 1.0 corrupts the calibration record. Reject.
 	high := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
-		"concept_id":        "high",
+		"concept":           "high",
 		"predicted_mastery": 100.0,
 	})
 	if !high.IsError {
@@ -79,7 +100,7 @@ func TestCalibrationCheck_RejectsOutOfRangePredictedMastery(t *testing.T) {
 
 	// Out-of-range low.
 	low := callTool(t, deps, registerCalibrationCheck, "L_owner", "calibration_check", map[string]any{
-		"concept_id":        "low",
+		"concept":           "low",
 		"predicted_mastery": -100.0,
 	})
 	if !low.IsError {
