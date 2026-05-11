@@ -23,8 +23,8 @@ func TestEnqueueMirrorWebhook_PersistsAndDedups(t *testing.T) {
 
 	mirror := &models.MirrorMessage{
 		Pattern:      "hint_overuse",
-		Message:      "Tu demandes souvent des indices sur des concepts maitrises.",
-		OpenQuestion: "Reflexe ou flou ?",
+		Message:      "You often ask for hints on concepts you have mastered.",
+		OpenQuestion: "Reflex or unclear?",
 	}
 	now := time.Now().UTC()
 
@@ -245,8 +245,8 @@ func TestEnqueueMirrorWebhook_ThenSchedulerSeesDedup(t *testing.T) {
 
 	mirror := &models.MirrorMessage{
 		Pattern:      "dependency_increasing",
-		Message:      "Ton score d'autonomie a baisse.",
-		OpenQuestion: "Plus de guidage ?",
+		Message:      "Your autonomy score has dropped.",
+		OpenQuestion: "More guidance?",
 	}
 	if _, _, err := EnqueueMirrorWebhook(store, learnerID, mirror, time.Now().UTC()); err != nil {
 		t.Fatalf("EnqueueMirrorWebhook: %v", err)

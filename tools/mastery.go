@@ -60,10 +60,10 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 			"current_mastery": cs.PMastery,
 			"challenge": map[string]interface{}{
 				"prompt_for_llm": fmt.Sprintf(
-					"Genere un mastery challenge sur %s. "+
-						"L'apprenant doit construire quelque chose de complet qui demontre le transfert. "+
-						"Evalue: application autonome, gestion des cas limites, qualite du code. "+
-						"Ne guide pas — observe si l'apprenant peut appliquer seul.",
+					"Generate a mastery challenge on %s. "+
+						"The learner must build something complete that demonstrates transfer. "+
+						"Evaluate: autonomous application, edge-case handling, code quality. "+
+						"Do not guide - observe whether the learner can apply the concept alone.",
 					params.Concept,
 				),
 				"evaluation_criteria": []string{

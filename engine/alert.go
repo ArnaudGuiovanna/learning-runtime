@@ -52,7 +52,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 				Urgency:            urgency,
 				Retention:          retention,
 				HoursUntilCritical: hoursLeft,
-				RecommendedAction:  fmt.Sprintf("revision immediate · %d minutes", estimateReviewMinutes(cs)),
+				RecommendedAction:  fmt.Sprintf("immediate review - %d minutes", estimateReviewMinutes(cs)),
 			})
 		}
 
@@ -91,7 +91,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 			errorRate := float64(streak) / float64(streak+1)
 
 			// Analyze error types for richer recommendation
-			recommendedAction := "reduire la difficulte"
+			recommendedAction := "reduce difficulty"
 			errorTypeCounts := make(map[string]int)
 			for _, i := range recentInteractions {
 				if i.Concept == concept && !i.Success && i.ErrorType != "" {
@@ -99,11 +99,11 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 				}
 			}
 			if errorTypeCounts["KNOWLEDGE_GAP"] >= 3 {
-				recommendedAction = "reduire la difficulte · lacune conceptuelle — revisiter les fondamentaux"
+				recommendedAction = "reduce difficulty - conceptual gap - revisit the fundamentals"
 			} else if errorTypeCounts["LOGIC_ERROR"] >= 3 {
-				recommendedAction = "reduire la difficulte · erreurs de logique recurrentes — exercices de raisonnement"
+				recommendedAction = "reduce difficulty - recurring logic errors - reasoning exercises"
 			} else if errorTypeCounts["SYNTAX_ERROR"] >= 3 {
-				recommendedAction = "reduire la difficulte · erreurs de syntaxe recurrentes — exercices de pratique"
+				recommendedAction = "reduce difficulty - recurring syntax errors - practice exercises"
 			}
 
 			alerts = append(alerts, models.Alert{
@@ -136,7 +136,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 				Concept:           cs.Concept,
 				Urgency:           models.UrgencyInfo,
 				ErrorRate:         1.0 - pCorrect,
-				RecommendedAction: fmt.Sprintf("IRT: probabilite de reussite a %.0f%% — difficulte a reduire", pCorrect*100),
+				RecommendedAction: fmt.Sprintf("IRT: success probability at %.0f%% - reduce difficulty", pCorrect*100),
 			})
 		}
 	}
@@ -160,7 +160,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 					Concept:           concept,
 					Urgency:           models.UrgencyWarning,
 					SessionsStalled:   len(interactions),
-					RecommendedAction: "changer de format · cas reel a debugger",
+					RecommendedAction: "change format - real-world case to debug",
 				})
 			}
 		}

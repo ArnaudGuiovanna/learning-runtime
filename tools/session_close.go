@@ -44,7 +44,7 @@ func registerRecordSessionClose(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			deps.Logger.Info("record_session_close: no active domain — needs setup", "learner", learnerID)
+			deps.Logger.Info("record_session_close: no active domain - needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
@@ -153,7 +153,7 @@ func buildRecapBrief(deps *Deps, learnerID string, domain *models.Domain) *model
 		"and wait for the answer to call record_session_close again with implementation_intention. " +
 		"Then call get_olm_snapshot to retrieve the learner's structured cognitive state, " +
 		"and call queue_webhook_message 3 times: daily_motivation for tomorrow at 8h UTC (warm, tied to personal_goal) ; " +
-		"olm:<domain_id> for tomorrow at 13h UTC (factual — distribution + focus + ONE metacog line if active + progress toward goal — no pep talk, content must MATCH the get_olm_snapshot snapshot) ; " +
+		"olm:<domain_id> for tomorrow at 13h UTC (factual - distribution + focus + ONE metacog line if active + progress toward goal - no pep talk, content must MATCH the get_olm_snapshot snapshot) ; " +
 		"daily_recap for tomorrow at 21h UTC (gentle recap). " +
 		"No raw KPIs."
 

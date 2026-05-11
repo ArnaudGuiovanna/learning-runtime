@@ -88,13 +88,13 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 		}
 
 		// Build opening message
-		openingMessage := fmt.Sprintf("Jour %d", dayNumber)
+		openingMessage := fmt.Sprintf("Day %d", dayNumber)
 		if learner.Objective != "" {
-			openingMessage += fmt.Sprintf(" · Objectif: %s", learner.Objective)
+			openingMessage += fmt.Sprintf(" - Goal: %s", learner.Objective)
 		}
-		openingMessage += fmt.Sprintf(" · %s", lastSessionInfo)
+		openingMessage += fmt.Sprintf(" - %s", lastSessionInfo)
 		if priorityConcept != "" {
-			openingMessage += fmt.Sprintf(" · Priorite: %s (retention %.0f%%)", priorityConcept, priorityRetention*100)
+			openingMessage += fmt.Sprintf(" - Priority: %s (retention %.0f%%)", priorityConcept, priorityRetention*100)
 		}
 
 		// List active domains for multi-domain awareness

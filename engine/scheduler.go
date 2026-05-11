@@ -224,11 +224,11 @@ func (s *Scheduler) dispatchQueued(kind, alertTag string, fallback func(*models.
 func queueKindTitle(kind string) string {
 	switch kind {
 	case "daily_motivation":
-		return "☀️ Bonjour"
+		return "☀️ Good morning"
 	case "daily_recap":
-		return "🌙 Ce soir"
+		return "🌙 Tonight"
 	case "reactivation":
-		return "👋 Reprends quand tu veux"
+		return "👋 Come back whenever you want"
 	case "reminder":
 		return "📚 Note"
 	}
@@ -251,16 +251,16 @@ func queueKindColor(kind string) int {
 
 func fallbackDailyMotivation(_ *models.Learner) discordPayload {
 	return discordPayload{Embeds: []discordEmbed{{
-		Title:       "☀️ Bonjour",
-		Description: "Meme 5 minutes aujourd'hui, ca tient la trajectoire. Reviens quand tu veux.",
+		Title:       "☀️ Good morning",
+		Description: "Even 5 minutes today keeps the trajectory. Come back whenever you want.",
 		Color:       0x5865F2,
 	}}}
 }
 
 func fallbackDailyRecap(_ *models.Learner) discordPayload {
 	return discordPayload{Embeds: []discordEmbed{{
-		Title:       "🌙 Ce soir",
-		Description: "Si tu passes, on continue. Sinon, a demain.",
+		Title:       "🌙 Tonight",
+		Description: "If you stop by, we keep going. Otherwise, see you tomorrow.",
 		Color:       0x57F287,
 	}}}
 }
@@ -539,7 +539,7 @@ func mirrorEmbedFromContent(content string) discordEmbed {
 		}
 	}
 	return discordEmbed{
-		Title:       "🪞 Reflet du jour",
+		Title:       "🪞 Mirror of the day",
 		Description: desc,
 		Color:       0x9B59B6,
 	}

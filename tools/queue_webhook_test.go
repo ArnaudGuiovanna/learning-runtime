@@ -100,7 +100,7 @@ func TestQueueWebhookMessage_HappyPath(t *testing.T) {
 		"kind":          "daily_motivation",
 		"scheduled_for": "2026-05-03T08:00:00Z",
 		"expires_at":    "2026-05-03T20:00:00Z",
-		"content":       "Bonjour, garde le cap.",
+		"content":       "Good morning, stay the course.",
 		"priority":      5,
 	})
 	if res.IsError {
@@ -122,7 +122,7 @@ func TestQueueWebhookMessage_HappyPath(t *testing.T) {
 	if len(pending) != 1 {
 		t.Fatalf("expected 1 pending message, got %d", len(pending))
 	}
-	if pending[0].Content != "Bonjour, garde le cap." {
+	if pending[0].Content != "Good morning, stay the course." {
 		t.Fatalf("content mismatch: %q", pending[0].Content)
 	}
 	if pending[0].Priority != 5 {

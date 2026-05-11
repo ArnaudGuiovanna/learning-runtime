@@ -84,7 +84,7 @@ func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			deps.Logger.Info("set_goal_relevance: no active domain — needs setup", "learner", learnerID)
+			deps.Logger.Info("set_goal_relevance: no active domain - needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
@@ -97,7 +97,7 @@ func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
 		}
 		for k := range params.Relevance {
 			if !known[k] {
-				r, _ := errorResult(fmt.Sprintf("unknown concept %q — not present in domain %q (call get_learner_context to see the concept list)", k, domain.ID))
+				r, _ := errorResult(fmt.Sprintf("unknown concept %q - not present in domain %q (call get_learner_context to see the concept list)", k, domain.ID))
 				return r, nil, nil
 			}
 		}
@@ -190,7 +190,7 @@ func registerGetGoalRelevance(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			deps.Logger.Info("get_goal_relevance: no active domain — needs setup", "learner", learnerID)
+			deps.Logger.Info("get_goal_relevance: no active domain - needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}

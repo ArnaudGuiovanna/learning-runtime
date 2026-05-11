@@ -21,8 +21,8 @@ func registerGetMetacognitiveMirror(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_metacognitive_mirror",
 		Description: "Return a factual mirror message if a dependency pattern is consolidated over the last 7 days, otherwise mirror=null. On-demand metacognitive reflection tool. " +
-			"When to call: ONLY outside the activity cycle — for example, on an explicit request for a metacognitive review, or when the learner asks about their own learning patterns. " +
-			"When NOT to call: if get_next_activity was already called in the same turn, the mirror is already present in its metacognitive_mirror key — a second call here duplicates work (same computation, same webhook queue deduplicated per day). " +
+			"When to call: ONLY outside the activity cycle - for example, on an explicit request for a metacognitive review, or when the learner asks about their own learning patterns. " +
+			"When NOT to call: if get_next_activity was already called in the same turn, the mirror is already present in its metacognitive_mirror key - a second call here duplicates work (same computation, same webhook queue deduplicated per day). " +
 			"Precondition: none; if no pattern is detected, mirror=null is returned without error. " +
 			"Returns: {mirror: <object or null>}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetMetacognitiveMirrorParams) (*mcp.CallToolResult, any, error) {

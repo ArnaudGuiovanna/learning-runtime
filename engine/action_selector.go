@@ -279,7 +279,7 @@ func selectHighMasteryAction(history ActionHistory) Action {
 			DifficultyTarget: 0.75,
 			Format:           "build_challenge",
 			EstimatedMinutes: 45,
-			Rationale:        "mastery stable : nouveau cycle challenge",
+			Rationale:        "mastery stable: new challenge cycle",
 		}
 	}
 }

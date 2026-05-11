@@ -186,7 +186,7 @@ func selectInstruction(
 		return Selection{
 			NoFringe:  true,
 			Phase:     models.PhaseInstruction,
-			Rationale: "frange externe vide : tout maitrise ou prereqs absents",
+			Rationale: "outer fringe empty: everything mastered or prereqs missing",
 		}
 	}
 
@@ -218,7 +218,7 @@ func selectInstruction(
 		return Selection{
 			NoFringe:  true,
 			Phase:     models.PhaseInstruction,
-			Rationale: "frange non vide mais aucun concept couvert par goal_relevance — appeler set_goal_relevance",
+			Rationale: "fringe non-empty but no concept covered by goal_relevance - call set_goal_relevance",
 		}
 	}
 	return Selection{
@@ -289,7 +289,7 @@ func selectMaintenance(
 		return Selection{
 			NoFringe:  true,
 			Phase:     models.PhaseMaintenance,
-			Rationale: "aucun concept maitrise : MAINTENANCE non applicable",
+			Rationale: "no mastered concept: MAINTENANCE not applicable",
 		}
 	}
 	sort.Slice(mastered, func(i, j int) bool {
@@ -327,7 +327,7 @@ func selectMaintenance(
 		return Selection{
 			NoFringe:  true,
 			Phase:     models.PhaseMaintenance,
-			Rationale: "concepts maitrises mais aucun couvert par goal_relevance — appeler set_goal_relevance",
+			Rationale: "mastered concepts but none covered by goal_relevance - call set_goal_relevance",
 		}
 	}
 	return Selection{

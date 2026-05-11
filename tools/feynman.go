@@ -64,7 +64,7 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 
 		promptText := fmt.Sprintf(
 			"Explain the concept '%s' as if you were teaching it to someone who knows nothing about it. "+
-				"No technical jargon — use analogies and concrete examples. "+
+				"No technical jargon - use analogies and concrete examples. "+
 				"The goal is to verify that you truly understood it, not just that you can recite it.\n\n"+
 				"After your explanation, I will identify the fuzzy or incomplete points "+
 				"and turn them into micro-concepts to work on.",

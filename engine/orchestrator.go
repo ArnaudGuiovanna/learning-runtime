@@ -427,8 +427,8 @@ func composeActivity(a Action, sel Selection, phase models.Phase) models.Activit
 		DifficultyTarget: a.DifficultyTarget,
 		Format:           a.Format,
 		EstimatedMinutes: a.EstimatedMinutes,
-		Rationale:        fmt.Sprintf("[phase=%s] %s · %s", phase, sel.Rationale, a.Rationale),
-		PromptForLLM:     fmt.Sprintf("Genere une activite %s sur %s. Format: %s. Difficulte cible: %.2f.", a.Type, sel.Concept, a.Format, a.DifficultyTarget),
+		Rationale:        fmt.Sprintf("[phase=%s] %s - %s", phase, sel.Rationale, a.Rationale),
+		PromptForLLM:     fmt.Sprintf("Generate a %s activity on %s. Format: %s. Target difficulty: %.2f.", a.Type, sel.Concept, a.Format, a.DifficultyTarget),
 	}
 }
 
