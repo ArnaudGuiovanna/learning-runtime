@@ -15,20 +15,20 @@ import (
 )
 
 type ImplementationIntentionInput struct {
-	Trigger      string `json:"trigger" jsonschema:"Clause 'quand' (ex: 'demain matin au café')"`
-	Action       string `json:"action" jsonschema:"Clause 'alors je' (ex: 'ferai 1 exercice de dérivées')"`
-	ScheduledFor string `json:"scheduled_for,omitempty" jsonschema:"ISO 8601 timestamp optionnel (UTC)"`
+	Trigger      string `json:"trigger" jsonschema:"'when' clause (e.g. 'tomorrow morning at the coffee shop')"`
+	Action       string `json:"action" jsonschema:"'then I will' clause (e.g. 'do 1 derivatives exercise')"`
+	ScheduledFor string `json:"scheduled_for,omitempty" jsonschema:"optional ISO 8601 timestamp (UTC)"`
 }
 
 type RecordSessionCloseParams struct {
-	DomainID                 string                        `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
-	ImplementationIntention  *ImplementationIntentionInput `json:"implementation_intention,omitempty" jsonschema:"Engagement if-then optionnel (Gollwitzer)"`
+	DomainID                string                        `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
+	ImplementationIntention *ImplementationIntentionInput `json:"implementation_intention,omitempty" jsonschema:"optional if-then commitment (Gollwitzer)"`
 }
 
 func registerRecordSessionClose(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_session_close",
-		Description: "Clôture la session : enregistre optionnellement une implementation intention (if-then) et retourne des signaux structurés pour composer le message de fin (concepts pratiqués, wins, intent prompt, message queue filler).",
+		Description: "Close the session: optionally record an implementation intention (if-then) and return structured signals for composing the closing message (concepts practiced, wins, intent prompt, message queue filler).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordSessionCloseParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

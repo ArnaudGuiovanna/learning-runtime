@@ -16,11 +16,11 @@ import (
 )
 
 type QueueWebhookMessageParams struct {
-	Kind         string `json:"kind" jsonschema:"Type de nudge : daily_motivation | daily_recap | reactivation | reminder | mirror_message | olm:<domain_id> (snapshot OLM par domaine)"`
-	ScheduledFor string `json:"scheduled_for" jsonschema:"ISO 8601 timestamp UTC de la fenêtre de tir (ex: 2026-04-13T08:00:00Z)"`
-	ExpiresAt    string `json:"expires_at,omitempty" jsonschema:"ISO 8601 timestamp UTC après lequel le message ne doit plus être envoyé"`
-	Content      string `json:"content" jsonschema:"Contenu Markdown prêt à poster sur le webhook Discord (max ~300 caractères recommandé)"`
-	Priority     int    `json:"priority,omitempty" jsonschema:"Priorité (plus grand = plus prioritaire, défaut 0)"`
+	Kind         string `json:"kind" jsonschema:"nudge type: daily_motivation | daily_recap | reactivation | reminder | mirror_message | olm:<domain_id> (per-domain OLM snapshot)"`
+	ScheduledFor string `json:"scheduled_for" jsonschema:"UTC ISO 8601 timestamp for the delivery window (e.g. 2026-04-13T08:00:00Z)"`
+	ExpiresAt    string `json:"expires_at,omitempty" jsonschema:"UTC ISO 8601 timestamp after which the message must not be sent"`
+	Content      string `json:"content" jsonschema:"Markdown content ready to post to the Discord webhook (max ~300 characters recommended)"`
+	Priority     int    `json:"priority,omitempty" jsonschema:"priority (higher = more important, default 0)"`
 }
 
 const maxWebhookContentLen = 1500
@@ -28,7 +28,7 @@ const maxWebhookContentLen = 1500
 func registerQueueWebhookMessage(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "queue_webhook_message",
-		Description: "Met en queue un message de nudge que le scheduler postera sur le webhook Discord de l'apprenant à la fenêtre voulue. Le LLM compose le texte (chaleureux, sans KPI brut) ; le scheduler dispatche.",
+		Description: "Queue a nudge message that the scheduler will post to the learner's Discord webhook at the desired window. The LLM composes the text (warm, no raw KPIs); the scheduler dispatches.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params QueueWebhookMessageParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
