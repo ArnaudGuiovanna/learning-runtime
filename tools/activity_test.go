@@ -71,6 +71,12 @@ func TestGetNextActivity_HappyPath(t *testing.T) {
 	if _, ok := out["motivation_brief"]; !ok {
 		t.Fatalf("expected motivation_brief key, got %v", out)
 	}
+	if _, ok := out["mastery_evidence"]; !ok {
+		t.Fatalf("expected mastery_evidence key, got %v", out)
+	}
+	if _, ok := out["mastery_uncertainty"]; !ok {
+		t.Fatalf("expected mastery_uncertainty key, got %v", out)
+	}
 }
 
 func TestGetNextActivity_ForeignDomainFallsBackToSetup(t *testing.T) {
@@ -324,6 +330,64 @@ func BenchmarkGetNextActivity(b *testing.B) {
 	}
 }
 
+func BenchmarkGetNextActivityLargeDomain(b *testing.B) {
+	store, deps := setupBenchTools(b)
+
+	concepts := make([]string, 100)
+	relevance := make(map[string]float64, len(concepts))
+	for i := range concepts {
+		concepts[i] = fmt.Sprintf("c%03d", i)
+		relevance[concepts[i]] = 1.0 - float64(i%10)*0.03
+	}
+	d := makeBenchDomainWithConcepts(b, store, "L_owner", concepts)
+	if err := store.UpdateDomainPhase(d.ID, models.PhaseInstruction, 0, time.Now().UTC()); err != nil {
+		b.Fatalf("seed phase: %v", err)
+	}
+	if _, err := store.MergeDomainGoalRelevance(d.ID, relevance); err != nil {
+		b.Fatalf("seed goal_relevance: %v", err)
+	}
+
+	for _, c := range concepts {
+		cs := models.NewConceptState("L_owner", c)
+		cs.PMastery = 0.5
+		cs.CardState = "review"
+		cs.Stability = 30
+		cs.ElapsedDays = 1
+		if err := store.UpsertConceptState(cs); err != nil {
+			b.Fatalf("seed state %s: %v", c, err)
+		}
+	}
+
+	for i := 0; i < 1000; i++ {
+		concept := concepts[i%len(concepts)]
+		interaction := &models.Interaction{
+			LearnerID:    "L_owner",
+			Concept:      concept,
+			ActivityType: string(models.ActivityPractice),
+			Success:      i%7 != 0,
+			DomainID:     d.ID,
+		}
+		if i%10 == 0 {
+			interaction.Success = false
+			interaction.MisconceptionType = "bench_misconception"
+			interaction.MisconceptionDetail = "benchmark detail"
+		}
+		if err := store.CreateInteraction(interaction); err != nil {
+			b.Fatalf("seed interaction: %v", err)
+		}
+	}
+
+	args := map[string]any{"domain_id": d.ID}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res := callBenchTool(b, deps, "L_owner", args)
+		if res.IsError {
+			b.Fatalf("get_next_activity: %q", resultText(res))
+		}
+	}
+}
+
 // ─── Benchmark helpers (testing.B variants of setupToolsTest/callTool) ─────
 
 // benchDSNCounter avoids DSN collisions across parallel bench runs.
@@ -367,9 +431,14 @@ func setupBenchTools(b *testing.B) (*db.Store, *Deps) {
 // for the benchmark — testing.B variant of makeOwnerDomain.
 func makeBenchDomain(b *testing.B, store *db.Store, ownerID string) *models.Domain {
 	b.Helper()
+	return makeBenchDomainWithConcepts(b, store, ownerID, []string{"a", "b"})
+}
+
+func makeBenchDomainWithConcepts(b *testing.B, store *db.Store, ownerID string, concepts []string) *models.Domain {
+	b.Helper()
 	d, err := store.CreateDomainWithValueFramings(ownerID, "math", "", models.KnowledgeSpace{
-		Concepts:      []string{"a", "b"},
-		Prerequisites: map[string][]string{"b": {"a"}},
+		Concepts:      concepts,
+		Prerequisites: map[string][]string{},
 	}, "")
 	if err != nil {
 		b.Fatalf("create domain: %v", err)

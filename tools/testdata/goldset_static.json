@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "name": "false_positive_high_bkt_without_evidence",
+      "setup_p_mastery": 0.95,
+      "expect_check_mastery": {
+        "mastery_ready": false,
+        "bkt_mastery_ready": true,
+        "evidence_quality": "weak",
+        "uncertainty_label": "low"
+      }
+    },
+    {
+      "name": "recall_repetition_does_not_prove_mastery",
+      "setup_p_mastery": 0.95,
+      "records": [
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true},
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true},
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true},
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true},
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true}
+      ],
+      "expect_check_mastery": {
+        "mastery_ready": false,
+        "bkt_mastery_ready": true,
+        "evidence_quality": "weak"
+      }
+    },
+    {
+      "name": "varied_proofs_unlock_mastery",
+      "setup_p_mastery": 0.95,
+      "records": [
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true},
+        {"activity_type": "PRACTICE", "success": true, "with_rubric": true},
+        {"activity_type": "MASTERY_CHALLENGE", "success": true, "with_rubric": true}
+      ],
+      "expect_check_mastery": {
+        "mastery_ready": true,
+        "bkt_mastery_ready": true,
+        "evidence_quality": "moderate",
+        "uncertainty_label": "high"
+      }
+    },
+    {
+      "name": "strong_evidence_with_transfer_has_clean_replay",
+      "setup_p_mastery": 0.95,
+      "records": [
+        {"activity_type": "RECALL_EXERCISE", "success": true, "with_rubric": true},
+        {"activity_type": "PRACTICE", "success": true, "with_rubric": true},
+        {"activity_type": "MASTERY_CHALLENGE", "success": true, "with_rubric": true},
+        {"activity_type": "FEYNMAN_PROMPT", "success": true, "with_rubric": true},
+        {"activity_type": "TRANSFER_PROBE", "success": true, "with_rubric": true}
+      ],
+      "expect_check_mastery": {
+        "mastery_ready": true,
+        "bkt_mastery_ready": true,
+        "evidence_quality": "strong",
+        "uncertainty_label": "high"
+      },
+      "expect_replay": {
+        "total_snapshots": 5,
+        "missing_rubric_evidence_count": 0,
+        "transfer_after_mastery_gap_count": 0,
+        "snapshot_json_issue_count": 0
+      }
+    },
+    {
+      "name": "replay_flags_missing_rubric_and_transfer_gap",
+      "setup_p_mastery": 0.95,
+      "records": [
+        {"activity_type": "PRACTICE", "success": true, "with_rubric": false}
+      ],
+      "expect_replay": {
+        "total_snapshots": 1,
+        "missing_rubric_evidence_count": 1,
+        "transfer_after_mastery_gap_count": 1,
+        "snapshot_json_issue_count": 0
+      }
+    }
+  ]
+}
