@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -31,11 +32,17 @@ func main() {
 	}))
 
 	port := os.Getenv("PORT")
-	if port == "" { port = "3000" }
+	if port == "" {
+		port = "3000"
+	}
 	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" { dbPath = "./data/runtime.db" }
+	if dbPath == "" {
+		dbPath = "./data/runtime.db"
+	}
 	baseURL := os.Getenv("BASE_URL")
-	if baseURL == "" { baseURL = fmt.Sprintf("http://localhost:%s", port) }
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%s", port)
+	}
 
 	// Init JWT
 	if err := auth.LoadJWTSecret(); err != nil {
@@ -102,9 +109,11 @@ func main() {
 	// public but TRUSTED_PROXY_CIDRS is unset — without it every request shares
 	// one bucket under the proxy's loopback IP (issue #37).
 	auth.WarnRateLimiterMisconfig(baseURL)
-	authLimiter := auth.NewRateLimiter(10.0/60, 10)       // 10/min for auth endpoints
-	registerLimiter := auth.NewRateLimiter(5.0/60, 5)     // 5/min for client registration
-	mcpLimiter := auth.NewRateLimiter(20.0/60, 20)        // 20/min for MCP API
+	authLimiter := auth.NewRateLimiter(10.0/60, 10)   // 10/min for auth endpoints
+	registerLimiter := auth.NewRateLimiter(5.0/60, 5) // 5/min for client registration
+	mcpRatePerMinute := envFloat("MCP_RATE_LIMIT_PER_MIN", 60)
+	mcpBurst := envInt("MCP_RATE_LIMIT_BURST", 60)
+	mcpLimiter := auth.NewRateLimiter(mcpRatePerMinute/60, mcpBurst)
 	defer authLimiter.Stop()
 	defer registerLimiter.Stop()
 	defer mcpLimiter.Stop()
@@ -183,9 +192,16 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rec, r)
-		logger.Info("request", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ua", r.UserAgent())
+		logger.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"ua", r.UserAgent(),
+		)
 	})
 }
 
@@ -261,9 +277,37 @@ func recoveryMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 
 func parseLogLevel(level string) slog.Level {
 	switch level {
-	case "debug": return slog.LevelDebug
-	case "warn": return slog.LevelWarn
-	case "error": return slog.LevelError
-	default: return slog.LevelInfo
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
+}
+
+func envFloat(key string, fallback float64) float64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+func envInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }

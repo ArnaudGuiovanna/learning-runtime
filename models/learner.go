@@ -56,18 +56,18 @@ func NewConceptState(learnerID, concept string) *ConceptState {
 }
 
 type Interaction struct {
-	ID           int64
-	LearnerID    string
-	Concept      string
-	ActivityType string
-	Success      bool
-	ResponseTime int
-	Confidence   float64
-	ErrorType         string
-	Notes             string
-	HintsRequested    int
-	SelfInitiated     bool
-	CalibrationID     string
+	ID                  int64
+	LearnerID           string
+	Concept             string
+	ActivityType        string
+	Success             bool
+	ResponseTime        int
+	Confidence          float64
+	ErrorType           string
+	Notes               string
+	HintsRequested      int
+	SelfInitiated       bool
+	CalibrationID       string
 	IsProactiveReview   bool
 	MisconceptionType   string
 	MisconceptionDetail string
@@ -78,9 +78,11 @@ type Interaction struct {
 	// BKT update for this observation, so the run can be replayed
 	// deterministically. Pointers so a NULL on pre-issue-#51 rows stays
 	// distinguishable from a legitimate zero. See issue #51 / #8.
-	BKTSlip             *float64
-	BKTGuess            *float64
-	CreatedAt           time.Time
+	BKTSlip         *float64
+	BKTGuess        *float64
+	RubricJSON      string
+	RubricScoreJSON string
+	CreatedAt       time.Time
 }
 
 type RefreshToken struct {

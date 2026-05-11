@@ -96,6 +96,11 @@ var alterMigrations = []string{
 	// column unreachable. Drop it so the schema reflects what the
 	// runtime actually uses. Forward-only.
 	`ALTER TABLE domains DROP COLUMN pinned_concept`,
+	// Structured rubrics supplied by the LLM-side grader. Stored as
+	// compact JSON strings so later pedagogical snapshots can replay the
+	// scoring evidence instead of only the boolean success flag.
+	`ALTER TABLE interactions ADD COLUMN rubric_json TEXT`,
+	`ALTER TABLE interactions ADD COLUMN rubric_score_json TEXT`,
 }
 
 // idempotentMigrations are CREATE TABLE/INDEX IF NOT EXISTS statements that
@@ -183,6 +188,21 @@ var idempotentMigrations = []string{
 )`,
 	`CREATE INDEX IF NOT EXISTS idx_impl_intent_learner ON implementation_intentions(learner_id, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_wmq_dispatch ON webhook_message_queue(learner_id, kind, status, scheduled_for)`,
+	`CREATE TABLE IF NOT EXISTS pedagogical_snapshots (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    interaction_id    INTEGER NOT NULL REFERENCES interactions(id),
+    learner_id        TEXT    NOT NULL REFERENCES learners(id),
+    domain_id         TEXT    NOT NULL,
+    concept           TEXT    NOT NULL,
+    activity_type     TEXT    NOT NULL,
+    before_json       TEXT    NOT NULL,
+    observation_json  TEXT    NOT NULL,
+    after_json        TEXT    NOT NULL,
+    decision_json     TEXT    NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_pedagogical_snapshots_learner_created ON pedagogical_snapshots(learner_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_pedagogical_snapshots_domain_concept ON pedagogical_snapshots(learner_id, domain_id, concept, created_at)`,
 }
 
 // Migrate brings the database schema up to the version expected by this build.

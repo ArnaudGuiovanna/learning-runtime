@@ -63,8 +63,14 @@ func TestTransferChallenge_DefaultContextType(t *testing.T) {
 		t.Fatalf("got %q", resultText(res))
 	}
 	out := decodeResult(t, res)
-	if out["context_type"] != "real_world" {
-		t.Fatalf("expected default context_type=real_world, got %v", out["context_type"])
+	if out["context_type"] != "near" {
+		t.Fatalf("expected default context_type=near, got %v", out["context_type"])
+	}
+	if out["transfer_dimension"] != "near" {
+		t.Fatalf("expected transfer_dimension=near, got %v", out["transfer_dimension"])
+	}
+	if _, ok := out["transfer_profile"].(map[string]any); !ok {
+		t.Fatalf("expected transfer_profile, got %v", out["transfer_profile"])
 	}
 }
 
@@ -123,6 +129,16 @@ func TestRecordTransferResult_HappyPath(t *testing.T) {
 	}
 	if out["blocked"] != false {
 		t.Fatalf("expected blocked=false for 0.7, got %v", out["blocked"])
+	}
+	if out["transfer_dimension"] != "far" {
+		t.Fatalf("expected real_world to normalize to transfer_dimension=far, got %v", out["transfer_dimension"])
+	}
+	profile, ok := out["transfer_profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected transfer_profile, got %v", out["transfer_profile"])
+	}
+	if profile["readiness_label"] == "" {
+		t.Fatalf("expected readiness_label in transfer_profile, got %v", profile)
 	}
 
 	// DB state — record persisted.
@@ -234,11 +250,11 @@ func TestRecordTransferResult_RejectsUnknownContextType(t *testing.T) {
 	}
 }
 
-// Issue #96: each of the five documented context_type enum values must be
+// Issue #96: each documented context_type enum value must be
 // accepted. Table-driven so a future schema drift shows up as a single
 // failing row rather than an opaque enum-mismatch.
 func TestRecordTransferResult_AllowsKnownContextTypes(t *testing.T) {
-	for _, ct := range []string{"real_world", "interview", "teaching", "debugging", "creative"} {
+	for _, ct := range []string{"near", "far", "real_world", "interview", "teaching", "debugging", "creative"} {
 		ct := ct
 		t.Run(ct, func(t *testing.T) {
 			store, deps := setupToolsTest(t)

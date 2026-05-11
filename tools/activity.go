@@ -7,8 +7,10 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"tutor-mcp/algorithms"
 	"tutor-mcp/engine"
 	"tutor-mcp/models"
 
@@ -23,11 +25,12 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_next_activity",
 		Description: "Determine the next optimal activity for the learner and aggregate all routing context: metacognitive_mirror, tutor_mode, motivation_brief, active misconceptions. Accounts for the current session to avoid repeating the same concept. " +
-			"When to call: AFTER get_pending_alerts, once no critical alert is blocking progress and the learner has an active domain. This is the main tool of the learning cycle. " +
-			"When NOT to call: if get_pending_alerts returned needs_domain_setup=true (call init_domain first); do not call get_metacognitive_mirror in the same turn - the mirror is already included in the metacognitive_mirror key of the response. " +
+			"When to call: this is the main tool of the learning cycle; it already includes alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief. " +
+			"When NOT to call: if another tool just returned needs_domain_setup=true (call init_domain first); do not call get_pending_alerts or get_metacognitive_mirror in the same turn unless the learner explicitly asks for those raw views. " +
 			"Precondition: a domain must exist; otherwise needs_domain_setup=true is returned with a setup_domain activity. " +
-			"Returns: {needs_domain_setup, domain_id, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief}.",
+			"Returns: {needs_domain_setup, domain_id, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetNextActivityParams) (*mcp.CallToolResult, any, error) {
+		totalStart := time.Now()
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
 			deps.Logger.Error("get_next_activity: auth failed", "err", err)
@@ -36,7 +39,9 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 
 		// Check if domain exists
+		domainStart := time.Now()
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
+		domainMs := time.Since(domainStart).Milliseconds()
 		if err != nil || domain == nil {
 			r, _ := jsonResult(map[string]interface{}{
 				"needs_domain_setup": true,
@@ -49,6 +54,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		prefetchStart := time.Now()
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, engine.DefaultRecentInteractionsWindow)
 		sessionStart, _ := deps.Store.GetSessionStart(learnerID)
@@ -92,16 +98,19 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				sessionConcepts[i.Concept]++
 			}
 		}
+		prefetchMs := time.Since(prefetchStart).Milliseconds()
 
 		// Route to next activity through the regulation pipeline.
 		// OrchestrateWithPhase returns the post-orchestrate phase so we
 		// can audit-log it without re-reading the domain row (perf #91).
+		orchestratorStart := time.Now()
 		activity, orchPhase, orchErr := engine.OrchestrateWithPhase(deps.Store, engine.OrchestratorInput{
 			LearnerID: learnerID,
 			DomainID:  domain.ID,
 			Now:       time.Now().UTC(),
 			Config:    engine.NewDefaultPhaseConfig(),
 		})
+		orchestratorMs := time.Since(orchestratorStart).Milliseconds()
 		if orchErr != nil {
 			deps.Logger.Error("orchestrator failed", "err", orchErr, "learner", learnerID, "domain", domain.ID)
 			r, _ := errorResult("could not compute next activity")
@@ -139,6 +148,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		)
 
 		// Metacognitive mirror
+		mirrorStart := time.Now()
 		since := time.Now().UTC().Add(-7 * 24 * time.Hour)
 		allInteractions, _ := deps.Store.GetInteractionsSince(learnerID, since)
 		calibBias, _ := deps.Store.GetCalibrationBias(learnerID, 20)
@@ -167,6 +177,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				deps.Logger.Warn("get_next_activity: mirror enqueue failed", "err", err, "learner", learnerID)
 			}
 		}
+		mirrorMs := time.Since(mirrorStart).Milliseconds()
 
 		// Tutor mode
 		var currentAffect *models.AffectState
@@ -201,6 +212,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 
 		// Misconception enrichment for selected concept
+		enrichmentStart := time.Now()
 		var activeMisconceptions any = []any{}
 		var knownMisconceptionTypes any = []string{}
 
@@ -227,9 +239,11 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				knownMisconceptionTypes = types
 			}
 		}
+		enrichmentMs := time.Since(enrichmentStart).Milliseconds()
 
 		// Motivation layer — compose a context-adaptive brief for this activity.
 		// Detect plateau active on the chosen concept from the alerts list.
+		motivationStart := time.Now()
 		plateauActive := false
 		for _, a := range alerts {
 			if a.Type == models.AlertPlateau && a.Concept == activity.Concept {
@@ -242,6 +256,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			learnerID, domain, activity.Concept, activity.Type,
 			plateauActive, len(sessionConcepts),
 		)
+		motivationMs := time.Since(motivationStart).Milliseconds()
 
 		// [6] FadeController — post-decision module gated on
 		// REGULATION_FADE=on (default OFF). Maps autonomy
@@ -267,6 +282,44 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			extra["autonomy_trend"] = string(trend)
 		}
 
+		diagnosticsStart := time.Now()
+		var masteryEvidence any = map[string]any{}
+		var masteryUncertainty any = map[string]any{}
+		var transferProfile any = map[string]any{}
+		var raschEloCalibration any = map[string]any{}
+		if activity.Concept != "" {
+			var selectedState *models.ConceptState
+			for _, cs := range domainStates {
+				if cs.Concept == activity.Concept {
+					selectedState = cs
+					break
+				}
+			}
+			conceptInteractions, err := deps.Store.GetRecentInteractions(learnerID, activity.Concept, 50)
+			if err != nil {
+				deps.Logger.Warn("get_next_activity: mastery diagnostics fetch failed", "err", err, "learner", learnerID, "concept", activity.Concept)
+			} else {
+				conceptInteractions = filterInteractionsByDomainID(conceptInteractions, domain.ID)
+				now := time.Now().UTC()
+				profile := engine.BuildEvidenceProfile(learnerID, activity.Concept, conceptInteractions, now)
+				masteryEvidence = map[string]any{
+					"profile": profile,
+					"quality": engine.MasteryEvidenceQuality(profile),
+				}
+				masteryUncertainty = engine.ComputeMasteryUncertainty(selectedState, conceptInteractions, engine.MasteryEvidenceProfile{Now: now})
+			}
+			if selectedState != nil {
+				raschState := algorithms.NewRaschEloState(selectedState.Theta, algorithms.FSRSDifficultyToIRT(selectedState.Difficulty))
+				raschEloCalibration = raschEloStateSnapshot(raschState)
+			}
+			if transferRecords, err := deps.Store.GetTransferScores(learnerID, activity.Concept); err != nil {
+				deps.Logger.Warn("get_next_activity: transfer diagnostics fetch failed", "err", err, "learner", learnerID, "concept", activity.Concept)
+			} else {
+				transferProfile = engine.BuildTransferProfile(activity.Concept, transferRecords)
+			}
+		}
+		diagnosticsMs := time.Since(diagnosticsStart).Milliseconds()
+
 		out := map[string]any{
 			"needs_domain_setup":        false,
 			"domain_id":                 domain.ID,
@@ -277,11 +330,33 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"active_misconceptions":     activeMisconceptions,
 			"known_misconception_types": knownMisconceptionTypes,
 			"motivation_brief":          motivationBrief,
+			"mastery_evidence":          masteryEvidence,
+			"mastery_uncertainty":       masteryUncertainty,
+			"transfer_profile":          transferProfile,
+			"rasch_elo_calibration":     raschEloCalibration,
 		}
 		for k, v := range extra {
 			out[k] = v
 		}
+		jsonStart := time.Now()
 		r, _ := jsonResult(out)
+		jsonMs := time.Since(jsonStart).Milliseconds()
+		if deps.Logger.Enabled(ctx, slog.LevelDebug) {
+			deps.Logger.Debug("get_next_activity timings",
+				"learner", learnerID,
+				"domain", domain.ID,
+				"concepts", len(domain.Graph.Concepts),
+				"domain_ms", domainMs,
+				"prefetch_ms", prefetchMs,
+				"orchestrator_ms", orchestratorMs,
+				"mirror_ms", mirrorMs,
+				"enrichment_ms", enrichmentMs,
+				"motivation_ms", motivationMs,
+				"diagnostics_ms", diagnosticsMs,
+				"json_ms", jsonMs,
+				"total_ms", time.Since(totalStart).Milliseconds(),
+			)
+		}
 		return r, nil, nil
 	})
 }

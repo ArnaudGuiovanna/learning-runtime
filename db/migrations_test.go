@@ -42,6 +42,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"transfer_records",
 		"implementation_intentions",
 		"webhook_message_queue",
+		"pedagogical_snapshots",
 	}
 	for _, table := range expectedTables {
 		var name string
@@ -67,6 +68,8 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"idx_interactions_misconception",
 		"idx_impl_intent_learner",
 		"idx_wmq_dispatch",
+		"idx_pedagogical_snapshots_learner_created",
+		"idx_pedagogical_snapshots_domain_concept",
 	}
 	for _, idx := range expectedIndexes {
 		var name string
@@ -88,6 +91,17 @@ func TestMigrate_Idempotent(t *testing.T) {
 		`INSERT INTO interactions (learner_id, concept, activity_type, success, error_type, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail) VALUES ('m1','C','RECALL_EXERCISE',1,'',0,0,'',0,NULL,NULL)`,
 	); err != nil {
 		t.Fatalf("insert with v0.9/v0.10 columns: %v", err)
+	}
+	var interactionID int64
+	if err := db.QueryRow(`SELECT id FROM interactions WHERE learner_id = 'm1'`).Scan(&interactionID); err != nil {
+		t.Fatalf("read interaction id: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO pedagogical_snapshots (interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json)
+		 VALUES (?, 'm1', 'd1', 'C', 'RECALL_EXERCISE', '{}', '{}', '{}', '{}')`,
+		interactionID,
+	); err != nil {
+		t.Fatalf("insert pedagogical snapshot: %v", err)
 	}
 	if _, err := db.Exec(
 		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis) VALUES ('d1','m1','dn','{}','goal',0,'','')`,

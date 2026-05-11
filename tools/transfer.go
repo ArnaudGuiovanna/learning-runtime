@@ -7,8 +7,10 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"tutor-mcp/algorithms"
+	"tutor-mcp/engine"
 	"tutor-mcp/models"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,7 +18,7 @@ import (
 
 type TransferChallengeParams struct {
 	ConceptID   string `json:"concept_id" jsonschema:"the concept to test in transfer"`
-	ContextType string `json:"context_type,omitempty" jsonschema:"context type: real_world, interview, teaching, debugging, creative (optional)"`
+	ContextType string `json:"context_type,omitempty" jsonschema:"context type: near, far, real_world, interview, teaching, debugging, creative (optional)"`
 	DomainID    string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
@@ -74,12 +76,22 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		existingTransfers, _ := deps.Store.GetTransferScores(learnerID, params.ConceptID)
+		transferProfile := engine.BuildTransferProfile(params.ConceptID, existingTransfers)
+
 		contextType := params.ContextType
 		if contextType == "" {
-			contextType = "real_world"
+			contextType = chooseTransferContextType(transferProfile)
+		}
+		transferDimension, ok := engine.NormalizeTransferDimension(contextType)
+		if !ok {
+			r, _ := errorResult(fmt.Sprintf(
+				"context_type %q is invalid: must be one of: %s",
+				contextType, strings.Join(allowedTransferContextTypes, ", "),
+			))
+			return r, nil, nil
 		}
 
-		existingTransfers, _ := deps.Store.GetTransferScores(learnerID, params.ConceptID)
 		var testedContexts []string
 		for _, tr := range existingTransfers {
 			testedContexts = append(testedContexts, fmt.Sprintf("%s (%.0f%%)", tr.ContextType, tr.Score*100))
@@ -96,11 +108,13 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 		)
 
 		r, _ := jsonResult(map[string]interface{}{
-			"eligible":        true,
-			"concept_id":      params.ConceptID,
-			"context_type":    contextType,
-			"prompt_text":     promptText,
-			"tested_contexts": testedContexts,
+			"eligible":           true,
+			"concept_id":         params.ConceptID,
+			"context_type":       contextType,
+			"transfer_dimension": string(transferDimension),
+			"prompt_text":        promptText,
+			"tested_contexts":    testedContexts,
+			"transfer_profile":   transferProfile,
 		})
 		return r, nil, nil
 	})
@@ -110,7 +124,7 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 
 type RecordTransferResultParams struct {
 	ConceptID   string  `json:"concept_id" jsonschema:"the concept being tested"`
-	ContextType string  `json:"context_type" jsonschema:"challenge context type: real_world, interview, teaching, debugging, creative"`
+	ContextType string  `json:"context_type" jsonschema:"challenge context type: near, far, real_world, interview, teaching, debugging, creative"`
 	Score       float64 `json:"score" jsonschema:"transfer score between 0 and 1"`
 	SessionID   string  `json:"session_id,omitempty" jsonschema:"session ID (optional)"`
 	DomainID    string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
@@ -121,8 +135,8 @@ type RecordTransferResultParams struct {
 // allowed orphan transfer rows ("banana", "") to pollute TRANSFER_BLOCKED
 // alerts. Kept inline here (rather than in tools/validate.go) to avoid a
 // merge conflict with the cycle-2 sibling PR that introduces validateEnum.
-var allowedRecordTransferContextTypes = []string{
-	"real_world", "interview", "teaching", "debugging", "creative",
+var allowedTransferContextTypes = []string{
+	"near", "far", "real_world", "interview", "teaching", "debugging", "creative",
 }
 
 func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
@@ -167,17 +181,11 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 		// Enum guard for context_type. Without this, hallucinated labels
 		// ("banana", "") flowed into the transfer_records table and
 		// poisoned downstream TRANSFER_BLOCKED alerts (issue #96).
-		ctOK := false
-		for _, v := range allowedRecordTransferContextTypes {
-			if params.ContextType == v {
-				ctOK = true
-				break
-			}
-		}
-		if !ctOK {
+		transferDimension, ok := engine.NormalizeTransferDimension(params.ContextType)
+		if !ok {
 			r, _ := errorResult(fmt.Sprintf(
-				"context_type %q is invalid: must be one of: real_world, interview, teaching, debugging, creative",
-				params.ContextType,
+				"context_type %q is invalid: must be one of: %s",
+				params.ContextType, strings.Join(allowedTransferContextTypes, ", "),
 			))
 			return r, nil, nil
 		}
@@ -216,11 +224,26 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
+		updatedTransfers, _ := deps.Store.GetTransferScores(learnerID, params.ConceptID)
+		transferProfile := engine.BuildTransferProfile(params.ConceptID, updatedTransfers)
+
 		r, _ := jsonResult(map[string]interface{}{
-			"recorded":       true,
-			"transfer_score": params.Score,
-			"blocked":        params.Score < 0.50,
+			"recorded":           true,
+			"transfer_score":     params.Score,
+			"transfer_dimension": string(transferDimension),
+			"transfer_profile":   transferProfile,
+			"blocked":            params.Score < engine.TransferFailureThreshold,
 		})
 		return r, nil, nil
 	})
+}
+
+func chooseTransferContextType(profile engine.TransferProfile) string {
+	if len(profile.MissingDimensions) > 0 {
+		return string(profile.MissingDimensions[0])
+	}
+	if len(profile.WeakestDimensions) > 0 {
+		return string(profile.WeakestDimensions[0])
+	}
+	return string(engine.TransferDimensionFar)
 }

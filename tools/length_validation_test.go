@@ -48,6 +48,40 @@ func TestRecordInteraction_RejectsOversizedConcept(t *testing.T) {
 	}
 }
 
+func TestRecordInteraction_RejectsOversizedRubricJSON(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+	}{
+		{name: "rubric_json", field: "rubric_json"},
+		{name: "rubric_score_json", field: "rubric_score_json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, deps := setupToolsTest(t)
+			makeOwnerDomain(t, store, "L_owner", "math")
+
+			args := map[string]any{
+				"concept":               "a",
+				"activity_type":         "RECALL_EXERCISE",
+				"success":               true,
+				"response_time_seconds": 5.0,
+				"confidence":            0.5,
+				"notes":                 "",
+			}
+			args[tc.field] = strings.Repeat("x", maxLongTextLen+1)
+
+			res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", args)
+			if !res.IsError {
+				t.Fatalf("expected length-cap rejection, got %q", resultText(res))
+			}
+			if !strings.Contains(resultText(res), tc.field) {
+				t.Fatalf("expected error to mention %s, got %q", tc.field, resultText(res))
+			}
+		})
+	}
+}
+
 // TestUpdateLearnerProfile_RejectsOversizedObjective swapped in for the
 // previous oversized-background coverage after issue #61 dropped the
 // `background` / `level` / `learning_style` fields from the tool surface.

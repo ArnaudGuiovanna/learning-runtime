@@ -4,7 +4,9 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 
@@ -134,6 +136,39 @@ func validateString(field, value string, max int) error {
 	return nil
 }
 
+// validateStructuredJSON rejects oversized, malformed, or scalar JSON. It is
+// used for JSON-bearing tool inputs that need to stay bounded and
+// machine-readable before they are persisted or echoed back to callers.
+func validateStructuredJSON(field, value string, max int) (any, error) {
+	if err := validateString(field, value, max); err != nil {
+		return nil, err
+	}
+	if value == "" {
+		return nil, nil
+	}
+
+	dec := json.NewDecoder(strings.NewReader(value))
+	dec.UseNumber()
+	var parsed any
+	if err := dec.Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("%s must be valid JSON: %v", field, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("%s must be valid JSON: %v", field, err)
+		}
+		return nil, fmt.Errorf("%s must contain a single JSON value", field)
+	}
+
+	switch parsed.(type) {
+	case map[string]any, []any:
+		return parsed, nil
+	default:
+		return nil, fmt.Errorf("%s must be a JSON object or array", field)
+	}
+}
+
 // validateEnum rejects values that are not in the allowed set. The error
 // names the field, the offending value, and the full accepted vocabulary
 // so the calling LLM can self-correct without a round-trip to the docs.
@@ -163,9 +198,9 @@ var allowedActivityTypes = []string{
 	string(models.ActivitySetupDomain),      // SETUP_DOMAIN
 	string(models.ActivityPractice),         // PRACTICE
 	string(models.ActivityDebugMisconception),
-	string(models.ActivityFeynmanPrompt),  // FEYNMAN_PROMPT
-	string(models.ActivityTransferProbe),  // TRANSFER_PROBE
-	string(models.ActivityCloseSession),   // CLOSE_SESSION
+	string(models.ActivityFeynmanPrompt), // FEYNMAN_PROMPT
+	string(models.ActivityTransferProbe), // TRANSFER_PROBE
+	string(models.ActivityCloseSession),  // CLOSE_SESSION
 }
 
 // allowedErrorTypes is the vocabulary the BKT heuristic

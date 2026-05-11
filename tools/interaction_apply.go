@@ -5,6 +5,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -30,6 +31,12 @@ type interactionInput struct {
 	MisconceptionType   string
 	MisconceptionDetail string
 	DomainID            string // persisted on the interaction row (issue #24)
+	RubricJSON          string
+	RubricScoreJSON     string
+	Rubric              any
+	RubricScore         any
+	RubricWarnings      []string
+	RubricScoreWarnings []string
 }
 
 // applyInteraction persists the interaction and updates the learner's
@@ -56,12 +63,13 @@ func applyInteraction(
 	learnerID string,
 	input interactionInput,
 	now time.Time,
-) (*models.ConceptState, error) {
+) (*models.ConceptState, map[string]any, error) {
 	// Load or bootstrap concept state.
 	cs, err := deps.Store.GetConceptState(learnerID, input.Concept)
 	if err != nil {
 		cs = models.NewConceptState(learnerID, input.Concept)
 	}
+	observation := rubricObservation(input)
 
 	// ── Snapshot read-only prior state ──────────────────────────────
 	// All downstream algorithm steps read from this snapshot, never
@@ -86,12 +94,11 @@ func applyInteraction(
 	}
 	priorNextReview := cs.NextReview
 
-	// ── BKT update — non-canonical, project-specific heuristic that
-	// ramps slip/guess by error_type. Computed up front (it only reads
-	// from the prior snapshot) so the (slipUsed, guessUsed) values can
-	// be persisted on the interaction row below for deterministic
-	// replay (issue #51 / #8). The PMastery write-back to `cs` happens
-	// in the merged-result block at the end of the function.
+	// ── BKT update — individualized over recent learner/concept
+	// evidence, while preserving the existing error_type ramps for the
+	// empty-history path. Computed up front (it only reads from the
+	// prior snapshot + prior interactions) so the effective parameters
+	// can be persisted and replayed deterministically.
 	bktState := algorithms.BKTState{
 		PMastery: priorPMastery,
 		PLearn:   priorPLearn,
@@ -99,25 +106,49 @@ func applyInteraction(
 		PSlip:    priorPSlip,
 		PGuess:   priorPGuess,
 	}
-	bktState, slipUsed, guessUsed := algorithms.BKTUpdateHeuristicSlipByErrorType(bktState, input.Success, input.ErrorType)
+	recentForBKT, err := deps.Store.GetRecentInteractions(learnerID, input.Concept, 20)
+	if err != nil {
+		deps.Logger.Warn("applyInteraction: individualized BKT profile unavailable", "err", err, "learner", learnerID, "concept", input.Concept)
+		recentForBKT = nil
+	}
+	recentForBKT = filterInteractionsByDomainID(recentForBKT, input.DomainID)
+	bktProfile := buildIndividualBKTProfile(recentForBKT, priorStability)
+	bktResult := algorithms.BKTUpdateIndividualized(bktState, bktProfile, input.Success, input.ErrorType)
+	bktState = bktResult.State
+	slipUsed := bktResult.Params.PSlip
+	guessUsed := bktResult.Params.PGuess
+
+	// ── Rasch/Elo calibration — audit-grade estimate for the
+	// learner/exercise difficulty pair. The concept state's Theta still
+	// follows the existing IRT update below; this model exposes an
+	// independent calibration signal for exercise selection and replay.
+	raschBefore := algorithms.NewRaschEloState(priorTheta, algorithms.FSRSDifficultyToIRT(priorDifficulty))
+	raschAfter := algorithms.RaschEloUpdate(raschBefore, input.Success)
+	observation = mergeObservation(observation, map[string]any{
+		"bkt_individualized_profile": individualBKTProfileSnapshot(bktProfile),
+		"bkt_individualized_params":  individualBKTParamsSnapshot(bktResult.Params),
+		"rasch_elo":                  raschEloObservation(raschBefore, raschAfter),
+	})
 
 	// Build and persist the interaction row.
 	interaction := &models.Interaction{
-		LearnerID:      learnerID,
-		Concept:        input.Concept,
-		ActivityType:   input.ActivityType,
-		Success:        input.Success,
-		ResponseTime:   int(input.ResponseTimeSeconds),
-		Confidence:     input.Confidence,
-		ErrorType:      input.ErrorType,
-		Notes:          input.Notes,
-		HintsRequested: input.HintsRequested,
-		SelfInitiated:  input.SelfInitiated,
-		CalibrationID:  input.CalibrationID,
-		DomainID:       input.DomainID,
-		BKTSlip:        &slipUsed,
-		BKTGuess:       &guessUsed,
-		CreatedAt:      now,
+		LearnerID:       learnerID,
+		Concept:         input.Concept,
+		ActivityType:    input.ActivityType,
+		Success:         input.Success,
+		ResponseTime:    int(input.ResponseTimeSeconds),
+		Confidence:      input.Confidence,
+		ErrorType:       input.ErrorType,
+		Notes:           input.Notes,
+		HintsRequested:  input.HintsRequested,
+		SelfInitiated:   input.SelfInitiated,
+		CalibrationID:   input.CalibrationID,
+		DomainID:        input.DomainID,
+		BKTSlip:         &slipUsed,
+		BKTGuess:        &guessUsed,
+		RubricJSON:      input.RubricJSON,
+		RubricScoreJSON: input.RubricScoreJSON,
+		CreatedAt:       now,
 	}
 
 	// Misconception fields — only stored on failures.
@@ -132,7 +163,7 @@ func applyInteraction(
 	}
 
 	if err := deps.Store.CreateInteraction(interaction); err != nil {
-		return nil, fmt.Errorf("applyInteraction: create interaction: %w", err)
+		return nil, nil, fmt.Errorf("applyInteraction: create interaction: %w", err)
 	}
 
 	// ── FSRS update — reads from prior snapshot. ───────────────────
@@ -182,8 +213,127 @@ func applyInteraction(
 
 	// Persist updated concept state.
 	if err := deps.Store.UpsertConceptState(cs); err != nil {
-		return nil, fmt.Errorf("applyInteraction: upsert concept state: %w", err)
+		return nil, nil, fmt.Errorf("applyInteraction: upsert concept state: %w", err)
+	}
+	if err := deps.Store.CreatePedagogicalSnapshot(&models.PedagogicalSnapshot{
+		InteractionID:   interaction.ID,
+		LearnerID:       learnerID,
+		DomainID:        input.DomainID,
+		Concept:         input.Concept,
+		ActivityType:    input.ActivityType,
+		BeforeJSON:      mustSnapshotJSON(conceptStateSnapshot(priorPMastery, priorPLearn, priorPForget, priorPSlip, priorPGuess, priorStability, priorDifficulty, priorElapsedDays, priorScheduledDays, priorReps, priorLapses, priorCardState, priorTheta, priorLastReview, priorNextReview)),
+		ObservationJSON: mustSnapshotJSON(observationSnapshot(input, bktResult.Params.PLearn, slipUsed, guessUsed, observation)),
+		AfterJSON:       mustSnapshotJSON(conceptStateAfterSnapshot(cs)),
+		DecisionJSON:    mustSnapshotJSON(decisionSnapshot(input, interaction.IsProactiveReview)),
+		CreatedAt:       now,
+	}); err != nil {
+		return nil, nil, fmt.Errorf("applyInteraction: create pedagogical snapshot: %w", err)
 	}
 
-	return cs, nil
+	return cs, observation, nil
+}
+
+func rubricObservation(input interactionInput) map[string]any {
+	observation := map[string]any{}
+	if input.Rubric != nil {
+		observation["rubric"] = input.Rubric
+	}
+	if input.RubricScore != nil {
+		observation["rubric_score"] = input.RubricScore
+	}
+	if len(input.RubricWarnings) > 0 {
+		observation["rubric_schema_warnings"] = input.RubricWarnings
+	}
+	if len(input.RubricScoreWarnings) > 0 {
+		observation["rubric_score_schema_warnings"] = input.RubricScoreWarnings
+	}
+	if len(observation) == 0 {
+		return nil
+	}
+	return observation
+}
+
+func conceptStateSnapshot(
+	pMastery, pLearn, pForget, pSlip, pGuess, stability, difficulty float64,
+	elapsedDays, scheduledDays, reps, lapses int,
+	cardState string,
+	theta float64,
+	lastReview time.Time,
+	nextReview *time.Time,
+) map[string]any {
+	out := map[string]any{
+		"p_mastery":      pMastery,
+		"p_learn":        pLearn,
+		"p_forget":       pForget,
+		"p_slip":         pSlip,
+		"p_guess":        pGuess,
+		"stability":      stability,
+		"difficulty":     difficulty,
+		"elapsed_days":   elapsedDays,
+		"scheduled_days": scheduledDays,
+		"reps":           reps,
+		"lapses":         lapses,
+		"card_state":     cardState,
+		"theta":          theta,
+	}
+	if !lastReview.IsZero() {
+		out["last_review"] = lastReview
+	}
+	if nextReview != nil {
+		out["next_review"] = *nextReview
+	}
+	return out
+}
+
+func conceptStateAfterSnapshot(cs *models.ConceptState) map[string]any {
+	var lastReview time.Time
+	if cs.LastReview != nil {
+		lastReview = *cs.LastReview
+	}
+	return conceptStateSnapshot(
+		cs.PMastery, cs.PLearn, cs.PForget, cs.PSlip, cs.PGuess,
+		cs.Stability, cs.Difficulty, cs.ElapsedDays, cs.ScheduledDays,
+		cs.Reps, cs.Lapses, cs.CardState, cs.Theta, lastReview, cs.NextReview,
+	)
+}
+
+func observationSnapshot(input interactionInput, learnUsed, slipUsed, guessUsed float64, observation map[string]any) map[string]any {
+	out := map[string]any{
+		"success":               input.Success,
+		"response_time_seconds": input.ResponseTimeSeconds,
+		"confidence":            input.Confidence,
+		"error_type":            input.ErrorType,
+		"hints_requested":       input.HintsRequested,
+		"self_initiated":        input.SelfInitiated,
+		"calibration_id":        input.CalibrationID,
+		"bkt_learn":             learnUsed,
+		"bkt_slip":              slipUsed,
+		"bkt_guess":             guessUsed,
+	}
+	if !input.Success && input.MisconceptionType != "" {
+		out["misconception_type"] = input.MisconceptionType
+		out["misconception_detail"] = input.MisconceptionDetail
+	}
+	for k, v := range observation {
+		out[k] = v
+	}
+	return out
+}
+
+func decisionSnapshot(input interactionInput, proactiveReview bool) map[string]any {
+	return map[string]any{
+		"domain_id":           input.DomainID,
+		"activity_type":       input.ActivityType,
+		"concept":             input.Concept,
+		"is_proactive_review": proactiveReview,
+		"source":              "record_interaction",
+	}
+}
+
+func mustSnapshotJSON(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }
