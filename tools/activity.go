@@ -16,17 +16,17 @@ import (
 )
 
 type GetNextActivityParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine cible ; si absent, le dernier domaine actif de l'apprenant est utilisé"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"target domain ID; if absent, the learner's last active domain is used"`
 }
 
 func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_next_activity",
-		Description: "Détermine la prochaine activité optimale pour l'apprenant et agrège tout le contexte de routage nécessaire : miroir métacognitif, mode tuteur, brief de motivation, misconceptions actives. Tient compte de la session en cours pour éviter de répéter le même concept. " +
-			"Quand appeler : APRÈS get_pending_alerts, dès qu'aucune alerte critique ne bloque la suite et que l'apprenant a un domaine actif. C'est l'outil principal du cycle d'apprentissage. " +
-			"Quand NE PAS appeler : si get_pending_alerts a renvoyé needs_domain_setup=true (appelez init_domain d'abord) ; n'appelez pas get_metacognitive_mirror dans le même tour, le miroir est déjà inclus dans la clé metacognitive_mirror du retour. " +
-			"Précondition : un domaine doit exister ; sinon needs_domain_setup=true est renvoyé avec une activité de type setup_domain. " +
-			"Retour : {needs_domain_setup, domain_id, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief}.",
+		Description: "Determine the next optimal activity for the learner and aggregate all routing context: metacognitive_mirror, tutor_mode, motivation_brief, active misconceptions. Accounts for the current session to avoid repeating the same concept. " +
+			"When to call: AFTER get_pending_alerts, once no critical alert is blocking progress and the learner has an active domain. This is the main tool of the learning cycle. " +
+			"When NOT to call: if get_pending_alerts returned needs_domain_setup=true (call init_domain first); do not call get_metacognitive_mirror in the same turn — the mirror is already included in the metacognitive_mirror key of the response. " +
+			"Precondition: a domain must exist; otherwise needs_domain_setup=true is returned with a setup_domain activity. " +
+			"Returns: {needs_domain_setup, domain_id, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetNextActivityParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
