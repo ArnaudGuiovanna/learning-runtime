@@ -69,11 +69,11 @@ func (s *Store) DequeueNextPending(learnerID, kind string, now time.Time, window
 	return item, nil
 }
 
-// MarkWebhookSent marks the given queue item as sent at `now`.
-func (s *Store) MarkWebhookSent(id int64, now time.Time) error {
+// MarkWebhookSent marks the learner-owned queue item as sent at `now`.
+func (s *Store) MarkWebhookSent(id int64, learnerID string, now time.Time) error {
 	_, err := s.db.Exec(
-		`UPDATE webhook_message_queue SET status = 'sent', sent_at = ? WHERE id = ?`,
-		now.UTC(), id,
+		`UPDATE webhook_message_queue SET status = 'sent', sent_at = ? WHERE id = ? AND learner_id = ?`,
+		now.UTC(), id, learnerID,
 	)
 	if err != nil {
 		return fmt.Errorf("mark webhook sent: %w", err)
@@ -81,11 +81,11 @@ func (s *Store) MarkWebhookSent(id int64, now time.Time) error {
 	return nil
 }
 
-// MarkWebhookFailed marks the given queue item as failed (will not be retried).
-func (s *Store) MarkWebhookFailed(id int64) error {
+// MarkWebhookFailed marks the learner-owned queue item as failed (will not be retried).
+func (s *Store) MarkWebhookFailed(id int64, learnerID string) error {
 	_, err := s.db.Exec(
-		`UPDATE webhook_message_queue SET status = 'failed' WHERE id = ?`,
-		id,
+		`UPDATE webhook_message_queue SET status = 'failed' WHERE id = ? AND learner_id = ?`,
+		id, learnerID,
 	)
 	if err != nil {
 		return fmt.Errorf("mark webhook failed: %w", err)
@@ -94,6 +94,7 @@ func (s *Store) MarkWebhookFailed(id int64) error {
 }
 
 // ExpirePastWebhookMessages marks any pending message whose expires_at is in the past as 'expired'.
+// This is intentionally global: it is a scheduler cleanup pass, not a learner-scoped mutator.
 // Returns the number of rows updated.
 func (s *Store) ExpirePastWebhookMessages(now time.Time) (int64, error) {
 	result, err := s.db.Exec(

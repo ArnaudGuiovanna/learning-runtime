@@ -111,7 +111,7 @@ func TestWebhookQueueEnqueueDequeueLifecycle(t *testing.T) {
 	}
 
 	// Mark sent.
-	if err := store.MarkWebhookSent(item.ID, now); err != nil {
+	if err := store.MarkWebhookSent(item.ID, "L1", now); err != nil {
 		t.Fatalf("mark sent: %v", err)
 	}
 
