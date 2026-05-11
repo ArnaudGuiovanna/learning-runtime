@@ -28,7 +28,7 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params CheckMasteryParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("check_mastery: auth failed", "err", err)
+			logAuthFailure(deps, "check_mastery", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

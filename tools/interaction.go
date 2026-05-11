@@ -39,7 +39,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordInteractionParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_interaction: auth failed", "err", err)
+			logAuthFailure(deps, "record_interaction", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

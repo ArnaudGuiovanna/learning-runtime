@@ -30,7 +30,7 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params TransferChallengeParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("transfer_challenge: auth failed", "err", err)
+			logAuthFailure(deps, "transfer_challenge", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -154,7 +154,7 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordTransferResultParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_transfer_result: auth failed", "err", err)
+			logAuthFailure(deps, "record_transfer_result", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

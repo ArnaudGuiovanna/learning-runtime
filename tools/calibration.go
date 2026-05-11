@@ -29,7 +29,7 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params CalibrationCheckParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("calibration_check: auth failed", "err", err)
+			logAuthFailure(deps, "calibration_check", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -102,7 +102,7 @@ func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordCalibrationResultParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_calibration_result: auth failed", "err", err)
+			logAuthFailure(deps, "record_calibration_result", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

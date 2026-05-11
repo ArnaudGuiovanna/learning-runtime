@@ -26,7 +26,7 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params FeynmanChallengeParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("feynman_challenge: auth failed", "err", err)
+			logAuthFailure(deps, "feynman_challenge", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

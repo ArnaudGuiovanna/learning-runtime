@@ -32,7 +32,7 @@ func registerQueueWebhookMessage(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params QueueWebhookMessageParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("queue_webhook_message: auth failed", "err", err)
+			logAuthFailure(deps, "queue_webhook_message", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

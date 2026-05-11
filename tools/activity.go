@@ -35,7 +35,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		totalStart := time.Now()
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_next_activity: auth failed", "err", err)
+			logAuthFailure(deps, "get_next_activity", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -130,10 +130,12 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		var orchPhase models.Phase
 		var orchErr error
 		intentStatus := "auto"
+		route := "orchestrator"
 		now := time.Now().UTC()
 		if intent == activityIntentReview {
 			activity, intentStatus = selectReviewIntentActivity(deps.Store, learnerID, domain, domainStates, domainInteractions, sessionConcepts, now)
 			orchPhase = models.PhaseMaintenance
+			route = "review_override"
 		} else {
 			// OrchestrateWithPhase returns the post-orchestrate phase so we
 			// can audit-log it without re-reading the domain row (perf #91).
@@ -142,6 +144,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				DomainID:  domain.ID,
 				Now:       now,
 				Config:    engine.NewDefaultPhaseConfig(),
+				Logger:    deps.Logger,
 			})
 		}
 		orchestratorMs := time.Since(orchestratorStart).Milliseconds()
@@ -175,6 +178,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		deps.Logger.Info("pipeline decision",
 			"learner", learnerID,
 			"domain", domain.ID,
+			"route", route,
 			"phase", loggedPhase,
 			"intent", intent,
 			"intent_status", intentStatus,

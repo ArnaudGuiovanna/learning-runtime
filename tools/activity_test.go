@@ -4,12 +4,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +29,25 @@ func TestGetNextActivity_NoAuth(t *testing.T) {
 	res := callTool(t, deps, registerGetNextActivity, "", "get_next_activity", map[string]any{})
 	if !res.IsError {
 		t.Fatalf("expected auth error")
+	}
+}
+
+func TestGetNextActivity_AuthFailureLoggedAtInfo(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	var buf bytes.Buffer
+	deps.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	res := callTool(t, deps, registerGetNextActivity, "", "get_next_activity", map[string]any{})
+	if !res.IsError {
+		t.Fatalf("expected auth error")
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "level=INFO") || !strings.Contains(logs, "get_next_activity: auth failed") {
+		t.Fatalf("expected auth failure at INFO, got logs=%q", logs)
+	}
+	if strings.Contains(logs, "level=ERROR") {
+		t.Fatalf("auth failure should not be logged at ERROR, got logs=%q", logs)
 	}
 }
 
@@ -343,6 +364,8 @@ func TestGetNextActivity_FadeFlagOn_VerbosityDecreasesAsAutonomyRises(t *testing
 func TestGetNextActivity_PostOrchestratePhaseMatchesDB(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	d := makeOwnerDomain(t, store, "L_owner", "math")
+	var buf bytes.Buffer
+	deps.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// Seed phase = INSTRUCTION and goal-relevance so the FSM has
 	// something to evaluate.
@@ -390,6 +413,13 @@ func TestGetNextActivity_PostOrchestratePhaseMatchesDB(t *testing.T) {
 	}
 	if got.Phase != models.PhaseMaintenance {
 		t.Errorf("expected DB phase=MAINTENANCE after transition, got %q", got.Phase)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "pipeline decision") || !strings.Contains(logs, "route=orchestrator") {
+		t.Fatalf("expected pipeline decision with route=orchestrator, got logs=%q", logs)
+	}
+	if !strings.Contains(logs, "phase transition (FSM)") {
+		t.Fatalf("expected FSM transition to use deps.Logger, got logs=%q", logs)
 	}
 }
 

@@ -42,7 +42,7 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UpdateLearnerProfileParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("update_learner_profile: auth failed", "err", err)
+			logAuthFailure(deps, "update_learner_profile", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

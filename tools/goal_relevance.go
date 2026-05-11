@@ -53,7 +53,7 @@ func registerSetGoalRelevance(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params SetGoalRelevanceParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("set_goal_relevance: auth failed", "err", err)
+			logAuthFailure(deps, "set_goal_relevance", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -178,7 +178,7 @@ func registerGetGoalRelevance(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetGoalRelevanceParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_goal_relevance: auth failed", "err", err)
+			logAuthFailure(deps, "get_goal_relevance", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

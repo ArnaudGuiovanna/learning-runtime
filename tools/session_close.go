@@ -32,7 +32,7 @@ func registerRecordSessionClose(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordSessionCloseParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_session_close: auth failed", "err", err)
+			logAuthFailure(deps, "record_session_close", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

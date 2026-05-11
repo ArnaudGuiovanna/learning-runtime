@@ -5,10 +5,13 @@
 package engine
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,6 +184,37 @@ func TestOrchestrate_Instruction_AllGoalMastered_TransitionsToMaintenance(t *tes
 	d, _ := store.GetDomainByID(domainID)
 	if d.Phase != models.PhaseMaintenance {
 		t.Errorf("expected transition to MAINTENANCE, got phase=%q", d.Phase)
+	}
+}
+
+func TestOrchestrate_UsesInjectedLoggerLevelForFSM(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		level   slog.Level
+		wantLog bool
+	}{
+		{name: "info enabled", level: slog.LevelInfo, wantLog: true},
+		{name: "info suppressed", level: slog.LevelWarn, wantLog: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := setupOrchStore(t)
+			domainID := seedOrchDomain(t, store, []string{"A", "B"}, nil, models.PhaseInstruction)
+			setGoalRelevance(t, store, domainID, map[string]float64{"A": 1.0, "B": 0.8})
+			setMastery(t, store, "A", 0.95)
+			setMastery(t, store, "B", 0.95)
+
+			var buf bytes.Buffer
+			input := defaultInput(domainID)
+			input.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: tc.level}))
+
+			if _, err := Orchestrate(store, input); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			gotLog := strings.Contains(buf.String(), "phase transition (FSM)")
+			if gotLog != tc.wantLog {
+				t.Fatalf("phase transition log present=%v, want %v; logs=%q", gotLog, tc.wantLog, buf.String())
+			}
+		})
 	}
 }
 

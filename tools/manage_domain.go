@@ -22,7 +22,7 @@ func registerArchiveDomain(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params ArchiveDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("archive_domain: auth failed", "err", err)
+			logAuthFailure(deps, "archive_domain", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -70,7 +70,7 @@ func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UnarchiveDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("unarchive_domain: auth failed", "err", err)
+			logAuthFailure(deps, "unarchive_domain", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -118,7 +118,7 @@ func registerDeleteDomain(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params DeleteDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("delete_domain: auth failed", "err", err)
+			logAuthFailure(deps, "delete_domain", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

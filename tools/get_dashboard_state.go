@@ -48,7 +48,7 @@ func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetDashboardStateParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_dashboard_state: auth failed", "err", err)
+			logAuthFailure(deps, "get_dashboard_state", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

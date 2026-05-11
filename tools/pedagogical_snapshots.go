@@ -31,7 +31,7 @@ func registerGetPedagogicalSnapshots(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetPedagogicalSnapshotsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_pedagogical_snapshots: auth failed", "err", err)
+			logAuthFailure(deps, "get_pedagogical_snapshots", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

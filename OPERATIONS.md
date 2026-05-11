@@ -133,7 +133,7 @@ The regulation pipeline emits structured `level=INFO` log lines so each `get_nex
 
 | Event | Source | Fields |
 |-------|--------|--------|
-| `pipeline decision` | `tools/activity.go` | `route` (`orchestrator` \| `legacy_fallback` \| `legacy`), `phase`, `activity_type`, `concept`, `rationale`, `learner`, `domain` |
+| `pipeline decision` | `tools/activity.go` | `route` (`orchestrator` \| `review_override`), `phase`, `activity_type`, `concept`, `rationale`, `learner`, `domain` |
 | `phase transition (FSM)` | `engine/orchestrator.go` | `from`, `to`, `entry_entropy`, `rationale`, `domain` |
 | `phase fallback (NoFringe)` | `engine/orchestrator.go` | `from`, `to`, `retry`, `domain` — FSM-disjoint phase override when no candidate is eligible |
 | `goal_relevance updated` | `tools/goal_relevance.go` | `concepts_updated`, `covered_total`, `all_concepts`, `uncovered`, `version`, `stale_after_set` |
@@ -176,7 +176,8 @@ journalctl --user -u tutor-mcp --since "1 hour ago" \
 
 ### Health signals to watch
 
-- **`route=legacy_fallback` count > 0** — the orchestrator is throwing errors. Look for the preceding `level=ERROR` line for the cause.
+- **`route=review_override` spike** — learners are explicitly asking for review. If unexpected, inspect the surrounding chat/tool calls that set `intent=review`.
+- **`orchestrator failed` errors** — the regulation pipeline could not compute an activity. Look for the same `learner` and `domain` on the preceding `level=ERROR` line.
 - **No `pipeline decision` logs after a session starts** — the LLM isn't calling `get_next_activity`. Drift in the system prompt likely.
 - **No `interaction recorded` logs while exercises are happening** — the LLM is generating activities but not closing the loop with `record_interaction`. Cohérence-of-rule-3 problem in the system prompt.
 - **Repeated `phase fallback (NoFringe)` for the same domain** — the candidate pool is empty. Likely cause: missing `goal_relevance` on a domain where the strict contract is enforced (partial vector). Run `set_goal_relevance` to repair.
