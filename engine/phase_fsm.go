@@ -85,8 +85,8 @@ type PhaseEvaluation struct {
 func EvaluatePhase(current models.Phase, obs PhaseObservables, cfg PhaseConfig) PhaseEvaluation {
 	switch current {
 	case models.PhaseDiagnostic:
-		// Critère relatif sur l'entropie : ne fire que si on a un
-		// snapshot valide ET la réduction atteint le seuil.
+		// Relative entropy criterion: only fire when we have a valid
+		// snapshot AND the reduction reaches the threshold.
 		hasSnapshot := obs.PhaseEntryEntropy > 0 && !math.IsNaN(obs.PhaseEntryEntropy)
 		entropyDelta := obs.PhaseEntryEntropy - obs.MeanEntropy
 		entropyExit := hasSnapshot && entropyDelta >= cfg.DeltaHThreshold
@@ -96,7 +96,7 @@ func EvaluatePhase(current models.Phase, obs PhaseObservables, cfg PhaseConfig) 
 			return PhaseEvaluation{
 				From: current, To: models.PhaseInstruction, Transitioned: true,
 				Rationale: fmt.Sprintf(
-					"DIAGNOSTIC→INSTRUCTION : reduction d'entropie atteinte (%.3f >= %.3f bits)",
+					"DIAGNOSTIC→INSTRUCTION: entropy reduction reached (%.3f >= %.3f bits)",
 					entropyDelta, cfg.DeltaHThreshold),
 			}
 		}
@@ -104,32 +104,32 @@ func EvaluatePhase(current models.Phase, obs PhaseObservables, cfg PhaseConfig) 
 			return PhaseEvaluation{
 				From: current, To: models.PhaseInstruction, Transitioned: true,
 				Rationale: fmt.Sprintf(
-					"DIAGNOSTIC→INSTRUCTION : N_max atteint (%d >= %d items)",
+					"DIAGNOSTIC→INSTRUCTION: N_max reached (%d >= %d items)",
 					obs.DiagnosticItemsCount, cfg.NDiagnosticMax),
 			}
 		}
 		return PhaseEvaluation{
 			From: current, To: current, Transitioned: false,
 			Rationale: fmt.Sprintf(
-				"DIAGNOSTIC : delta=%.3f bits (seuil %.3f), items=%d/%d — stay",
+				"DIAGNOSTIC: delta=%.3f bits (threshold %.3f), items=%d/%d — stay",
 				entropyDelta, cfg.DeltaHThreshold,
 				obs.DiagnosticItemsCount, cfg.NDiagnosticMax),
 		}
 
 	case models.PhaseInstruction:
-		// Tous les concepts goal-relevants maîtrisés.
+		// All goal-relevant concepts mastered.
 		if obs.TotalGoalRelevant > 0 && obs.MasteredGoalRelevant == obs.TotalGoalRelevant {
 			return PhaseEvaluation{
 				From: current, To: models.PhaseMaintenance, Transitioned: true,
 				Rationale: fmt.Sprintf(
-					"INSTRUCTION→MAINTENANCE : %d/%d concepts goal-relevants maitrises",
+					"INSTRUCTION→MAINTENANCE: %d/%d goal-relevant concepts mastered",
 					obs.MasteredGoalRelevant, obs.TotalGoalRelevant),
 			}
 		}
 		return PhaseEvaluation{
 			From: current, To: current, Transitioned: false,
 			Rationale: fmt.Sprintf(
-				"INSTRUCTION : %d/%d concepts goal-relevants maitrises — stay",
+				"INSTRUCTION: %d/%d goal-relevant concepts mastered — stay",
 				obs.MasteredGoalRelevant, obs.TotalGoalRelevant),
 		}
 
@@ -137,21 +137,21 @@ func EvaluatePhase(current models.Phase, obs PhaseObservables, cfg PhaseConfig) 
 		if obs.GoalRelevantBelowRetention {
 			return PhaseEvaluation{
 				From: current, To: models.PhaseInstruction, Transitioned: true,
-				Rationale: "MAINTENANCE→INSTRUCTION : un concept goal-relevant sous le seuil de retention",
+				Rationale: "MAINTENANCE→INSTRUCTION: one goal-relevant concept below the retention threshold",
 			}
 		}
 		return PhaseEvaluation{
 			From: current, To: current, Transitioned: false,
-			Rationale: "MAINTENANCE : retention OK sur tous les goal-relevants — stay",
+			Rationale: "MAINTENANCE: retention OK on all goal-relevants — stay",
 		}
 
 	default:
-		// Phase non reconnue : pas de transition. C'est à l'orchestrateur
-		// de décider du fallback (typiquement INSTRUCTION pour les
-		// rows pré-flag avec phase NULL — déjà mappé en chaîne vide).
+		// Unrecognised phase: no transition. The orchestrator decides
+		// the fallback (typically INSTRUCTION for rows pre-flagged with
+		// phase NULL — already mapped to an empty string).
 		return PhaseEvaluation{
 			From: current, To: current, Transitioned: false,
-			Rationale: fmt.Sprintf("phase non reconnue %q — pas de transition", string(current)),
+			Rationale: fmt.Sprintf("unrecognised phase %q — no transition", string(current)),
 		}
 	}
 }

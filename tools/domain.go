@@ -314,9 +314,9 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		// [2] PhaseController — initialise le domaine en DIAGNOSTIC.
-		// Les concept_states viennent d'être créés à PMastery=0.1 —
-		// l'entropie d'entrée est calculable maintenant.
+		// [2] PhaseController — initialises the domain in DIAGNOSTIC.
+		// The concept_states were just created at PMastery=0.1 —
+		// the entry entropy is now computable.
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		stateMap := map[string]*models.ConceptState{}
 		for _, cs := range states {
@@ -326,8 +326,8 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 		if err := deps.Store.UpdateDomainPhase(domain.ID, models.PhaseDiagnostic, entryEntropy, time.Now().UTC()); err != nil {
 			deps.Logger.Error("init_domain: failed to set initial phase",
 				"err", err, "domain", domain.ID)
-			// Non-fatal: domain reste en phase NULL → INSTRUCTION
-			// fallback. La régulation continue à fonctionner.
+			// Non-fatal: domain stays in phase NULL → INSTRUCTION
+			// fallback. Regulation continues to work.
 		}
 
 		response := map[string]interface{}{
@@ -339,9 +339,9 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 		// non-blocking per Q2). Only emitted when REGULATION_GOAL=on so
 		// pre-flag clients see no behavioural change.
 		if regulationGoalEnabled() {
-			reason := fmt.Sprintf("Décompose le personal_goal contre les %d concepts via set_goal_relevance pour activer le goal-aware routing.", len(params.Concepts))
+			reason := fmt.Sprintf("Decompose the personal_goal against the %d concepts via set_goal_relevance to activate goal-aware routing.", len(params.Concepts))
 			if params.PersonalGoal == "" {
-				reason = "personal_goal vide — set_goal_relevance reste optionnel ; appelle-le si tu veux annoter manuellement la pertinence par concept."
+				reason = "personal_goal is empty — set_goal_relevance remains optional; call it if you want to manually annotate relevance per concept."
 			}
 			response["next_action"] = map[string]any{
 				"version":  1,
@@ -466,7 +466,7 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			response["next_action"] = map[string]any{
 				"version":  1,
 				"tool":     "set_goal_relevance",
-				"reason":   fmt.Sprintf("%d nouveaux concepts ajoutés ; appelle set_goal_relevance avec leurs scores pour conserver le routage goal-aware (la sémantique est incrémentale, les concepts existants ne sont pas effacés).", added),
+				"reason":   fmt.Sprintf("%d new concepts added; call set_goal_relevance with their scores to preserve goal-aware routing (semantics are incremental — existing concepts are not erased).", added),
 				"required": false,
 			}
 		}

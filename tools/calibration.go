@@ -82,7 +82,7 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 		}
 
 		promptText := fmt.Sprintf(
-			"Tu as estimé ta maîtrise de '%s' à %.0f/5. Voyons ça avec un exercice.",
+			"You estimated your mastery of '%s' at %.0f/5. Let's check that with an exercise.",
 			params.ConceptID, params.PredictedMastery,
 		)
 

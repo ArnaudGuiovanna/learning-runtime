@@ -283,8 +283,8 @@ func TestBuildOLMSnapshot_NotActionable_AllSolid(t *testing.T) {
 func TestFormatOLMEmbed_FocusWarning(t *testing.T) {
 	snap := &OLMSnapshot{
 		DomainID:      "d1",
-		DomainName:    "Python pour bio-info",
-		PersonalGoal:  "analyser tes données de jardin",
+		DomainName:    "Python for bio-info",
+		PersonalGoal:  "analyse your garden data",
 		Solid:         3,
 		InProgress:    2,
 		Fragile:       1,
@@ -296,19 +296,19 @@ func TestFormatOLMEmbed_FocusWarning(t *testing.T) {
 		HasActionable: true,
 	}
 	embed := FormatOLMEmbed(snap)
-	if embed.Title != "🧭 État du moment" {
+	if embed.Title != "🧭 Current state" {
 		t.Errorf("Title=%q", embed.Title)
 	}
-	if !strings.Contains(embed.Description, "Python pour bio-info") {
+	if !strings.Contains(embed.Description, "Python for bio-info") {
 		t.Errorf("Description missing domain name: %q", embed.Description)
 	}
 	if !strings.Contains(embed.Description, "boucles") {
 		t.Errorf("Description missing focus concept: %q", embed.Description)
 	}
-	if !strings.Contains(embed.Description, "Focus du moment") {
-		t.Errorf("Description should use 'Focus du moment' for warning urgency: %q", embed.Description)
+	if !strings.Contains(embed.Description, "Current focus") {
+		t.Errorf("Description should use 'Current focus' for warning urgency: %q", embed.Description)
 	}
-	if !strings.Contains(embed.Description, "à mi-chemin") {
+	if !strings.Contains(embed.Description, "halfway there") {
 		t.Errorf("Description missing goal progress phrase: %q", embed.Description)
 	}
 	if embed.Color != 0xF5A623 {
@@ -326,7 +326,7 @@ func TestFormatOLMEmbed_FocusCriticalRedTitleAndColor(t *testing.T) {
 		HasActionable: true,
 	}
 	embed := FormatOLMEmbed(snap)
-	if embed.Title != "🚨 État — un concept à reprendre vite" {
+	if embed.Title != "🚨 State — one concept needs attention now" {
 		t.Errorf("Title=%q", embed.Title)
 	}
 	if embed.Color != 0xFF6B6B {
@@ -359,8 +359,8 @@ func TestNodeClassify(t *testing.T) {
 
 func TestMetacogLine_Exported(t *testing.T) {
 	got := MetacogLine(&OLMSnapshot{CalibrationBias: 2.0})
-	if got == "" || got[:2] != "Tu" {
-		t.Errorf("MetacogLine(over-confident) = %q, want non-empty starting with 'Tu'", got)
+	if got == "" || got[:3] != "You" {
+		t.Errorf("MetacogLine(over-confident) = %q, want non-empty starting with 'You'", got)
 	}
 	got = MetacogLine(&OLMSnapshot{CalibrationBias: 0.0})
 	if got != "" {

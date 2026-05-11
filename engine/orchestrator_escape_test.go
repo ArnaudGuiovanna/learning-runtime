@@ -13,7 +13,7 @@ import (
 )
 
 // TestOrchestrate_EscapePath_NoFringeAfterRetry covers the
-// "pipeline_exhausted: NoFringe persistant après retry" branch of
+// "pipeline_exhausted: NoFringe persists after retry" branch of
 // Orchestrate (engine/orchestrator.go:142-146). The scenario:
 //
 //   - Phase = INSTRUCTION ; the domain's only concept is mastered, so
