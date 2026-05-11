@@ -164,3 +164,23 @@ func TestSystemPrompt_ToolRegistryConsistency(t *testing.T) {
 		)
 	}
 }
+
+// TestSystemPrompt_LanguageContract asserts that the system prompt
+// instructs the LLM to handle locale per the i18n contract documented
+// in docs/i18n.md.
+func TestSystemPrompt_LanguageContract(t *testing.T) {
+	prompt := buildSystemPrompt()
+
+	if !strings.Contains(prompt, "update_learner_profile") {
+		t.Error("system prompt must reference update_learner_profile for language persistence")
+	}
+	if regexp.MustCompile(`[^\x00-\x7F]`).MatchString(prompt) {
+		t.Error("system prompt must be ASCII-only")
+	}
+	if !strings.Contains(strings.ToLower(prompt), "language") {
+		t.Error("system prompt must address language handling explicitly")
+	}
+	if !strings.Contains(prompt, "profile.language") {
+		t.Error("system prompt must describe profile.language as the override")
+	}
+}
