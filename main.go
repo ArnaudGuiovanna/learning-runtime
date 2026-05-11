@@ -105,18 +105,20 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Rate limiters (in-process, per-IP). Warn loudly if the deployment looks
-	// public but TRUSTED_PROXY_CIDRS is unset — without it every request shares
+	// Rate limiters (in-process). Warn loudly if the deployment looks public but
+	// TRUSTED_PROXY_CIDRS is unset - without it every IP-limited request shares
 	// one bucket under the proxy's loopback IP (issue #37).
 	auth.WarnRateLimiterMisconfig(baseURL)
 	authLimiter := auth.NewRateLimiter(10.0/60, 10)   // 10/min for auth endpoints
 	registerLimiter := auth.NewRateLimiter(5.0/60, 5) // 5/min for client registration
 	mcpRatePerMinute := envFloat("MCP_RATE_LIMIT_PER_MIN", 60)
 	mcpBurst := envInt("MCP_RATE_LIMIT_BURST", 60)
-	mcpLimiter := auth.NewRateLimiter(mcpRatePerMinute/60, mcpBurst)
+	mcpIPLimiter := auth.NewRateLimiter(mcpRatePerMinute/60, mcpBurst)
+	mcpLearnerLimiter := auth.NewRateLimiter(mcpRatePerMinute/60, mcpBurst)
 	defer authLimiter.Stop()
 	defer registerLimiter.Stop()
-	defer mcpLimiter.Stop()
+	defer mcpIPLimiter.Stop()
+	defer mcpLearnerLimiter.Stop()
 
 	// OAuth routes — rate-limit sensitive endpoints
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", oauthServer.HandleAuthServerMetadata)
@@ -126,8 +128,14 @@ func main() {
 	mux.Handle("POST /token", auth.RateLimitMiddleware(authLimiter, http.HandlerFunc(oauthServer.HandleToken)))
 	mux.Handle("POST /register", auth.RateLimitMiddleware(registerLimiter, http.HandlerFunc(oauthServer.HandleRegister)))
 
-	// MCP route (auth + rate limit protected)
-	mux.Handle("/mcp", auth.RateLimitMiddleware(mcpLimiter, auth.BearerMiddleware(baseURL, mcpHandler)))
+	// MCP route: per-IP shield before auth, then per-learner limiting after auth.
+	mcpProtectedHandler := auth.RateLimitMiddleware(
+		mcpIPLimiter,
+		auth.BearerMiddleware(baseURL,
+			auth.LearnerRateLimitMiddleware(mcpLearnerLimiter, mcpHandler),
+		),
+	)
+	mux.Handle("/mcp", mcpProtectedHandler)
 
 	// Start scheduler
 	scheduler := engine.NewScheduler(store, logger)

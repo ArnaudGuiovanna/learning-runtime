@@ -55,20 +55,55 @@ func TestBearerMiddleware_MissingAuthHeader(t *testing.T) {
 }
 
 func TestBearerMiddleware_NonBearerScheme(t *testing.T) {
-	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
-	mw := BearerMiddleware("https://test.example", next)
+	for _, authHeader := range []string{
+		"Basic dXNlcjpwYXNz",
+		"Bearerx token",
+	} {
+		t.Run(authHeader, func(t *testing.T) {
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+			mw := BearerMiddleware("https://test.example", next)
 
-	req := httptest.NewRequest("GET", "/mcp", nil)
-	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
-	rec := httptest.NewRecorder()
-	mw.ServeHTTP(rec, req)
+			req := httptest.NewRequest("GET", "/mcp", nil)
+			req.Header.Set("Authorization", authHeader)
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+			if called {
+				t.Fatal("next must not be called for non-Bearer scheme")
+			}
+		})
 	}
-	if called {
-		t.Fatal("next must not be called for non-Bearer scheme")
+}
+
+func TestBearerMiddleware_AcceptsBearerSchemeCaseInsensitive(t *testing.T) {
+	setTestSecret(t)
+
+	const learnerID = "learner-case"
+	tok, err := GenerateJWT("https://test.example", learnerID)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	for _, scheme := range []string{"Bearer", "bearer", "BEARER", "BeArEr"} {
+		t.Run(scheme, func(t *testing.T) {
+			mw := BearerMiddleware("https://test.example", helperOKHandler(t, learnerID))
+
+			req := httptest.NewRequest("GET", "/mcp", nil)
+			req.Header.Set("Authorization", scheme+" "+tok)
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%q", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "ok:"+learnerID) {
+				t.Fatalf("body = %q, expected learner id", rec.Body.String())
+			}
+		})
 	}
 }
 

@@ -5,6 +5,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -155,6 +156,111 @@ func TestRateLimitMiddleware_Returns429AndSetsRetryAfter(t *testing.T) {
 	}
 	if called2 != 0 {
 		t.Fatal("next handler must NOT be invoked when rate-limited")
+	}
+}
+
+func TestLearnerRateLimitMiddleware_UsesLearnerIDBuckets(t *testing.T) {
+	rl := NewRateLimiter(0, 1)
+	defer rl.Stop()
+
+	calls := map[string]int{}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls[GetLearnerID(r.Context())]++
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := LearnerRateLimitMiddleware(rl, next)
+
+	serve := func(learnerID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/mcp", nil)
+		ctx := context.WithValue(req.Context(), LearnerIDKey, learnerID)
+		rec := httptest.NewRecorder()
+		mw.ServeHTTP(rec, req.WithContext(ctx))
+		return rec
+	}
+
+	if rec := serve("learner-a"); rec.Code != http.StatusOK {
+		t.Fatalf("learner-a first status = %d, want 200", rec.Code)
+	}
+	if rec := serve("learner-a"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("learner-a second status = %d, want 429", rec.Code)
+	}
+	if rec := serve("learner-b"); rec.Code != http.StatusOK {
+		t.Fatalf("learner-b first status = %d, want 200", rec.Code)
+	}
+	if calls["learner-a"] != 1 {
+		t.Fatalf("learner-a handler calls = %d, want 1", calls["learner-a"])
+	}
+	if calls["learner-b"] != 1 {
+		t.Fatalf("learner-b handler calls = %d, want 1", calls["learner-b"])
+	}
+}
+
+func TestLearnerRateLimitMiddleware_UsesBearerInjectedLearnerID(t *testing.T) {
+	setTestSecret(t)
+
+	tokenA, err := GenerateJWT("https://test.example", "learner-a")
+	if err != nil {
+		t.Fatalf("generate token A: %v", err)
+	}
+	tokenB, err := GenerateJWT("https://test.example", "learner-b")
+	if err != nil {
+		t.Fatalf("generate token B: %v", err)
+	}
+
+	rl := NewRateLimiter(0, 1)
+	defer rl.Stop()
+
+	calls := map[string]int{}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls[GetLearnerID(r.Context())]++
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := BearerMiddleware("https://test.example", LearnerRateLimitMiddleware(rl, next))
+
+	serve := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/mcp", nil)
+		req.Header.Set("Authorization", "bearer "+token)
+		rec := httptest.NewRecorder()
+		mw.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := serve(tokenA); rec.Code != http.StatusOK {
+		t.Fatalf("learner-a first status = %d, want 200", rec.Code)
+	}
+	if rec := serve(tokenA); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("learner-a second status = %d, want 429", rec.Code)
+	}
+	if rec := serve(tokenB); rec.Code != http.StatusOK {
+		t.Fatalf("learner-b first status = %d, want 200", rec.Code)
+	}
+	if calls["learner-a"] != 1 {
+		t.Fatalf("learner-a handler calls = %d, want 1", calls["learner-a"])
+	}
+	if calls["learner-b"] != 1 {
+		t.Fatalf("learner-b handler calls = %d, want 1", calls["learner-b"])
+	}
+}
+
+func TestLearnerRateLimitMiddleware_RejectsMissingLearnerID(t *testing.T) {
+	rl := NewRateLimiter(1, 1)
+	defer rl.Stop()
+
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	mw := LearnerRateLimitMiddleware(rl, next)
+
+	req := httptest.NewRequest("GET", "/mcp", nil)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if called {
+		t.Fatal("next handler must not run without learner_id in context")
 	}
 }
 

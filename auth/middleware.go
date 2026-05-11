@@ -19,14 +19,14 @@ const LearnerIDKey contextKey = "learner_id"
 func BearerMiddleware(baseURL string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr, ok := bearerToken(authHeader)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf(
 				`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`, baseURL,
 			))
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 		learnerID, err := VerifyJWT(tokenStr, baseURL)
 		if err != nil {
 			slog.Debug("jwt verify failed", "err", err)
@@ -39,6 +39,18 @@ func BearerMiddleware(baseURL string, next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), LearnerIDKey, learnerID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func bearerToken(authHeader string) (string, bool) {
+	scheme, token, ok := strings.Cut(authHeader, " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 func GetLearnerID(ctx context.Context) string {

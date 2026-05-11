@@ -20,7 +20,7 @@ type bucket struct {
 	lastTime time.Time
 }
 
-// RateLimiter implements a per-IP token bucket rate limiter.
+// RateLimiter implements a token bucket rate limiter keyed by caller identity.
 type RateLimiter struct {
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -42,15 +42,15 @@ func NewRateLimiter(rate float64, burst int) *RateLimiter {
 	return rl
 }
 
-// Allow consumes one token for the given IP. Returns false if the bucket is empty.
-func (rl *RateLimiter) Allow(ip string) bool {
+// Allow consumes one token for the given key. Returns false if the bucket is empty.
+func (rl *RateLimiter) Allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	now := time.Now()
-	b, ok := rl.buckets[ip]
+	b, ok := rl.buckets[key]
 	if !ok {
-		rl.buckets[ip] = &bucket{tokens: float64(rl.burst) - 1, lastTime: now}
+		rl.buckets[key] = &bucket{tokens: float64(rl.burst) - 1, lastTime: now}
 		return true
 	}
 
@@ -82,9 +82,9 @@ func (rl *RateLimiter) cleanup() {
 		case <-ticker.C:
 			rl.mu.Lock()
 			cutoff := time.Now().Add(-10 * time.Minute)
-			for ip, b := range rl.buckets {
+			for key, b := range rl.buckets {
 				if b.lastTime.Before(cutoff) {
-					delete(rl.buckets, ip)
+					delete(rl.buckets, key)
 				}
 			}
 			rl.mu.Unlock()
@@ -221,6 +221,25 @@ func RateLimitMiddleware(limiter *RateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if !limiter.Allow(ip) {
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, `{"error":"rate_limit_exceeded"}`, http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// LearnerRateLimitMiddleware wraps an authenticated handler with per-learner
+// rate limiting. It must run after BearerMiddleware, which injects learner_id.
+func LearnerRateLimitMiddleware(limiter *RateLimiter, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		learnerID := GetLearnerID(r.Context())
+		if learnerID == "" {
+			slog.Warn("learner rate limiter missing learner_id in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !limiter.Allow(learnerID) {
 			w.Header().Set("Retry-After", "5")
 			http.Error(w, `{"error":"rate_limit_exceeded"}`, http.StatusTooManyRequests)
 			return
