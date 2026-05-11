@@ -15,15 +15,15 @@ import (
 )
 
 type TransferChallengeParams struct {
-	ConceptID   string `json:"concept_id" jsonschema:"Le concept à tester en transfert"`
-	ContextType string `json:"context_type,omitempty" jsonschema:"Type de contexte: real_world, interview, teaching, debugging, creative (optionnel)"`
-	DomainID    string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	ConceptID   string `json:"concept_id" jsonschema:"the concept to test in transfer"`
+	ContextType string `json:"context_type,omitempty" jsonschema:"context type: real_world, interview, teaching, debugging, creative (optional)"`
+	DomainID    string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
 func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "transfer_challenge",
-		Description: "Génère une situation inédite pour tester le transfert d'un concept maîtrisé hors du contexte initial.",
+		Description: "Generate a novel situation to test the transfer of a mastered concept outside its original context.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params TransferChallengeParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -109,11 +109,11 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 // ─── record_transfer_result ─────────────────────────────────────────────────
 
 type RecordTransferResultParams struct {
-	ConceptID   string  `json:"concept_id" jsonschema:"Le concept testé"`
-	ContextType string  `json:"context_type" jsonschema:"Type de contexte du challenge: real_world, interview, teaching, debugging, creative"`
-	Score       float64 `json:"score" jsonschema:"Score de transfert entre 0 et 1"`
-	SessionID   string  `json:"session_id,omitempty" jsonschema:"ID de session (optionnel)"`
-	DomainID    string  `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	ConceptID   string  `json:"concept_id" jsonschema:"the concept being tested"`
+	ContextType string  `json:"context_type" jsonschema:"challenge context type: real_world, interview, teaching, debugging, creative"`
+	Score       float64 `json:"score" jsonschema:"transfer score between 0 and 1"`
+	SessionID   string  `json:"session_id,omitempty" jsonschema:"session ID (optional)"`
+	DomainID    string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
 // allowedRecordTransferContextTypes enumerates the documented context_type
@@ -128,7 +128,7 @@ var allowedRecordTransferContextTypes = []string{
 func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_transfer_result",
-		Description: "Enregistre le résultat d'un transfer challenge.",
+		Description: "Record the result of a transfer challenge.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordTransferResultParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
