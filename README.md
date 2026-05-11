@@ -12,13 +12,13 @@
 
 # Tutor MCP — Open-Source AI Tutor & Intelligent Tutoring System (ITS) for LLMs
 
-> Self-hosted **AI tutor** runtime that turns any LLM (Claude, ChatGPT, Le Chat, Gemini) into a true **Intelligent Tutoring System (ITS)** — grounded in 50 years of cognitive science (BKT, FSRS, IRT, PFA, KST) and exposed over the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Adaptive learning, spaced repetition, mastery tracking, misconception diagnosis and a metacognitive loop — for any subject, with no item bank to curate.
+> Self-hosted **AI tutor** runtime that turns any LLM (Claude, ChatGPT, Le Chat, Gemini) into a true **Intelligent Tutoring System (ITS)** — grounded in cognitive science (BKT, FSRS, IRT, PFA, KST, Rasch/Elo calibration) and exposed over the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Adaptive learning, spaced repetition, mastery tracking, misconception diagnosis, transfer checks, pedagogical audit trails and a metacognitive loop — for any subject, with no item bank to curate.
 
 **Tutor MCP is the adaptive brain behind a personalised tutor.** You tell an LLM (Claude, ChatGPT, …) what you want to learn — *Spanish for travel*, *Go for backend*, *options trading*, *medieval history* — and the runtime orchestrates the journey end-to-end: what to study next, when to review, how hard the next exercise should be, when you've mastered a concept, when you're losing motivation, when you're ready to be more autonomous. It works on **any subject the learner can describe in natural language** — no content catalog, no curation, no editorial backlog.
 
-Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
+Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, structured rubrics, transfer profiling, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
-> Current release: **v0.3** — the regulation pipeline (BKT-aware action selector, KST-aware concept selector, gate controller, and a pure-FSM phase orchestrator) is the single runtime engine; the legacy alert-and-router cascade has been retired.
+> Current release: **v0.3** — the regulation pipeline is the single runtime engine, and the learner model now includes structured evidence gates, pedagogical snapshots, transfer profiles, individualized BKT parameters, and Rasch/Elo exercise calibration signals.
 
 ## Table of Contents
 
@@ -26,7 +26,8 @@ Under the hood, it provides real-time cognitive state tracking, spaced-repetitio
 - [Compatible MCP clients](#compatible-mcp-clients)
 - [Design Choice — The LLM is the Content Engine](#design-choice--the-llm-is-the-content-engine-the-runtime-is-the-its)
 - [How It Works](#how-it-works)
-- [Cognitive Science Engine](#cognitive-science-engine--bkt-fsrs-irt-pfa-kst)
+- [Cognitive Science Engine](#cognitive-science-engine)
+- [Pedagogical Reliability & Auditability](#pedagogical-reliability--auditability)
 - [Regulation Pipeline (v0.3)](#regulation-pipeline-v03)
 - [MCP Tools](#mcp-tools)
 - [Alert, Motivation, Webhook engines](#alert-engine)
@@ -51,8 +52,8 @@ For 50 years, **Intelligent Tutoring Systems (ITS)** research — Anderson, VanL
 | ITS pillar | Provided by | How |
 |------------|-------------|-----|
 | **Domain model** | Tutor MCP runtime | Concept graph with prerequisites, validated by **KST** (Knowledge Space Theory) |
-| **Learner model** | Tutor MCP runtime | Mastery, ability and recall predicted by **BKT** (Bayesian Knowledge Tracing), **IRT** (Item Response Theory) and **PFA** (Performance Factor Analysis) |
-| **Pedagogical model** | Tutor MCP runtime | Spaced-repetition scheduling via **FSRS** (Free Spaced Repetition Scheduler), activity router, alert engine, motivation engine, metacognitive loop |
+| **Learner model** | Tutor MCP runtime | Mastery, ability, recall and transfer predicted by **BKT** (Bayesian Knowledge Tracing), **IRT** (Item Response Theory), **Rasch/Elo**, **PFA** (Performance Factor Analysis) and structured transfer profiles |
+| **Pedagogical model** | Tutor MCP runtime | Spaced-repetition scheduling via **FSRS** (Free Spaced Repetition Scheduler), evidence-gated mastery, activity router, alert engine, motivation engine, metacognitive loop |
 | **Interface & content** | Any MCP-compatible LLM | Claude, ChatGPT, Le Chat, Gemini — generates exercises, hints, feedback and dialogue on demand |
 
 The cognitive science is rigid and measurable; the LLM is infinitely flexible. Together they make an ITS that works on day one for any topic — without an editorial team.
@@ -79,7 +80,7 @@ Traditional learning platforms (Duolingo, Anki, Khan Academy) and most "AI tutor
 
 - **Domains and prerequisite graphs** are co-authored by the learner and the LLM at `init_domain` time — not pre-curated.
 - **Exercises, explanations, hints, feedback, motivational nudges** — all generated on the fly by the LLM.
-- The **runtime** brings the cognitive science of an ITS: five algorithms (BKT, FSRS, IRT, PFA, KST), an alert engine, a motivation engine, a metacognitive loop.
+- The **runtime** brings the cognitive science of an ITS: BKT, FSRS, IRT, PFA, KST, Rasch/Elo calibration, transfer modeling, evidence gates, an alert engine, a motivation engine, and a metacognitive loop.
 - The **LLM** brings infinite domain breadth and on-demand calibration.
 
 This is what makes the system work on day one for any topic — and what lets it scale without an editorial team.
@@ -88,23 +89,37 @@ This is what makes the system work on day one for any topic — and what lets it
 
 The server sits between a learner and an LLM. Three parallel loops run from the first session:
 
-**Learning loop** (what to learn, when) — The LLM calls MCP tools before and after every exchange to check alerts, get the next optimal activity, and record interactions. Four cognitive algorithms update the learner model in real time. The LLM never invents its own scheduling.
+**Learning loop** (what to learn, when) — The LLM calls MCP tools before and after every exchange to get the next optimal activity and record interactions. The runtime updates mastery, recall, ability, exercise calibration and transfer evidence in real time. The LLM never invents its own scheduling.
 
 **Metacognitive loop** (how the learner learns) — Affect check-ins, calibration tracking, and autonomy metrics observe the learner's relationship to the system. A mirror mechanism surfaces factual observations about dependency patterns without judging. The system aims to make itself progressively unnecessary.
 
 **Motivation loop** (why this matters) — A brief engine selects a single motivational angle per exercise (milestone, competence value, growth mindset, affect reframe, plateau recontextualization, or utility value linked to the learner's personal goal). The LLM composes the text from structured signals; the system never emits canned pep talk.
 
-## Cognitive Science Engine — BKT, FSRS, IRT, PFA, KST
+## Cognitive Science Engine
 
-Five complementary learning-science algorithms run on every interaction and jointly inform the activity router. Together they form the learner-and-pedagogical model of the ITS.
+Complementary learning-science algorithms run on every interaction and jointly inform the activity router. Together they form the learner-and-pedagogical model of the ITS.
 
 | Algorithm | Role |
 |-----------|------|
-| **BKT** (Bayesian Knowledge Tracing) | Tracks mastery probability per concept. Distinguishes syntax errors from knowledge gaps. |
+| **BKT** (Bayesian Knowledge Tracing) | Tracks mastery probability per concept. Error-type heuristics and recent-history profiles individualize `P(Learn)`, `P(Slip)` and `P(Guess)` without letting the LLM tune them. |
 | **FSRS** (Free Spaced Repetition Scheduler) | Schedules reviews using stability/difficulty curves. Determines optimal review intervals. |
 | **IRT** (Item Response Theory) | Estimates learner ability (θ) from response patterns. Calibrates exercise difficulty. |
+| **Rasch/Elo** | Lightweight deterministic calibration signal for learner ability vs. exercise difficulty; exposed to the LLM as an item-design hint and stored in snapshots. |
 | **PFA** (Performance Factor Analysis) | Weights success/failure history to predict performance on each concept. |
 | **KST** (Knowledge Space Theory) | Validates prerequisite graphs and gates new concepts on mastery of their ancestors. |
+| **Structured transfer model** | Aggregates transfer attempts over canonical dimensions (`near`, `far`, `debugging`, `teaching`, `creative`) and labels readiness (`unobserved`, `narrow`, `developing`, `ready`, `robust`, `blocked`). |
+
+## Pedagogical Reliability & Auditability
+
+The project deliberately separates deterministic runtime decisions from LLM coaching freedom.
+
+- The **runtime** owns state transitions, thresholds, graph validation, evidence gates, transfer readiness, scheduling, alert computation and audit snapshots.
+- The **LLM** owns natural-language tutoring: examples, hints, feedback, emotional tone, motivation phrasing and learner-facing explanations.
+- `record_interaction` accepts structured `rubric_json` and `rubric_score_json`, canonicalizes them, persists them on the interaction, and copies them into pedagogical snapshots.
+- `get_pedagogical_snapshots` exposes the recent before/observation/after/decision trace for a learner, domain and concept.
+- `get_decision_replay_summary` summarizes audit quality: missing rubrics, missing transfer evidence, JSON issues, and other replay gaps.
+- `check_mastery` no longer trusts a high BKT value alone. It combines BKT, evidence diversity, uncertainty and transfer status before surfacing a mastery challenge.
+- A static goldset exercises known pedagogical failure modes: false-positive high BKT, repeated recall without evidence diversity, missing rubrics, missing transfer and clean replay.
 
 ## Regulation Pipeline (v0.3)
 
@@ -151,13 +166,15 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 |------|-------------|
 | `get_learner_context` | Session context: active domain, concept states, recent history, active misconceptions |
 | `get_pending_alerts` | Critical alerts requiring immediate action |
-| `get_next_activity` | Next optimal activity + metacognitive mirror + tutor mode + motivation brief |
-| `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA; tracks hints, initiative, proactive reviews, error type, misconception type/detail |
-| `check_mastery` | Check if a concept is eligible for a mastery challenge |
+| `get_next_activity` | Next optimal activity + metacognitive mirror + tutor mode + motivation brief + mastery evidence/uncertainty + transfer profile + Rasch/Elo calibration |
+| `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA and individualized BKT signals; tracks hints, initiative, proactive reviews, error type, misconception type/detail, structured rubric evidence |
+| `check_mastery` | Check if a concept is eligible for a mastery challenge using BKT + evidence diversity + uncertainty + transfer status |
 | `get_dashboard_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
 | `get_olm_snapshot` | Open Learner Model snapshot: per-concept mastery, retention, last-seen, fringe membership, anti-repeat status |
 | `get_availability_model` | Learner's time windows and session frequency |
 | `update_learner_profile` | Persist learner metadata (device, objective, language, calibration bias, affect baseline, autonomy score) |
+| `get_pedagogical_snapshots` | Recent pedagogical decision traces: before state, observation, after state and decision metadata |
+| `get_decision_replay_summary` | Offline audit summary over snapshots: replay coverage, missing rubrics, transfer gaps and JSON issues |
 
 ### Domain Management
 
@@ -165,6 +182,7 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 |------|-------------|
 | `init_domain` | Create a knowledge domain with concepts, prerequisite graph, personal goal, and optional value framings |
 | `add_concepts` | Add concepts to an existing domain without resetting progress |
+| `validate_domain_graph` | Deterministic graph quality audit: cycles, unknown prerequisites, isolated nodes, disconnected components, depth and guidance |
 | `archive_domain` | Hide a domain from dashboard/routing while preserving progress |
 | `unarchive_domain` | Reactivate an archived domain |
 | `delete_domain` | Permanently remove a domain and all its data |
@@ -187,8 +205,8 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 |------|-------------|
 | `get_misconceptions` | Lists detected misconceptions per concept with status (active/resolved) and frequency |
 | `feynman_challenge` | Feynman method: learner explains a mastered concept; LLM identifies gaps for BKT injection |
-| `transfer_challenge` | Tests concept transfer in novel contexts outside initial learning |
-| `record_transfer_result` | Records transfer challenge score for a concept/context pair |
+| `transfer_challenge` | Tests concept transfer in a structured novel dimension (`near`, `far`, `debugging`, `teaching`, `creative`) |
+| `record_transfer_result` | Records transfer score and returns the updated structured transfer profile |
 | `learning_negotiation` | Exposes system plan with tradeoffs; learner can propose alternatives |
 
 ### Session Close & Nudges
@@ -276,13 +294,19 @@ OAuth 2.1 with PKCE. Learners register and authenticate through a built-in flow:
 ```
 main.go              HTTP server, MCP handler, OAuth, scheduler startup
 ├── auth/            OAuth 2.1 server, JWT middleware, PKCE, rate limiter
-├── algorithms/      BKT, FSRS, IRT, KST, PFA + thresholds + BKT info-gain (all with tests)
-│   ├── bkt.go / fsrs.go / irt.go / kst.go / pfa.go   Five core learning-science algorithms
-│   ├── thresholds.go                                  Unified 0.85 mastery threshold (REGULATION_THRESHOLD)
+├── algorithms/      BKT, individualized BKT, FSRS, IRT, Rasch/Elo, KST, PFA + thresholds + info-gain
+│   ├── bkt.go / individual_bkt.go                     Mastery tracing + learner-specific parameter adjustment
+│   ├── fsrs.go / irt.go / rasch_elo.go / pfa.go       Review scheduling, ability estimation, item calibration, performance history
+│   ├── kst.go / thresholds.go                         Graph gating + unified 0.85 mastery threshold
 │   └── bkt_info_gain.go                               Binary entropy + info-gain helpers for [4] concept selector
 ├── engine/
 │   ├── alert.go                Learning + metacognitive alert computation
 │   ├── router.go               Legacy activity routing with priority-based alert handling
+│   ├── evidence.go             Mastery evidence diversity profile
+│   ├── uncertainty.go          Confidence/uncertainty estimates for mastery decisions
+│   ├── transfer_model.go       Structured transfer readiness over near/far/debugging/teaching/creative
+│   ├── replay.go               Pedagogical snapshot replay audit summaries
+│   ├── graph_quality.go        Deterministic domain graph quality report
 │   ├── metacognition.go        Autonomy score, mirror detection, tutor mode
 │   ├── motivation.go           Brief selection + composition (6 kinds, Hidi-Renninger phase)
 │   ├── scheduler.go            Cron jobs: critical alerts, reviews, queued nudges, cleanup
@@ -301,6 +325,7 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   └── regulation.go           Phase enum (DIAGNOSTIC / INSTRUCTION / MAINTENANCE)
 ├── db/
 │   ├── store.go                     SQLite persistence: learners, domains, concepts, interactions
+│   ├── pedagogical_snapshots.go      Before/observation/after/decision traces for audit/replay
 │   ├── metacognition.go             Affect, calibration, transfer, autonomy queries
 │   ├── misconceptions.go            Misconception aggregation and status tracking
 │   ├── motivation_queries.go        Brief-engine signals (failures, session counts, self-init ratio)
@@ -310,7 +335,7 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   ├── phase.go                     Phase transitions, action history, anti-repeat queries
 │   ├── schema.sql                   Table definitions (embedded)
 │   └── migrations.go                Idempotent migrations for existing databases
-└── tools/                30 MCP tool handlers + system prompt + flag-gated appendices
+└── tools/                MCP tool handlers + system prompt + rubrics + pedagogical snapshots + flag-gated appendices
 ```
 
 ## Language conventions
@@ -505,7 +530,7 @@ The figures below include a safety buffer (~50%) against the theoretical limits.
 - **SQLite** (via modernc.org/sqlite — pure Go, no CGO)
 - **JWT** for access tokens, bcrypt for passwords
 - **robfig/cron** for background scheduling
-- Wide test coverage across the five algorithms, the regulation pipeline (action / concept / gate / phase-FSM / orchestrator), the alert engine, motivation selection, misconception aggregation, OLM snapshots, goal-relevance staleness, and schema migrations
+- Wide test coverage across the learning algorithms, the regulation pipeline (action / concept / gate / phase-FSM / orchestrator), evidence and uncertainty gates, structured transfer profiles, graph-quality validation, replay/goldset fixtures, alert engine, motivation selection, misconception aggregation, OLM snapshots, goal-relevance staleness, and schema migrations
 
 ## Operations
 
@@ -515,10 +540,10 @@ For database backup, restore, off-host copy and service control recipes, see [OP
 
 The current focus is the alpha-to-beta path. Active priorities are tracked on the [issue tracker](https://github.com/ArnaudGuiovanna/tutor-mcp/issues), labelled `p0` (urgent), `p1` (this sprint), `p2` (when convenient).
 
-Three algorithmic refinements are deferred to a later release — none block daily use:
+Some deeper statistical refinements are still deferred to a later release — none block daily use:
 
 - [#48 PFA fidelity to Pavlik 2009](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/48) — sign of ρ, β intercept, decay term
-- [#49 IRT statistical robustness](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/49) — EAP/MAP prior to replace pure MLE
+- [#49 IRT statistical robustness](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/49) — EAP/MAP prior to replace pure MLE; the new Rasch/Elo layer is a lightweight calibration signal, not a full IRT estimator replacement
 - [#52 FSRS sub-day intervals](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/52) — hour-granularity Learning/Relearning steps
 
 The full [`CHANGELOG.md`](./CHANGELOG.md) tracks what has shipped.
