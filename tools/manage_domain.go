@@ -12,7 +12,7 @@ import (
 )
 
 type ArchiveDomainParams struct {
-	DomainID string `json:"domain_id" jsonschema:"ID of the domain to archive"`
+	DomainID string `json:"domain_id" jsonschema:"id of the domain to archive"`
 }
 
 func registerArchiveDomain(server *mcp.Server, deps *Deps) {
@@ -60,7 +60,7 @@ func registerArchiveDomain(server *mcp.Server, deps *Deps) {
 }
 
 type UnarchiveDomainParams struct {
-	DomainID string `json:"domain_id" jsonschema:"ID of the domain to reactivate"`
+	DomainID string `json:"domain_id" jsonschema:"id of the domain to reactivate"`
 }
 
 func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
@@ -107,7 +107,7 @@ func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
 }
 
 type DeleteDomainParams struct {
-	DomainID string `json:"domain_id" jsonschema:"ID of the domain to permanently delete"`
+	DomainID string `json:"domain_id" jsonschema:"id of the domain to permanently delete"`
 	Confirm  bool   `json:"confirm" jsonschema:"must be true to confirm deletion"`
 }
 

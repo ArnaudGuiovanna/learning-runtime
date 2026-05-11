@@ -25,7 +25,7 @@ type RecordInteractionParams struct {
 	DomainID            string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"number of hints requested during the exchange (optional, default 0)"`
 	SelfInitiated       bool    `json:"self_initiated,omitempty" jsonschema:"true if the session started without a webhook alert"`
-	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"ID of the associated calibration prediction (optional)"`
+	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"id of the associated calibration prediction (optional)"`
 	MisconceptionType   string  `json:"misconception_type,omitempty" jsonschema:"free-form label of the detected misconception (optional, ignored if success=true)"`
 	MisconceptionDetail string  `json:"misconception_detail,omitempty" jsonschema:"one-sentence description of the misconception (optional)"`
 }
