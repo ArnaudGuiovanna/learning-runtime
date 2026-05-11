@@ -198,7 +198,7 @@ func TestSelectConcept_Instruction_AllUncovered_NoFringe(t *testing.T) {
 	}
 }
 
-// ─── OQ-4.4 : tie-break alphabétique (contrat figé) ────────────────────────
+// ─── OQ-4.4 : alphabetical tie-break (frozen contract) ────────────────────
 
 func TestSelectConcept_Instruction_TieBreakAlphabetical(t *testing.T) {
 	// alpha, beta, gamma — same mastery, same goal_relevance → same
@@ -232,10 +232,10 @@ func TestSelectConcept_Instruction_TieBreakAlphabetical_NonAlphaInsertOrder(t *t
 	}
 }
 
-// ─── OQ-4.6 : trois cas dégénérés explicites de la formule INSTRUCTION ─────
+// ─── OQ-4.6 : three explicit degenerate cases of the INSTRUCTION formula ────
 
 func TestSelectConcept_Instruction_DegenerateGoalRelevanceNearZero(t *testing.T) {
-	// Concept à pertinence quasi-nulle ne gagne jamais sauf seul candidat.
+	// Concept with near-zero relevance never wins unless it is the only candidate.
 	graph := graphFlat("Low", "High")
 	states := []*models.ConceptState{reviewedCS("Low", 0.10), reviewedCS("High", 0.10)}
 	gr := map[string]float64{"Low": 0.001, "High": 1.0}
@@ -246,11 +246,11 @@ func TestSelectConcept_Instruction_DegenerateGoalRelevanceNearZero(t *testing.T)
 }
 
 func TestSelectConcept_Instruction_DegenerateMasteryNearBKT(t *testing.T) {
-	// Concept à mastery juste sous le seuil → score = gr × ~0.15 (faible).
-	// Un concept moins maîtrisé à pertinence égale gagne.
+	// Concept with mastery just below the threshold → score = gr × ~0.15 (low).
+	// A less-mastered concept at equal relevance wins.
 	graph := graphFlat("Almost", "Fresh")
 	states := []*models.ConceptState{
-		reviewedCS("Almost", 0.84), // tout proche de BKT
+		reviewedCS("Almost", 0.84), // very close to BKT threshold
 		reviewedCS("Fresh", 0.10),  // (1-m)=0.90
 	}
 	gr := map[string]float64{"Almost": 1.0, "Fresh": 1.0}
@@ -543,7 +543,7 @@ func TestSelectConcept_Diagnostic_AllCandidatesFromOtherDomain_NoFringe(t *testi
 	}
 }
 
-// ─── Cas dégénérés transverses ─────────────────────────────────────────────
+// ─── Cross-cutting degenerate cases ────────────────────────────────────────
 
 func TestSelectConcept_NaN_PMastery_ExcludedFromAllPhases(t *testing.T) {
 	csNaN := reviewedCS("Bad", math.NaN())

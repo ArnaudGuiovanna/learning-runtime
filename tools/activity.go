@@ -42,8 +42,8 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				"needs_domain_setup": true,
 				"activity": models.Activity{
 					Type:         models.ActivitySetupDomain,
-					Rationale:    "aucun domaine configuré",
-					PromptForLLM: "L'apprenant n'a pas encore de domaine. Analyse son objectif, décompose-le en concepts et appelle init_domain().",
+					Rationale:    "no domain configured",
+					PromptForLLM: "The learner has no domain yet. Analyse their objective, break it down into concepts, and call init_domain().",
 				},
 			})
 			return r, nil, nil
@@ -219,7 +219,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 						misconceptionPrompt += " — " + m.LastErrorDetail
 					}
 				}
-				misconceptionPrompt += ". Cible ces confusions dans ton explication et ton exercice. Ne mentionne pas explicitement les misconceptions — conçois l'exercice pour qu'il les confronte naturellement."
+				misconceptionPrompt += ". Target these confusions in your explanation and exercise. Do not explicitly mention the misconceptions — design the exercise so the learner confronts them naturally."
 				activity.PromptForLLM += misconceptionPrompt
 			}
 

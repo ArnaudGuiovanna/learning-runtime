@@ -580,7 +580,7 @@ func TestApplyGate_EmptyPhase_ReturnsError(t *testing.T) {
 	}
 }
 
-// ─── Cas dégénérés ─────────────────────────────────────────────────────────
+// ─── Degenerate cases ──────────────────────────────────────────────────────
 
 func TestApplyGate_NilAlerts(t *testing.T) {
 	in := GateInput{

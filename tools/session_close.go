@@ -148,14 +148,14 @@ func buildRecapBrief(deps *Deps, learnerID string, domain *models.Domain) *model
 	has, _ := deps.Store.HasRecentImplementationIntention(learnerID, "", time.Now().UTC().Add(-7*24*time.Hour))
 	promptIntent := !has
 
-	instruction := "Clos la session en 2-3 phrases. Mentionne un win tangible ou une belle tentative. " +
-		"Si prompt_for_implementation_intention est vrai, pose une question concrète du type 'Quand et où tu pratiques ensuite ?' " +
-		"et attends la réponse pour rappeler record_session_close avec implementation_intention. " +
-		"Puis appelle get_olm_snapshot pour récupérer l'état cognitif structuré de l'apprenant, " +
-		"et appelle queue_webhook_message 3 fois : daily_motivation pour demain 8h UTC (chaleureux, lien au personal_goal) ; " +
-		"olm:<domain_id> pour demain 13h UTC (factuel — distribution + focus + UNE ligne métacog si active + progression vers le goal — pas de pep talk, le contenu doit COLLER au snapshot get_olm_snapshot) ; " +
-		"daily_recap pour demain 21h UTC (recap doux). " +
-		"Sans KPI brut."
+	instruction := "Close the session in 2-3 sentences. Mention a tangible win or a good attempt. " +
+		"If prompt_for_implementation_intention is true, ask a concrete question like 'When and where will you practice next?' " +
+		"and wait for the answer to call record_session_close again with implementation_intention. " +
+		"Then call get_olm_snapshot to retrieve the learner's structured cognitive state, " +
+		"and call queue_webhook_message 3 times: daily_motivation for tomorrow at 8h UTC (warm, tied to personal_goal) ; " +
+		"olm:<domain_id> for tomorrow at 13h UTC (factual — distribution + focus + ONE metacog line if active + progress toward goal — no pep talk, content must MATCH the get_olm_snapshot snapshot) ; " +
+		"daily_recap for tomorrow at 21h UTC (gentle recap). " +
+		"No raw KPIs."
 
 	return &models.RecapBrief{
 		ConceptsPracticed:             practiced,

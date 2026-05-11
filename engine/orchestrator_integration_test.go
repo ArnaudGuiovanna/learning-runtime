@@ -315,10 +315,10 @@ func findRepoRootForArtifact(t *testing.T) string {
 // ─── E2E scenarios (OQ-2.7) ────────────────────────────────────────────────
 
 func TestOrchestrate_E2E_RestrictiveGoal_FastMaintenance_30Sessions(t *testing.T) {
-	// Restrictif : 3 concepts goal-relevants sur 6, le reste irrélevant.
-	// AntiRepeatWindow=1 pour ce scénario : avec seulement 3 concepts
-	// covered, N=3 viderait la pool éligible. N=1 garde la diversité
-	// minimale tout en laissant 2 concepts toujours sélectionnables.
+	// Restrictive: 3 goal-relevant concepts out of 6, the rest irrelevant.
+	// AntiRepeatWindow=1 for this scenario: with only 3 concepts
+	// covered, N=3 would drain the eligible pool. N=1 preserves
+	// minimal diversity while keeping 2 concepts always selectable.
 	concepts := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"}
 	goal := map[string]float64{
 		"alpha": 0.9, "beta": 0.9, "gamma": 0.9,
@@ -328,8 +328,8 @@ func TestOrchestrate_E2E_RestrictiveGoal_FastMaintenance_30Sessions(t *testing.T
 	cfg.AntiRepeatWindow = 1
 	art := runE2ESimulation(t, "restrictive_goal", concepts, nil, goal, 30, cfg)
 
-	// Assertions :
-	// 1. Au moins une transition observée
+	// Assertions:
+	// 1. At least one transition observed
 	if art.Summary.TransitionsCount == 0 {
 		t.Errorf("expected ≥1 transition over 30 sessions, got 0")
 	}
@@ -341,8 +341,8 @@ func TestOrchestrate_E2E_RestrictiveGoal_FastMaintenance_30Sessions(t *testing.T
 }
 
 func TestOrchestrate_E2E_BroadGoal_LongInstruction_30Sessions(t *testing.T) {
-	// Large : tous les concepts goal-relevants. L'apprenant doit
-	// maîtriser TOUS pour passer en MAINTENANCE.
+	// Broad: all concepts are goal-relevant. The learner must
+	// master ALL of them to transition to MAINTENANCE.
 	concepts := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"}
 	goal := map[string]float64{
 		"alpha": 0.9, "beta": 0.9, "gamma": 0.9,
@@ -351,16 +351,16 @@ func TestOrchestrate_E2E_BroadGoal_LongInstruction_30Sessions(t *testing.T) {
 	cfg := NewDefaultPhaseConfig()
 	art := runE2ESimulation(t, "broad_goal", concepts, nil, goal, 30, cfg)
 
-	// Assertion : le passage en MAINTENANCE doit être plus tardif (ou
-	// inexistant) que dans le scénario restrictif. On vérifie que
-	// MAINTENANCE n'arrive pas avant la deuxième moitié de la
-	// simulation, que la phase finale est MAINTENANCE, et que les
-	// sessions INSTRUCTION sont substantielles. (La comparaison directe
-	// I > M était une proxy fragile : une fois `selectDiagnostic`
-	// corrigé pour respecter le gate anti-repeat — issue #93 lineage —
-	// la phase DIAGNOSTIC ne masterise plus aucun concept par accident,
-	// donc INSTRUCTION démarre plus tôt et MAINTENANCE peut accumuler
-	// plus de sessions vers la fin.)
+	// Assertion: the transition to MAINTENANCE must be later (or
+	// absent) than in the restrictive scenario. We verify that
+	// MAINTENANCE does not arrive before the second half of the
+	// simulation, that the final phase is MAINTENANCE, and that
+	// INSTRUCTION sessions are substantial. (The direct comparison
+	// I > M was a fragile proxy: once `selectDiagnostic` was fixed
+	// to respect the anti-repeat gate — issue #93 lineage — the
+	// DIAGNOSTIC phase no longer accidentally masters concepts, so
+	// INSTRUCTION starts earlier and MAINTENANCE can accumulate
+	// more sessions toward the end.)
 	if art.Summary.FirstMaintenanceAt > 0 && art.Summary.FirstMaintenanceAt < 15 {
 		t.Errorf("broad goal : MAINTENANCE arrived too early (session %d, expected >= 15)",
 			art.Summary.FirstMaintenanceAt)
@@ -374,10 +374,9 @@ func TestOrchestrate_E2E_BroadGoal_LongInstruction_30Sessions(t *testing.T) {
 	}
 }
 
-// TestOrchestrate_E2E_FullCycle_30Sessions vérifie que les 3
-// transitions DIAGNOSTIC → INSTRUCTION → MAINTENANCE peuvent toutes
-// se produire au cours d'une simulation de 30 sessions sur un domaine
-// minimal goal-aligned.
+// TestOrchestrate_E2E_FullCycle_30Sessions verifies that all 3
+// transitions DIAGNOSTIC → INSTRUCTION → MAINTENANCE can occur
+// within a 30-session simulation on a minimal goal-aligned domain.
 func TestOrchestrate_E2E_FullCycle_30Sessions(t *testing.T) {
 	concepts := []string{"alpha", "beta"}
 	goal := map[string]float64{"alpha": 1.0, "beta": 1.0}
@@ -385,13 +384,13 @@ func TestOrchestrate_E2E_FullCycle_30Sessions(t *testing.T) {
 	cfg.AntiRepeatWindow = 1 // 2-concept domain — N>=2 starves the pool.
 	art := runE2ESimulation(t, "full_cycle", concepts, nil, goal, 30, cfg)
 
-	// Au moins DIAGNOSTIC → INSTRUCTION doit avoir eu lieu (NDiagnosticMax=8
-	// après 8 interactions garantit la sortie).
+	// At least DIAGNOSTIC → INSTRUCTION must have occurred (NDiagnosticMax=8
+	// guarantees exit after 8 interactions).
 	if art.Summary.FirstInstructionAt == 0 {
 		t.Errorf("expected DIAGNOSTIC→INSTRUCTION transition within 30 sessions")
 	}
-	// La phase finale doit être MAINTENANCE (apprenant simulé maîtrise
-	// les 2 concepts en BKT update successifs).
+	// The final phase must be MAINTENANCE (simulated learner masters
+	// both concepts through successive BKT updates).
 	if art.Summary.FinalPhase != string(models.PhaseMaintenance) {
 		t.Logf("note : final phase %s, expected MAINTENANCE — ok if BKT didn't reach 0.85 in 30 steps",
 			art.Summary.FinalPhase)

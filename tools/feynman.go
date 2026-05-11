@@ -57,17 +57,17 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 				"eligible":  false,
 				"mastery":   cs.PMastery,
 				"threshold": algorithms.MasteryBKT(),
-				"message":   "Concept pas encore maîtrisé. Continue la pratique régulière.",
+				"message":   "Concept not yet mastered. Keep up the regular practice.",
 			})
 			return r, nil, nil
 		}
 
 		promptText := fmt.Sprintf(
-			"Explique le concept '%s' comme si tu l'enseignais à quelqu'un qui n'y connaît rien. "+
-				"Pas de jargon technique — utilise des analogies, des exemples concrets. "+
-				"L'objectif est de vérifier que tu as vraiment compris, pas que tu sais réciter.\n\n"+
-				"Après ton explication, je vais identifier les points flous ou incomplets "+
-				"et les transformer en micro-concepts à travailler.",
+			"Explain the concept '%s' as if you were teaching it to someone who knows nothing about it. "+
+				"No technical jargon — use analogies and concrete examples. "+
+				"The goal is to verify that you truly understood it, not just that you can recite it.\n\n"+
+				"After your explanation, I will identify the fuzzy or incomplete points "+
+				"and turn them into micro-concepts to work on.",
 			params.ConceptID,
 		)
 
@@ -75,10 +75,10 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 			"eligible":    true,
 			"prompt_text": promptText,
 			"concept_id":  params.ConceptID,
-			"instructions_for_llm": "Après l'explication de l'apprenant, identifie les gaps conceptuels spécifiques. " +
-				"Pour chaque gap, génère un label court et une description. " +
-				"Demande confirmation à l'apprenant avant d'injecter les gaps dans le graphe via add_concepts(). " +
-				"Les nouveaux micro-concepts doivent avoir le concept source comme prérequis.",
+			"instructions_for_llm": "After the learner's explanation, identify the specific conceptual gaps. " +
+				"For each gap, generate a short label and a description. " +
+				"Ask the learner for confirmation before injecting the gaps into the graph via add_concepts(). " +
+				"The new micro-concepts must have the source concept as a prerequisite.",
 			"gap_template": map[string]interface{}{
 				"label":          "<nom court du gap>",
 				"description":    "<ce qui manque dans l'explication>",

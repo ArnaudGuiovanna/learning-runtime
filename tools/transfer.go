@@ -69,7 +69,7 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 			r, _ := jsonResult(map[string]interface{}{
 				"eligible": false,
 				"mastery":  cs.PMastery,
-				"message":  "Concept pas encore maîtrisé. Le transfert challenge requiert BKT >= 0.85.",
+				"message":  "Concept not yet mastered. The transfer challenge requires BKT >= 0.85.",
 			})
 			return r, nil, nil
 		}
@@ -86,12 +86,12 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 		}
 
 		promptText := fmt.Sprintf(
-			"Génère une situation totalement nouvelle qui teste le transfert du concept '%s' "+
-				"dans un contexte de type '%s'. "+
-				"La situation ne doit PAS ressembler aux exercices précédents. "+
-				"L'objectif: vérifier que l'apprenant peut appliquer ce concept dans un contexte qu'il n'a jamais vu.\n\n"+
-				"Après la réponse de l'apprenant, évalue le transfer_score (0-1) et "+
-				"appelle record_transfer_result avec le résultat.",
+			"Generate a completely new situation that tests the transfer of the concept '%s' "+
+				"in a context of type '%s'. "+
+				"The situation must NOT resemble previous exercises. "+
+				"The goal: verify that the learner can apply this concept in a context they have never seen.\n\n"+
+				"After the learner's response, evaluate the transfer_score (0-1) and "+
+				"call record_transfer_result with the result.",
 			params.ConceptID, contextType,
 		)
 

@@ -124,8 +124,8 @@ func TestOrchestrate_DomainPhaseNull_DefaultsToInstruction(t *testing.T) {
 	if activity.Type == "" {
 		t.Errorf("expected an Activity, got empty Type")
 	}
-	// La phase reste NULL en DB (orchestrator a juste lu, pas écrit
-	// — pas de transition car déjà en INSTRUCTION).
+	// The phase remains NULL in DB (orchestrator only read, did not
+	// write — no transition because already in INSTRUCTION).
 	d, _ := store.GetDomainByID(domainID)
 	if d.Phase != "" {
 		t.Errorf("expected phase to remain NULL on legacy domain, got %q", d.Phase)
@@ -212,13 +212,13 @@ func TestOrchestrate_Maintenance_RetentionLow_TransitionsToInstruction(t *testin
 // ─── OQ-2.7 : Goal-relevant cutoff (uncovered exclusion) ───────────────────
 
 func TestOrchestrate_GoalRelevant_RestrictiveGoal_FastMaintenance(t *testing.T) {
-	// Goal restrictif : 1 concept goal-relevant sur 5 → MAINTENANCE
-	// dès que ce concept est mastered, peu importe les autres.
+	// Restrictive goal: 1 goal-relevant concept out of 5 → MAINTENANCE
+	// as soon as that concept is mastered, regardless of the others.
 	store := setupOrchStore(t)
 	domainID := seedOrchDomain(t, store, []string{"A", "B", "C", "D", "E"}, nil, models.PhaseInstruction)
 	setGoalRelevance(t, store, domainID, map[string]float64{"A": 0.9}) // B-E uncovered
-	setMastery(t, store, "A", 0.95)                                    // seul A mastered
-	// B-E restent à mastery=0.1 default — non goal-relevants
+	setMastery(t, store, "A", 0.95)                                    // only A mastered
+	// B-E remain at mastery=0.1 default — not goal-relevant
 
 	if _, err := Orchestrate(store, defaultInput(domainID)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -230,14 +230,14 @@ func TestOrchestrate_GoalRelevant_RestrictiveGoal_FastMaintenance(t *testing.T) 
 }
 
 func TestOrchestrate_GoalRelevant_BroadGoal_StaysInstruction(t *testing.T) {
-	// Goal large : 5 concepts goal-relevants, seul 1 mastered → reste INSTRUCTION.
+	// Broad goal: 5 goal-relevant concepts, only 1 mastered → stays INSTRUCTION.
 	store := setupOrchStore(t)
 	domainID := seedOrchDomain(t, store, []string{"A", "B", "C", "D", "E"}, nil, models.PhaseInstruction)
 	setGoalRelevance(t, store, domainID, map[string]float64{
 		"A": 0.9, "B": 0.9, "C": 0.9, "D": 0.9, "E": 0.9,
 	})
-	setMastery(t, store, "A", 0.95) // seul A mastered
-	// B-E à 0.1 default
+	setMastery(t, store, "A", 0.95) // only A mastered
+	// B-E at 0.1 default
 
 	if _, err := Orchestrate(store, defaultInput(domainID)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -251,17 +251,17 @@ func TestOrchestrate_GoalRelevant_BroadGoal_StaysInstruction(t *testing.T) {
 // ─── Phase invalide en DB → INSTRUCTION fallback ──────────────────────────
 
 func TestOrchestrate_PhaseCorruptedInDB_FallsBackGracefully(t *testing.T) {
-	// Si la DB contient une phase non reconnue, l'orchestrateur ne
-	// doit pas crasher. Le FSM EvaluatePhase ignore (no transition).
-	// La pipeline tourne avec la valeur en DB (Gate refusera car
-	// erreur, mais on capture le fallback gracieux).
+	// If the DB contains an unrecognised phase, the orchestrator must
+	// not crash. The FSM EvaluatePhase ignores it (no transition).
+	// The pipeline runs with the DB value (Gate will refuse with an
+	// error, but we capture the graceful fallback).
 	store := setupOrchStore(t)
 	domainID := seedOrchDomain(t, store, []string{"A"}, nil, models.Phase("BOGUS"))
 	setGoalRelevance(t, store, domainID, map[string]float64{"A": 1.0})
 
 	_, err := Orchestrate(store, defaultInput(domainID))
-	// Gate retourne ErrGateUnknownPhase → propagé comme erreur de
-	// pipeline. C'est le comportement attendu (cohérent avec
+	// Gate returns ErrGateUnknownPhase → propagated as a pipeline
+	// error. This is the expected behaviour (consistent with
 	// OQ-4.1/OQ-2.5 explicit-error).
 	if err == nil {
 		t.Fatalf("expected error on corrupted phase, got nil")

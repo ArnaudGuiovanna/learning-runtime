@@ -35,7 +35,7 @@ import (
 
 // ErrGateUnknownPhase is returned by ApplyGate when the caller passes
 // a Phase value that is not one of {Instruction, Diagnostic,
-// Maintenance}. Cohérent with [4] OQ-4.1: explicit error, no silent
+// Maintenance}. Consistent with [4] OQ-4.1: explicit error, no silent
 // fallback — version-skew bugs must surface immediately.
 var ErrGateUnknownPhase = errors.New("gate: unknown phase")
 

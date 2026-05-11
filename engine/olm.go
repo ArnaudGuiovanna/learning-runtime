@@ -314,7 +314,7 @@ func formatFocusReason(a models.Alert) string {
 	case models.AlertForgetting:
 		return fmt.Sprintf("retention %.0f%%", a.Retention*100)
 	case models.AlertZPDDrift:
-		return fmt.Sprintf("%.0f%% d'erreurs récentes", a.ErrorRate*100)
+		return fmt.Sprintf("%.0f%% recent errors", a.ErrorRate*100)
 	case models.AlertPlateau:
 		return fmt.Sprintf("plateau %d sessions", a.SessionsStalled)
 	}
@@ -326,11 +326,11 @@ func formatFocusReason(a models.Alert) string {
 // factual: distribution + focus + (one) metacognitive line if active +
 // goal progress phrase. No pep talk.
 func FormatOLMEmbed(snap *OLMSnapshot) DiscordEmbed {
-	title := "🧭 État du moment"
+	title := "🧭 Current state"
 	color := colorInfo
 	switch snap.FocusUrgency {
 	case models.UrgencyCritical:
-		title = "🚨 État — un concept à reprendre vite"
+		title = "🚨 State — one concept needs attention now"
 		color = colorCritical
 	case models.UrgencyWarning:
 		color = colorWarning
@@ -347,11 +347,11 @@ func FormatOLMEmbed(snap *OLMSnapshot) DiscordEmbed {
 		var prefix string
 		switch snap.FocusUrgency {
 		case models.UrgencyCritical:
-			prefix = "Un concept à reprendre vite"
+			prefix = "One concept needs attention now"
 		case models.UrgencyWarning:
-			prefix = "Focus du moment"
+			prefix = "Current focus"
 		default:
-			prefix = "Prochain palier"
+			prefix = "Next milestone"
 		}
 		lines = append(lines, fmt.Sprintf("%s : **%s** (%s).", prefix, snap.FocusConcept, snap.FocusReason))
 	}
@@ -361,7 +361,7 @@ func FormatOLMEmbed(snap *OLMSnapshot) DiscordEmbed {
 	}
 
 	if snap.PersonalGoal != "" {
-		lines = append(lines, fmt.Sprintf("Objectif \"%s\" : %s.", snap.PersonalGoal, progressPhrase(snap.KSTProgress)))
+		lines = append(lines, fmt.Sprintf("Goal \"%s\": %s.", snap.PersonalGoal, progressPhrase(snap.KSTProgress)))
 	}
 
 	return DiscordEmbed{
@@ -383,16 +383,16 @@ type DiscordEmbed struct {
 func compactBuckets(snap *OLMSnapshot) string {
 	parts := []string{}
 	if snap.Solid > 0 {
-		parts = append(parts, fmt.Sprintf("%d solides", snap.Solid))
+		parts = append(parts, fmt.Sprintf("%d solid", snap.Solid))
 	}
 	if snap.InProgress > 0 {
-		parts = append(parts, fmt.Sprintf("%d en cours", snap.InProgress))
+		parts = append(parts, fmt.Sprintf("%d in progress", snap.InProgress))
 	}
 	if snap.Fragile > 0 {
-		parts = append(parts, fmt.Sprintf("%d fragiles", snap.Fragile))
+		parts = append(parts, fmt.Sprintf("%d fragile", snap.Fragile))
 	}
 	if snap.NotStarted > 0 {
-		parts = append(parts, fmt.Sprintf("%d pas commencés", snap.NotStarted))
+		parts = append(parts, fmt.Sprintf("%d not started", snap.NotStarted))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -404,16 +404,16 @@ func compactBuckets(snap *OLMSnapshot) string {
 // FormatOLMEmbed.
 func MetacogLine(snap *OLMSnapshot) string {
 	if snap.CalibrationBias > calibrationActionableThreshold {
-		return "Tu sur-estimes un peu tes acquis depuis 3 sessions — quelques exercices à froid t'aideront à recalibrer."
+		return "You have been slightly over-estimating your knowledge for 3 sessions — a few cold exercises will help you recalibrate."
 	}
 	if snap.CalibrationBias < -calibrationActionableThreshold {
-		return "Tu sous-estimes un peu tes acquis — tu en sais plus que tu crois."
+		return "You are slightly under-estimating yourself — you know more than you think."
 	}
 	if snap.AutonomyTrend == "declining" {
-		return "Tu t'appuies un peu plus sur les hints récemment — tente quelques exercices sans aide pour voir."
+		return "You have been leaning on hints a bit more lately — try a few exercises without help to see how you do."
 	}
 	if snap.AffectTrend == "declining" {
-		return "Les 3 dernières sessions ont été éprouvantes — n'hésite pas à alléger ou faire une pause."
+		return "The last 3 sessions have been tough — feel free to lighten the load or take a break."
 	}
 	return ""
 }
@@ -421,10 +421,10 @@ func MetacogLine(snap *OLMSnapshot) string {
 func progressPhrase(p float64) string {
 	switch {
 	case p < 0.30:
-		return "tu démarres"
+		return "just getting started"
 	case p < algorithms.MasteryKST():
-		return "à mi-chemin"
+		return "halfway there"
 	default:
-		return "presque arrivé"
+		return "almost there"
 	}
 }

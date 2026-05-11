@@ -53,7 +53,7 @@ func registerArchiveDomain(server *mcp.Server, deps *Deps) {
 			"archived":    true,
 			"domain_id":   domain.ID,
 			"domain_name": domain.Name,
-			"message":     fmt.Sprintf("Domaine '%s' archivé. La progression est préservée. Utilise unarchive_domain pour le réactiver.", domain.Name),
+			"message":     fmt.Sprintf("Domain '%s' archived. Progress preserved. Use unarchive_domain to restore it.", domain.Name),
 		})
 		return r, nil, nil
 	})
@@ -100,7 +100,7 @@ func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
 			"archived":    false,
 			"domain_id":   domain.ID,
 			"domain_name": domain.Name,
-			"message":     fmt.Sprintf("Domaine '%s' réactivé.", domain.Name),
+			"message":     fmt.Sprintf("Domain '%s' restored.", domain.Name),
 		})
 		return r, nil, nil
 	})

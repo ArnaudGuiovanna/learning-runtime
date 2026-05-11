@@ -13,7 +13,7 @@ import (
 // TestGetDashboardState_NoActiveDomain_UsesCanonicalShape asserts that when a
 // learner with no domain calls get_dashboard_state, the response uses the
 // canonical needs_domain_setup payload (Issue #33) instead of the previous
-// French operator-facing error string ("aucun domaine configuré"). This keeps
+// previous French error string instead of the canonical structured payload. This keeps
 // the chat-side tool surface uniform so the LLM can branch on a single signal
 // regardless of which tool it called.
 func TestGetDashboardState_NoActiveDomain_UsesCanonicalShape(t *testing.T) {
