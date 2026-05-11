@@ -28,12 +28,14 @@ type RecordInteractionParams struct {
 	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"id of the associated calibration prediction (optional)"`
 	MisconceptionType   string  `json:"misconception_type,omitempty" jsonschema:"free-form label of the detected misconception (optional, ignored if success=true)"`
 	MisconceptionDetail string  `json:"misconception_detail,omitempty" jsonschema:"one-sentence description of the misconception (optional)"`
+	RubricJSON          string  `json:"rubric_json,omitempty" jsonschema:"optional rubric as a JSON object or array"`
+	RubricScoreJSON     string  `json:"rubric_score_json,omitempty" jsonschema:"optional rubric scoring result as a JSON object or array"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_interaction",
-		Description: "Record the result of an exercise and update the learner's cognitive state. Supports error_type to adjust the BKT model according to the error type.",
+		Description: "Record the result of an exercise and update the learner's cognitive state. Supports error_type to adjust the BKT model according to the error type, and optional rubric_json/rubric_score_json for structured grading evidence.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordInteractionParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -105,6 +107,24 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
+		rubric, rubricWarnings, err := normalizeRubricJSON(params.RubricJSON)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		rubricScore, rubricScoreWarnings, err := normalizeRubricScoreJSON(params.RubricScoreJSON, rubric)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		rubricJSON := ""
+		if rubric != nil {
+			rubricJSON = mustSnapshotJSON(rubric)
+		}
+		rubricScoreJSON := ""
+		if rubricScore != nil {
+			rubricScoreJSON = mustSnapshotJSON(rubricScore)
+		}
 
 		// Resolve the active domain (honoring the optional domain_id) and
 		// validate the concept against its concept list. Without this guard
@@ -126,7 +146,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		cs, err := applyInteraction(deps, learnerID, interactionInput{
+		cs, observation, err := applyInteraction(deps, learnerID, interactionInput{
 			Concept:             params.Concept,
 			ActivityType:        params.ActivityType,
 			Success:             params.Success,
@@ -140,6 +160,12 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			MisconceptionType:   params.MisconceptionType,
 			MisconceptionDetail: params.MisconceptionDetail,
 			DomainID:            domain.ID,
+			RubricJSON:          rubricJSON,
+			RubricScoreJSON:     rubricScoreJSON,
+			Rubric:              rubric,
+			RubricScore:         rubricScore,
+			RubricWarnings:      rubricWarnings,
+			RubricScoreWarnings: rubricScoreWarnings,
 		}, time.Now().UTC())
 		if err != nil {
 			deps.Logger.Error("record_interaction: applyInteraction failed", "err", err, "learner", learnerID)
@@ -176,14 +202,18 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 
 		nextReviewHours := float64(cs.ScheduledDays) * 24.0
 
-		r, _ := jsonResult(map[string]interface{}{
+		payload := map[string]interface{}{
 			"updated":              true,
 			"new_mastery":          cs.PMastery,
 			"next_review_in_hours": nextReviewHours,
 			"engagement_signal":    engagementSignal,
 			"fatigue_signal":       fatigueSignal,
 			"frustration_signal":   frustrationSignal,
-		})
+		}
+		if len(observation) > 0 {
+			payload["observation"] = observation
+		}
+		r, _ := jsonResult(payload)
 		return r, nil, nil
 	})
 }

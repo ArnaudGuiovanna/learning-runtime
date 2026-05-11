@@ -98,6 +98,176 @@ func TestRecordInteraction_HappyPath_Success(t *testing.T) {
 	}
 }
 
+func TestRecordInteraction_ReturnsRubricObservation(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 12.0,
+		"confidence":            0.9,
+		"notes":                 "rubric scored",
+		"rubric_json":           `{"scale":"0-1","criteria":[{"id":"correctness","weight":0.7}]}`,
+		"rubric_score_json":     `{"overall":0.8,"criteria_scores":{"correctness":0.8}}`,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+
+	out := decodeResult(t, res)
+	obs, ok := out["observation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected observation map, got %v", out["observation"])
+	}
+	rubric, ok := obs["rubric"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected parsed rubric object, got %v", obs["rubric"])
+	}
+	if _, ok := rubric["criteria"].([]any); !ok {
+		t.Fatalf("expected canonical rubric criteria, got %v", rubric)
+	}
+	score, ok := obs["rubric_score"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected parsed rubric_score object, got %v", obs["rubric_score"])
+	}
+	if got, _ := score["total"].(float64); got != 0.8 {
+		t.Fatalf("rubric_score total = %v, want 0.8", score["total"])
+	}
+	if _, ok := score["criteria_scores"].([]any); !ok {
+		t.Fatalf("expected canonical criteria_scores, got %v", score)
+	}
+	if _, ok := obs["rubric_schema_warnings"].([]any); !ok {
+		t.Fatalf("expected rubric schema warnings, got %v", obs)
+	}
+	recents, err := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if err != nil {
+		t.Fatalf("get interactions: %v", err)
+	}
+	if len(recents) != 1 {
+		t.Fatalf("got %d interactions, want 1", len(recents))
+	}
+	if recents[0].RubricJSON == "" || recents[0].RubricScoreJSON == "" {
+		t.Fatalf("expected rubric JSON to be persisted on interaction: %+v", recents[0])
+	}
+	snapshots, err := store.GetPedagogicalSnapshots("L_owner", recents[0].DomainID, "a", 5)
+	if err != nil {
+		t.Fatalf("get snapshots: %v", err)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("got %d snapshots, want 1", len(snapshots))
+	}
+	if !strings.Contains(snapshots[0].ObservationJSON, `"rubric_score"`) {
+		t.Fatalf("snapshot observation should include rubric_score, got %s", snapshots[0].ObservationJSON)
+	}
+}
+
+func TestRecordInteraction_ReturnsPedagogicalModelObservation(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 9.0,
+		"confidence":            0.8,
+		"notes":                 "model audit",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+
+	out := decodeResult(t, res)
+	obs, ok := out["observation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected observation map, got %v", out["observation"])
+	}
+	if _, ok := obs["bkt_individualized_profile"].(map[string]any); !ok {
+		t.Fatalf("expected individualized BKT profile in observation, got %v", obs)
+	}
+	params, ok := obs["bkt_individualized_params"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected individualized BKT params in observation, got %v", obs)
+	}
+	if _, ok := params["p_learn"].(float64); !ok {
+		t.Fatalf("expected p_learn in individualized BKT params, got %v", params)
+	}
+	rasch, ok := obs["rasch_elo"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected rasch_elo in observation, got %v", obs)
+	}
+	if _, ok := rasch["success_probability_before"].(float64); !ok {
+		t.Fatalf("expected success_probability_before in rasch_elo, got %v", rasch)
+	}
+
+	recents, err := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if err != nil || len(recents) != 1 {
+		t.Fatalf("expected persisted interaction, got len=%d err=%v", len(recents), err)
+	}
+	snapshots, err := store.GetPedagogicalSnapshots("L_owner", recents[0].DomainID, "a", 5)
+	if err != nil {
+		t.Fatalf("get snapshots: %v", err)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("got %d snapshots, want 1", len(snapshots))
+	}
+	if !strings.Contains(snapshots[0].ObservationJSON, `"rasch_elo"`) ||
+		!strings.Contains(snapshots[0].ObservationJSON, `"bkt_learn"`) {
+		t.Fatalf("snapshot observation should include model signals, got %s", snapshots[0].ObservationJSON)
+	}
+}
+
+func TestRecordInteraction_RejectsInvalidRubricJSON(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            0.8,
+		"notes":                 "",
+		"rubric_json":           `{"criteria":`,
+	})
+	if !res.IsError {
+		t.Fatalf("expected rubric_json validation error, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "rubric_json") || !strings.Contains(msg, "valid JSON") {
+		t.Fatalf("expected rubric_json JSON error, got %q", msg)
+	}
+
+	recents, _ := store.GetRecentInteractionsByLearner("L_owner", 5)
+	if len(recents) != 0 {
+		t.Fatalf("expected no interactions persisted on bad rubric_json, got %d", len(recents))
+	}
+}
+
+func TestRecordInteraction_RejectsNegativeScalarRubricScoreJSON(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 5.0,
+		"confidence":            0.8,
+		"notes":                 "",
+		"rubric_score_json":     `-0.8`,
+	})
+	if !res.IsError {
+		t.Fatalf("expected rubric_score_json validation error, got %q", resultText(res))
+	}
+	msg := resultText(res)
+	if !strings.Contains(msg, "rubric_score_json") || !strings.Contains(msg, "non-negative") {
+		t.Fatalf("expected structured rubric_score_json error, got %q", msg)
+	}
+}
+
 func TestRecordInteraction_FailureDecliningSignal(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	makeOwnerDomain(t, store, "L_owner", "math")
@@ -660,7 +830,7 @@ func TestApplyInteraction_IRTReadsPreFSRSDifficulty(t *testing.T) {
 		t.Fatalf("test setup is vacuous: pre/post FSRS thetas are identical (%v)", expectedTheta)
 	}
 
-	cs, err := applyInteraction(deps, "L_owner", interactionInput{
+	cs, _, err := applyInteraction(deps, "L_owner", interactionInput{
 		Concept:             "a",
 		ActivityType:        "RECALL_EXERCISE",
 		Success:             false, // → FSRS rating Again

@@ -428,7 +428,6 @@ func (s *Store) UpdateDomainLastValueAxis(domainID, axis string) error {
 	return nil
 }
 
-
 func (s *Store) UpdateDomainGraph(domainID string, graph models.KnowledgeSpace) error {
 	graphJSON, err := json.Marshal(graph)
 	if err != nil {
@@ -635,19 +634,20 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 
 // ─── Interactions ─────────────────────────────────────────────────────────────
 
-const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, created_at`
+const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, rubric_json, rubric_score_json, created_at`
 
 func (s *Store) CreateInteraction(i *models.Interaction) error {
 	i.CreatedAt = time.Now().UTC()
 	result, err := s.db.Exec(
-		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, rubric_json, rubric_score_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.LearnerID, i.Concept, i.ActivityType, boolToInt(i.Success),
 		i.ResponseTime, i.Confidence, i.ErrorType, i.Notes,
 		i.HintsRequested, boolToInt(i.SelfInitiated), i.CalibrationID, boolToInt(i.IsProactiveReview),
 		nullString(i.MisconceptionType), nullString(i.MisconceptionDetail),
 		nullString(i.DomainID),
 		nullFloat64(i.BKTSlip), nullFloat64(i.BKTGuess),
+		nullString(i.RubricJSON), nullString(i.RubricScoreJSON),
 		i.CreatedAt,
 	)
 	if err != nil {
@@ -706,7 +706,7 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 	for rows.Next() {
 		i := &models.Interaction{}
 		var successInt, selfInitInt, proactiveInt int
-		var errorType, calibrationID, misconceptionType, misconceptionDetail, domainID sql.NullString
+		var errorType, calibrationID, misconceptionType, misconceptionDetail, domainID, rubricJSON, rubricScoreJSON sql.NullString
 		var bktSlip, bktGuess sql.NullFloat64
 		if err := rows.Scan(
 			&i.ID, &i.LearnerID, &i.Concept, &i.ActivityType,
@@ -714,6 +714,7 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 			&i.HintsRequested, &selfInitInt, &calibrationID, &proactiveInt,
 			&misconceptionType, &misconceptionDetail, &domainID,
 			&bktSlip, &bktGuess,
+			&rubricJSON, &rubricScoreJSON,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan interaction row: %w", err)
@@ -743,6 +744,12 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 		if bktGuess.Valid {
 			v := bktGuess.Float64
 			i.BKTGuess = &v
+		}
+		if rubricJSON.Valid {
+			i.RubricJSON = rubricJSON.String
+		}
+		if rubricScoreJSON.Valid {
+			i.RubricScoreJSON = rubricScoreJSON.String
 		}
 		interactions = append(interactions, i)
 	}
@@ -1185,7 +1192,7 @@ const fragileThreshold = 0.30
 //
 //   - mastery_threshold : concept_state.p_mastery >= 0.70 and updated_at >= since
 //   - retention_drop    : p_mastery currently < 0.30 (proxy for the fragile state — not a real drop event,
-//                         since the query sees a snapshot, not a transition) and updated_at >= since
+//     since the query sees a snapshot, not a transition) and updated_at >= since
 //   - streak_start      : earliest interaction in a still-running streak (computed via GetActivityStreak)
 //
 // (calibration_threshold derivable from calibration_history but skipped in v1
