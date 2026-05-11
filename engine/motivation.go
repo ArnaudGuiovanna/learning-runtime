@@ -36,7 +36,7 @@ type BriefInput struct {
 // algorithms.MasteryBKT() / REGULATION_THRESHOLD. It is an empirical bound
 // for the "individual interest" phase from Hidi & Renninger 2006 (Four-Phase
 // Model of Interest Development), which is conceptually orthogonal to the
-// runtime's notion of "concept BKT-maîtrisé". Coupling them was rejected in
+// runtime's notion of "concept BKT-mastered". Coupling them was rejected in
 // docs/regulation-design/07-threshold-resolver.md OQ-7.2.
 func InferInterestPhase(sessions int, mastery, selfInitRatio float64) string {
 	if mastery > 0.85 || (selfInitRatio > 0.6 && sessions >= 3) {

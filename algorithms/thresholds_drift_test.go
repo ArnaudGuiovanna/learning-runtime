@@ -18,7 +18,7 @@ import (
 // in the same line as a "mastery"/"PMastery" identifier. Each match must
 // either live in algorithms/thresholds.go or appear in the explicit
 // allow-list below — see docs/regulation-design/07-threshold-resolver.md
-// §2 (Sites NON refactorés) for the rationale of each entry.
+// §2 (Non-refactored sites) for the rationale of each entry.
 //
 // Adding a new entry here is a deliberate decision. The default action
 // when this test fires is to refactor the call site to use

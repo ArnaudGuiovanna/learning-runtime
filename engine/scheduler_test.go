@@ -40,9 +40,9 @@ func TestSendOLM_DispatchesFallbackWhenQueueEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		got := string(body)
-		if !strings.Contains(got, "Focus du moment") &&
-			!strings.Contains(got, "Prochain palier") &&
-			!strings.Contains(got, "reprendre vite") {
+		if !strings.Contains(got, "Current focus") &&
+			!strings.Contains(got, "Next milestone") &&
+			!strings.Contains(got, "needs attention now") {
 			t.Errorf("expected an OLM body, got: %s", got)
 		}
 		w.WriteHeader(http.StatusNoContent)

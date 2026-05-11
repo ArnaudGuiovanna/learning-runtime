@@ -43,7 +43,7 @@ type PhaseConfig struct {
 	// goal_relevance[c] > GoalRelevantCutoff. Default 0 (any strictly
 	// positive score qualifies). Concepts uncovered by the
 	// goal_relevance vector are excluded by virtue of not being in
-	// the map (cohérent with [4] OQ-4.3 = B').
+	// the map (consistent with [4] OQ-4.3 = B').
 	GoalRelevantCutoff float64
 
 	// AntiRepeatWindow is the value the orchestrator forwards into

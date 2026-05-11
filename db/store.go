@@ -1215,7 +1215,7 @@ func (s *Store) GetRecentLearnerEvents(learnerID string, since time.Time) ([]Raw
 		if mastery >= masteryKST {
 			events = append(events, RawLearnerEvent{
 				At: at, Kind: "mastery_threshold", Concept: concept,
-				Message: fmt.Sprintf("%s atteint le seuil de maîtrise", concept),
+				Message: fmt.Sprintf("%s reached the mastery threshold", concept),
 			})
 		} else if mastery < fragileThreshold {
 			events = append(events, RawLearnerEvent{
@@ -1233,7 +1233,7 @@ func (s *Store) GetRecentLearnerEvents(learnerID string, since time.Time) ([]Raw
 		if !startedAt.Before(since) {
 			events = append(events, RawLearnerEvent{
 				At: startedAt, Kind: "streak_start",
-				Message: fmt.Sprintf("Démarrage de la série de %d jours", streak),
+				Message: fmt.Sprintf("%d-day streak started", streak),
 			})
 		}
 	}

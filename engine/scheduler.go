@@ -447,11 +447,11 @@ func (s *Scheduler) sendOLM() {
 // is used as-is for Description; the title/color come from FocusUrgency for
 // visual consistency with the Go fallback.
 func embedFromQueueItem(item *models.WebhookQueueItem, urgency models.AlertUrgency) discordEmbed {
-	title := "🧭 État du moment"
+	title := "🧭 Current state"
 	color := colorInfo
 	switch urgency {
 	case models.UrgencyCritical:
-		title = "🚨 État — un concept à reprendre vite"
+		title = "🚨 State — one concept needs attention now"
 		color = colorCritical
 	case models.UrgencyWarning:
 		color = colorWarning

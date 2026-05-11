@@ -158,7 +158,7 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 
 	return models.Activity{
 		Type:         models.ActivityRest,
-		Rationale:    "pipeline_exhausted: NoFringe persistant après retry",
+		Rationale:    "pipeline_exhausted: NoFringe persists after retry",
 		PromptForLLM: "Aucune activite eligible apres retry. Demande a l'apprenant ce qu'il souhaite faire.",
 	}, currentPhase, nil
 }
@@ -253,8 +253,8 @@ func buildObservables(domain *models.Domain, pf *pipelineFixtures, cfg PhaseConf
 			hasRel = true
 		}
 		if !hasRel {
-			// Uncovered concept — exclu du set goal-relevant (cohérent
-			// avec OQ-2.7 et [4] OQ-4.3 = B').
+			// Uncovered concept — excluded from the goal-relevant set
+			// (consistent with OQ-2.7 and [4] OQ-4.3 = B').
 			continue
 		}
 		if rel <= cfg.GoalRelevantCutoff {
@@ -264,8 +264,8 @@ func buildObservables(domain *models.Domain, pf *pipelineFixtures, cfg PhaseConf
 
 		cs := pf.StatesByConcept[c]
 		if cs == nil {
-			// Pas de state ≡ jamais pratiqué ≡ pas mastered, pas
-			// "below retention" (rien à oublier).
+			// No state ≡ never practised ≡ not mastered, not
+			// "below retention" (nothing to forget).
 			continue
 		}
 		if cs.PMastery >= bkt {
@@ -368,9 +368,9 @@ func runPipeline(
 	// ── [5] ActionSelector — on the chosen concept ────────────────
 	cs := pf.StatesByConcept[selection.Concept]
 	if cs == nil {
-		// Concept dans le graphe mais sans state — créer un state par
-		// défaut pour SelectAction (mastery=0, theta=0) afin d'éviter
-		// le panic. SelectAction's NaN-guard handles missing fields.
+		// Concept in the graph but no state — create a default state
+		// for SelectAction (mastery=0, theta=0) to avoid the panic.
+		// SelectAction's NaN-guard handles missing fields.
 		cs = models.NewConceptState(input.LearnerID, selection.Concept)
 	}
 	var mc *db.MisconceptionGroup

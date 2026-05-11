@@ -5,7 +5,7 @@
 //
 // BuildGlobalOLMSnapshot rolls up across all non-archived domains for a
 // learner — exposed via get_olm_snapshot(scope:"global") for the
-// "Modèle global" view.
+// "Global model" view.
 
 package engine
 
