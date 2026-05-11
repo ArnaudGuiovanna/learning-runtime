@@ -25,7 +25,7 @@ func registerGetMisconceptions(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetMisconceptionsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_misconceptions: auth failed", "err", err)
+			logAuthFailure(deps, "get_misconceptions", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

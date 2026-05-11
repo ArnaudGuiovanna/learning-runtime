@@ -23,7 +23,7 @@ func registerGetOLMSnapshot(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetOLMSnapshotParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_olm_snapshot: auth failed", "err", err)
+			logAuthFailure(deps, "get_olm_snapshot", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

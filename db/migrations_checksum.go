@@ -5,6 +5,7 @@
 package db
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -35,11 +36,20 @@ func (m migration) checksum() string {
 	return hex.EncodeToString(sum[:])
 }
 
+type migrationTx interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // ensureSchemaMigrationsTable creates the bookkeeping table used by Migrate to
 // track which migrations have been applied and the checksum they were applied
 // with. Called unconditionally before any other migration runs.
 func ensureSchemaMigrationsTable(db *sql.DB) error {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	return ensureSchemaMigrationsTableInTx(context.Background(), db)
+}
+
+func ensureSchemaMigrationsTableInTx(ctx context.Context, tx migrationTx) error {
+	_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,
     checksum   TEXT NOT NULL,
     applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -55,14 +65,27 @@ func ensureSchemaMigrationsTable(db *sql.DB) error {
 // containing "checksum mismatch" so callers (and tests) can detect drift.
 //
 // Issue #118: the body Exec and the bookkeeping INSERT are wrapped in a
-// single transaction so a crash (or any error) between them cannot leave
-// the schema mutated but unrecorded. The IgnoreExecErrors path is a special
-// case: a failed Exec inside a sqlite tx aborts that tx, so we have to roll
-// it back and start a fresh tx for the INSERT — see recordIgnoredMigration.
+// single transaction so a crash (or any error) between them cannot leave the
+// schema mutated but unrecorded. Issue #126: Migrate calls applyMigrationInTx
+// while holding a BEGIN EXCLUSIVE transaction, serialising the check-then-
+// insert path across processes.
 func applyMigration(db *sql.DB, m migration) error {
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration tx %q: %w", m.Version, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := applyMigrationInTx(ctx, tx, m); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func applyMigrationInTx(ctx context.Context, tx migrationTx, m migration) error {
 	var storedChecksum string
-	// The checksum-stored check is read-only and stays outside the tx.
-	row := db.QueryRow(`SELECT checksum FROM schema_migrations WHERE version = ?`, m.Version)
+	row := tx.QueryRowContext(ctx, `SELECT checksum FROM schema_migrations WHERE version = ?`, m.Version)
 	switch err := row.Scan(&storedChecksum); err {
 	case nil:
 		if storedChecksum != m.checksum() {
@@ -79,53 +102,42 @@ func applyMigration(db *sql.DB, m migration) error {
 		return fmt.Errorf("schema_migrations: read version %q: %w", m.Version, err)
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin migration tx %q: %w", m.Version, err)
+	if _, err := tx.ExecContext(ctx, `SAVEPOINT migration_body`); err != nil {
+		return fmt.Errorf("start migration savepoint %q: %w", m.Version, err)
 	}
-	// Rollback is a no-op once Commit succeeds; if the IgnoreExecErrors
-	// branch already rolled back manually, this returns sql.ErrTxDone
-	// which we intentionally ignore.
-	defer func() { _ = tx.Rollback() }()
-
-	if _, execErr := tx.Exec(m.Body); execErr != nil {
+	if _, execErr := tx.ExecContext(ctx, m.Body); execErr != nil {
+		if err := rollbackMigrationBody(ctx, tx, m.Version, execErr); err != nil {
+			return err
+		}
 		if !m.IgnoreExecErrors {
 			return fmt.Errorf("apply migration %q: %w", m.Version, execErr)
 		}
 		// IgnoreExecErrors covers ALTERs already applied on legacy DBs
 		// ("duplicate column name", "no such column" on DROP COLUMN,
-		// etc.). The failed statement aborted this tx, so roll it back
-		// and record the bookkeeping row on a fresh tx — subsequent
-		// runs then take the "checksum already matches, skip" branch.
-		_ = tx.Rollback()
-		return recordIgnoredMigration(db, m)
+		// etc.). Roll back any partial body effects, then record the
+		// bookkeeping row in the still-open transaction — subsequent runs
+		// then take the "checksum already matches, skip" branch.
+	} else if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT migration_body`); err != nil {
+		return fmt.Errorf("release migration savepoint %q: %w", m.Version, err)
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		ctx,
 		`INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)`,
 		m.Version, m.checksum(),
 	); err != nil {
 		return fmt.Errorf("record migration %q: %w", m.Version, err)
 	}
-	return tx.Commit()
+	return nil
 }
 
-// recordIgnoredMigration inserts the schema_migrations bookkeeping row for
-// an IgnoreExecErrors migration whose body Exec failed. It runs on its own
-// transaction because the original tx was aborted by the failing body
-// statement (sqlite refuses further writes on an aborted tx).
-func recordIgnoredMigration(db *sql.DB, m migration) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin replacement tx %q: %w", m.Version, err)
+func rollbackMigrationBody(ctx context.Context, tx migrationTx, version string, cause error) error {
+	if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT migration_body`); err != nil {
+		return fmt.Errorf("rollback migration savepoint %q after %v: %w", version, cause, err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(
-		`INSERT INTO schema_migrations (version, checksum) VALUES (?, ?)`,
-		m.Version, m.checksum(),
-	); err != nil {
-		return fmt.Errorf("record migration %q: %w", m.Version, err)
+	if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT migration_body`); err != nil {
+		return fmt.Errorf("release migration savepoint %q after rollback from %v: %w", version, cause, err)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // buildMigrations assembles the ordered migration list from the embedded

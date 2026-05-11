@@ -27,6 +27,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"time"
@@ -53,6 +54,9 @@ type OrchestratorInput struct {
 	// production. Tests can pass narrower configs to drive specific
 	// scenarios.
 	Config PhaseConfig
+	// Logger receives FSM and persistence diagnostics. Nil disables
+	// orchestrator logging for callers that have not opted in.
+	Logger *slog.Logger
 }
 
 // orchestratorMaxRetries is the upper bound on FSM-driven pipeline
@@ -83,6 +87,7 @@ func Orchestrate(store *db.Store, input OrchestratorInput) (models.Activity, err
 //
 // On error, the returned phase is the empty string ("").
 func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Activity, models.Phase, error) {
+	logger := input.logger()
 	domain, err := store.GetDomainByID(input.DomainID)
 	if err != nil {
 		return models.Activity{}, "", fmt.Errorf("%w: %q: %v", ErrUnknownDomain, input.DomainID, err)
@@ -109,11 +114,11 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 		if eval.To == models.PhaseDiagnostic {
 			entryEntropy = obs.MeanEntropy
 		}
-		slog.Info("phase transition (FSM)",
+		logger.Info("phase transition (FSM)",
 			"domain", domain.ID, "from", eval.From, "to", eval.To,
 			"entry_entropy", entryEntropy, "rationale", eval.Rationale)
 		if persistErr := store.UpdateDomainPhase(domain.ID, eval.To, entryEntropy, input.Now); persistErr != nil {
-			slog.Error("orchestrator: failed to persist phase transition",
+			logger.Error("orchestrator: failed to persist phase transition",
 				"domain", domain.ID, "from", eval.From, "to", eval.To, "err", persistErr)
 			// The transition is informative — failing to persist
 			// must not block the live activity. Continue with the
@@ -147,10 +152,10 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 		if next == currentPhase {
 			break
 		}
-		slog.Info("phase fallback (NoFringe)",
+		logger.Info("phase fallback (NoFringe)",
 			"domain", domain.ID, "from", currentPhase, "to", next, "retry", retry)
 		if persistErr := store.UpdateDomainPhase(domain.ID, next, 0, input.Now); persistErr != nil {
-			slog.Error("orchestrator: failed to persist NoFringe fallback transition",
+			logger.Error("orchestrator: failed to persist NoFringe fallback transition",
 				"domain", domain.ID, "from", currentPhase, "to", next, "err", persistErr)
 		}
 		currentPhase = next
@@ -161,6 +166,13 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 		Rationale:    "pipeline_exhausted: NoFringe persists after retry",
 		PromptForLLM: "Aucune activite eligible apres retry. Demande a l'apprenant ce qu'il souhaite faire.",
 	}, currentPhase, nil
+}
+
+func (input OrchestratorInput) logger() *slog.Logger {
+	if input.Logger != nil {
+		return input.Logger
+	}
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // pipelineSignal lets runPipeline communicate "no candidate, please

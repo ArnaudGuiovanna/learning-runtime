@@ -16,8 +16,9 @@ import (
 )
 
 type CalibrationCheckParams struct {
-	ConceptID        string  `json:"concept_id" jsonschema:"the concept to assess"`
-	PredictedMastery float64 `json:"predicted_mastery" jsonschema:"learner self-assessment: 1=no mastery, 5=perfect mastery"`
+	Concept          string  `json:"concept,omitempty" jsonschema:"the concept to assess; canonical key for concept-targeting tools; required unless concept_id is used"`
+	ConceptID        string  `json:"concept_id,omitempty" jsonschema:"deprecated compatibility alias for concept; prefer concept"`
+	PredictedMastery float64 `json:"predicted_mastery" jsonschema:"learner self-assessment on a 1..5 Likert scale (1=no mastery, 5=perfect mastery); stored internally as 0..1"`
 	DomainID         string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
@@ -28,33 +29,28 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params CalibrationCheckParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("calibration_check: auth failed", "err", err)
+			logAuthFailure(deps, "calibration_check", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
-		if params.ConceptID == "" {
-			r, _ := errorResult("concept_id is required")
+		concept, err := normalizeConceptParam(params.Concept, params.ConceptID)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if concept == "" {
+			r, _ := errorResult("concept is required")
 			return r, nil, nil
 		}
 
-		// String length caps (issue #82). concept_id is persisted into
+		// String length cap (issue #82). concept is persisted into
 		// calibration_records and echoed into prompt_text; domain_id is
 		// resolved against the learner's domains. Without these guards a
 		// misbehaving caller could push multi-MB strings into either path.
-		stringFields := []struct {
-			name  string
-			value string
-			max   int
-		}{
-			{"concept_id", params.ConceptID, maxShortLabelLen},
-			{"domain_id", params.DomainID, maxShortLabelLen},
-		}
-		for _, f := range stringFields {
-			if err := validateString(f.name, f.value, f.max); err != nil {
-				r, _ := errorResult(err.Error())
-				return r, nil, nil
-			}
+		if err := validateString("domain_id", params.DomainID, maxShortLabelLen); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
 		}
 
 		// 1-5 Likert self-assessment. Reject NaN/Inf and out-of-range values
@@ -71,7 +67,7 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 		record := &models.CalibrationRecord{
 			PredictionID: predictionID,
 			LearnerID:    learnerID,
-			ConceptID:    params.ConceptID,
+			ConceptID:    concept,
 			Predicted:    predicted,
 		}
 
@@ -83,7 +79,7 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 
 		promptText := fmt.Sprintf(
 			"You estimated your mastery of '%s' at %.0f/5. Let's check that with an exercise.",
-			params.ConceptID, params.PredictedMastery,
+			concept, params.PredictedMastery,
 		)
 
 		r, _ := jsonResult(map[string]interface{}{
@@ -96,7 +92,7 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 
 type RecordCalibrationResultParams struct {
 	PredictionID string  `json:"prediction_id" jsonschema:"prediction ID returned by calibration_check"`
-	ActualScore  float64 `json:"actual_score" jsonschema:"actual score between 0 and 1 (0=total failure, 1=perfect success)"`
+	ActualScore  float64 `json:"actual_score" jsonschema:"actual score as a 0..1 float (0=total failure, 1=perfect success)"`
 }
 
 func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
@@ -106,7 +102,7 @@ func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordCalibrationResultParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_calibration_result: auth failed", "err", err)
+			logAuthFailure(deps, "record_calibration_result", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

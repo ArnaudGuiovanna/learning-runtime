@@ -18,7 +18,9 @@ import (
 )
 
 type GetNextActivityParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"target domain ID; if absent, the learner's last active domain is used"`
+	DomainID   string `json:"domain_id,omitempty" jsonschema:"target domain ID; if absent, the learner's last active domain is used"`
+	DomainName string `json:"domain_name,omitempty" jsonschema:"target domain name when the learner names a subject but the domain_id is unknown"`
+	Intent     string `json:"intent,omitempty" jsonschema:"learner intent: auto or review. Use review when the learner asks to revise/review already studied material"`
 }
 
 func registerGetNextActivity(server *mcp.Server, deps *Deps) {
@@ -28,21 +30,48 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"When to call: this is the main tool of the learning cycle; it already includes alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief. " +
 			"When NOT to call: if another tool just returned needs_domain_setup=true (call init_domain first); do not call get_pending_alerts or get_metacognitive_mirror in the same turn unless the learner explicitly asks for those raw views. " +
 			"Precondition: a domain must exist; otherwise needs_domain_setup=true is returned with a setup_domain activity. " +
-			"Returns: {needs_domain_setup, domain_id, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
+			"Returns: {needs_domain_setup, domain_id, domain_name, intent, intent_status, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetNextActivityParams) (*mcp.CallToolResult, any, error) {
 		totalStart := time.Now()
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_next_activity: auth failed", "err", err)
+			logAuthFailure(deps, "get_next_activity", err)
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+
+		for _, f := range []struct {
+			name  string
+			value string
+		}{
+			{"domain_id", params.DomainID},
+			{"domain_name", params.DomainName},
+			{"intent", params.Intent},
+		} {
+			if err := validateString(f.name, f.value, maxShortLabelLen); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+		}
+		intent, err := normalizeActivityIntent(params.Intent)
+		if err != nil {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
 		// Check if domain exists
 		domainStart := time.Now()
-		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
+		domain, err := resolveActivityDomain(deps.Store, learnerID, params.DomainID, params.DomainName)
 		domainMs := time.Since(domainStart).Milliseconds()
 		if err != nil || domain == nil {
+			if params.DomainName != "" {
+				msg := "domain not found"
+				if err != nil {
+					msg = err.Error()
+				}
+				r, _ := errorResult(msg)
+				return r, nil, nil
+			}
 			r, _ := jsonResult(map[string]interface{}{
 				"needs_domain_setup": true,
 				"activity": models.Activity{
@@ -85,12 +114,6 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		// Compute alerts (only for domain concepts)
 		alerts := engine.ComputeAlerts(domainStates, domainInteractions, sessionStart)
 
-		// Mastery map for downstream consumers (motivation brief, etc.).
-		mastery := make(map[string]float64)
-		for _, cs := range domainStates {
-			mastery[cs.Concept] = cs.PMastery
-		}
-
 		// Build set of concepts already practiced in this session
 		sessionConcepts := make(map[string]int)
 		for _, i := range sessionInteractions {
@@ -100,16 +123,30 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 		prefetchMs := time.Since(prefetchStart).Milliseconds()
 
-		// Route to next activity through the regulation pipeline.
-		// OrchestrateWithPhase returns the post-orchestrate phase so we
-		// can audit-log it without re-reading the domain row (perf #91).
+		// Route to next activity through the regulation pipeline, or through
+		// the explicit review override when the learner asks to revise.
 		orchestratorStart := time.Now()
-		activity, orchPhase, orchErr := engine.OrchestrateWithPhase(deps.Store, engine.OrchestratorInput{
-			LearnerID: learnerID,
-			DomainID:  domain.ID,
-			Now:       time.Now().UTC(),
-			Config:    engine.NewDefaultPhaseConfig(),
-		})
+		var activity models.Activity
+		var orchPhase models.Phase
+		var orchErr error
+		intentStatus := "auto"
+		route := "orchestrator"
+		now := time.Now().UTC()
+		if intent == activityIntentReview {
+			activity, intentStatus = selectReviewIntentActivity(deps.Store, learnerID, domain, domainStates, domainInteractions, sessionConcepts, now)
+			orchPhase = models.PhaseMaintenance
+			route = "review_override"
+		} else {
+			// OrchestrateWithPhase returns the post-orchestrate phase so we
+			// can audit-log it without re-reading the domain row (perf #91).
+			activity, orchPhase, orchErr = engine.OrchestrateWithPhase(deps.Store, engine.OrchestratorInput{
+				LearnerID: learnerID,
+				DomainID:  domain.ID,
+				Now:       now,
+				Config:    engine.NewDefaultPhaseConfig(),
+				Logger:    deps.Logger,
+			})
+		}
 		orchestratorMs := time.Since(orchestratorStart).Milliseconds()
 		if orchErr != nil {
 			deps.Logger.Error("orchestrator failed", "err", orchErr, "learner", learnerID, "domain", domain.ID)
@@ -141,7 +178,10 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		deps.Logger.Info("pipeline decision",
 			"learner", learnerID,
 			"domain", domain.ID,
+			"route", route,
 			"phase", loggedPhase,
+			"intent", intent,
+			"intent_status", intentStatus,
 			"activity_type", activity.Type,
 			"concept", activity.Concept,
 			"rationale", activity.Rationale,
@@ -323,6 +363,9 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		out := map[string]any{
 			"needs_domain_setup":        false,
 			"domain_id":                 domain.ID,
+			"domain_name":               domain.Name,
+			"intent":                    intent,
+			"intent_status":             intentStatus,
 			"activity":                  activity,
 			"session_concepts_done":     len(sessionConcepts),
 			"metacognitive_mirror":      mirror,

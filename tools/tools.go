@@ -32,6 +32,13 @@ func getLearnerID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+func logAuthFailure(deps *Deps, tool string, err error) {
+	if deps == nil || deps.Logger == nil {
+		return
+	}
+	deps.Logger.Info(tool+": auth failed", "err", err)
+}
+
 // filterStatesByConcepts returns only the states whose concept is in the set.
 // An empty set means "no active domains" → returns nil so callers don't surface
 // orphan history (e.g. priority_concept stays empty when the learner has no

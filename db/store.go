@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -48,6 +49,8 @@ func IsSafeWebhookURL(rawURL string) bool {
 type Store struct {
 	db *sql.DB
 }
+
+var ErrOAuthClientLimitReached = errors.New("oauth client limit reached")
 
 // RawDB returns the underlying *sql.DB. Intended for tests that need
 // to insert with explicit timestamps (e.g. simulating older
@@ -496,7 +499,13 @@ func (s *Store) ActiveDomainConceptSet(learnerID string) (map[string]bool, error
 }
 
 func (s *Store) DeleteDomain(domainID, learnerID string) error {
-	result, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete domain tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.Exec(
 		`DELETE FROM domains WHERE id = ? AND learner_id = ?`,
 		domainID, learnerID,
 	)
@@ -506,6 +515,23 @@ func (s *Store) DeleteDomain(domainID, learnerID string) error {
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("domain not found")
+	}
+
+	if _, err := tx.Exec(
+		`DELETE FROM implementation_intentions WHERE learner_id = ? AND domain_id = ?`,
+		learnerID, domainID,
+	); err != nil {
+		return fmt.Errorf("delete domain implementation intentions: %w", err)
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM webhook_message_queue WHERE learner_id = ? AND kind = ?`,
+		learnerID, "olm:"+domainID,
+	); err != nil {
+		return fmt.Errorf("delete domain webhook queue: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete domain tx: %w", err)
 	}
 	return nil
 }
@@ -1072,7 +1098,7 @@ func (s *Store) CreateOAuthClient(clientID, clientName, redirectURIs string) err
 }
 
 // CreateOAuthClientWithSecret persists a confidential client when secretHash != "".
-// secretHash should be hex-encoded SHA-256 of the issued secret; pass "" for public (PKCE) clients.
+// secretHash should be a bcrypt digest of the issued secret; pass "" for public (PKCE) clients.
 func (s *Store) CreateOAuthClientWithSecret(clientID, clientName, redirectURIs, secretHash string) error {
 	_, err := s.db.Exec(
 		`INSERT INTO oauth_clients (client_id, client_name, redirect_uris, client_secret_hash) VALUES (?, ?, ?, ?)`,
@@ -1082,6 +1108,39 @@ func (s *Store) CreateOAuthClientWithSecret(clientID, clientName, redirectURIs, 
 		return fmt.Errorf("create oauth client: %w", err)
 	}
 	return nil
+}
+
+// CreateOAuthClientWithSecretCapped persists a client only if the current row
+// count is still below maxClients. maxClients <= 0 disables the cap.
+func (s *Store) CreateOAuthClientWithSecretCapped(clientID, clientName, redirectURIs, secretHash string, maxClients int) error {
+	if maxClients <= 0 {
+		return s.CreateOAuthClientWithSecret(clientID, clientName, redirectURIs, secretHash)
+	}
+	result, err := s.db.Exec(
+		`INSERT INTO oauth_clients (client_id, client_name, redirect_uris, client_secret_hash)
+		 SELECT ?, ?, ?, ?
+		 WHERE (SELECT COUNT(*) FROM oauth_clients) < ?`,
+		clientID, clientName, redirectURIs, secretHash, maxClients,
+	)
+	if err != nil {
+		return fmt.Errorf("create oauth client: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("create oauth client rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrOAuthClientLimitReached
+	}
+	return nil
+}
+
+func (s *Store) CountOAuthClients() (int, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM oauth_clients`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count oauth clients: %w", err)
+	}
+	return count, nil
 }
 
 func (s *Store) GetOAuthClient(clientID string) (*OAuthClient, error) {

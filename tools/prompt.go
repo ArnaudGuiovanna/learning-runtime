@@ -63,7 +63,7 @@ OPERATING PRINCIPLES
 TOOLS (reference)
 - get_learner_context(): session context, domain list, progress_narrative
 - get_pending_alerts(): critical alerts
-- get_next_activity(): next optimal activity + metacognitive_mirror + tutor_mode + motivation_brief + mastery_evidence/mastery_uncertainty + transfer_profile + rasch_elo_calibration
+- get_next_activity(domain_id?, domain_name?, intent?): next optimal activity + metacognitive_mirror + tutor_mode + motivation_brief + mastery_evidence/mastery_uncertainty + transfer_profile + rasch_elo_calibration
 - record_interaction(): record an exercise outcome; updates BKT/FSRS/IRT and returns individualized BKT/Rasch-Elo observation signals
 - record_affect(): emotional check-in at session start/end
 - record_session_close(): close the session; returns recap_brief
@@ -104,12 +104,14 @@ A. SESSION START
 
 B. EXERCISE LOOP (per exercise)
    Before:
-   - Call get_next_activity(domain_id) - contains alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief.
+   - Call get_next_activity(domain_id?, domain_name?, intent?) - contains alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief.
+   - If the learner names a subject/domain and you do not know its ID, use the domains from get_learner_context and pass the matching domain_id. If the ID is unknown, pass domain_name. Never let the default last-active domain override an explicitly named subject.
+   - If the learner asks to revise/review/practice prior material, pass intent:"review". If intent_status=="no_reviewable_concept", say there is nothing previously studied to revise in that domain and ask whether they want to start a new concept.
    - Do not call get_pending_alerts in the same turn unless the learner explicitly asks for raw pending alerts.
    - If tutor_mode != normal: adapt your register (scaffolding / lighter).
    - If mastery_evidence is weak or mastery_uncertainty is low-confidence, prefer one more varied proof (recall, practice, feynman, transfer) before treating the concept as mastered.
    - Use transfer_profile to pick a missing or weak transfer dimension; use rasch_elo_calibration as an item-difficulty hint, not as learner-facing text.
-   - Call calibration_check(concept_id, predicted_mastery) only for session-opening calibration, mastery challenges, transfer/feynman probes, or every few exercises when calibration is stale. Do not block every routine exercise on a self-rating.
+   - Call calibration_check(concept, predicted_mastery) only for session-opening calibration, mastery challenges, transfer/feynman probes, or every few exercises when calibration is stale. Do not block every routine exercise on a self-rating.
    After:
    - Call record_calibration_result(prediction_id, actual_score) only if you called calibration_check before this exercise.
    - Call record_interaction() including hints_requested and self_initiated.
@@ -141,7 +143,7 @@ F. SIGNAL HANDLING
        - The mirror only activates on consolidated patterns (3+ sessions).
 
    F.2 Feynman & Transfer triggers
-       - On MASTERY_READY: offer feynman_challenge() or transfer_challenge().
+       - On MASTERY_READY: offer feynman_challenge(concept) or transfer_challenge(concept).
        - On TRANSFER_BLOCKED: trigger feynman_challenge().
        - After a feynman_challenge: ask for confirmation before injecting gaps via add_concepts().
 
@@ -163,7 +165,7 @@ F. SIGNAL HANDLING
 const goalDecomposerAppendix = `
 
 GOAL-AWARE TOOLS (REGULATION_GOAL=on):
-- set_goal_relevance(domain_id?, relevance): decompose the personal_goal against the concepts. Map concept_id -> score [0,1] (1.0 = central, 0.0 = orthogonal). INCREMENTAL semantics: only the concepts provided are updated; others keep their score. Unknown concept -> explicit error.
+- set_goal_relevance(domain_id?, relevance): decompose the personal_goal against the concepts. Map concept -> score 0..1 (1.0 = central, 0.0 = orthogonal). INCREMENTAL semantics: only the concepts provided are updated; others keep their score. Unknown concept -> explicit error.
 - get_goal_relevance(domain_id?): read the stored vector and the list of concepts still without a score. Use this to observe what is missing after add_concepts.
 
 When to call set_goal_relevance:

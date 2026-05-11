@@ -22,7 +22,7 @@ func registerValidateDomainGraph(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params ValidateDomainGraphParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("validate_domain_graph: auth failed", "err", err)
+			logAuthFailure(deps, "validate_domain_graph", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

@@ -30,9 +30,9 @@ type UpdateLearnerProfileParams struct {
 	Device          string   `json:"device,omitempty" jsonschema:"primary device (e.g. laptop, phone, tablet)"`
 	Objective       string   `json:"objective,omitempty" jsonschema:"updated learning objective"`
 	Language        string   `json:"language,omitempty" jsonschema:"preferred language for exercises (BCP-47 hint to the LLM)"`
-	CalibrationBias *float64 `json:"calibration_bias,omitempty" jsonschema:"calibration bias (positive=over-estimated, negative=under-estimated). Provide explicitly to overwrite; omit to leave unchanged. 0 = perfect calibration."`
+	CalibrationBias *float64 `json:"calibration_bias,omitempty" jsonschema:"signed calibration bias as a -1..1 float (positive=over-estimated, negative=under-estimated). Provide explicitly to overwrite; omit to leave unchanged. 0 = perfect calibration."`
 	AffectBaseline  string   `json:"affect_baseline,omitempty" jsonschema:"learner's emotional baseline"`
-	AutonomyScore   *float64 `json:"autonomy_score,omitempty" jsonschema:"current autonomy score (0-1). Provide explicitly to overwrite; omit to leave unchanged. 0 = fully dependent."`
+	AutonomyScore   *float64 `json:"autonomy_score,omitempty" jsonschema:"current autonomy score as a 0..1 float. Provide explicitly to overwrite; omit to leave unchanged. 0 = fully dependent."`
 }
 
 func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
@@ -42,7 +42,7 @@ func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UpdateLearnerProfileParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("update_learner_profile: auth failed", "err", err)
+			logAuthFailure(deps, "update_learner_profile", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

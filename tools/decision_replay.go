@@ -32,7 +32,7 @@ func registerGetDecisionReplaySummary(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetDecisionReplaySummaryParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_decision_replay_summary: auth failed", "err", err)
+			logAuthFailure(deps, "get_decision_replay_summary", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

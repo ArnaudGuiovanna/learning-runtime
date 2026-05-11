@@ -10,6 +10,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -36,22 +37,29 @@ const (
 	passwordMaxLen = 72
 )
 
+const (
+	registerBodyLimitBytes           int64 = 16 << 10
+	defaultMaxRegisteredOAuthClients       = 10_000
+)
+
 // OAuthServer implements the OAuth 2.1 authorization server.
 type OAuthServer struct {
-	store         *db.Store
-	baseURL       string
-	logger        *slog.Logger
-	loginFailures *LoginFailureTracker
+	store                *db.Store
+	baseURL              string
+	logger               *slog.Logger
+	loginFailures        *LoginFailureTracker
+	maxRegisteredClients int
 }
 
 // NewOAuthServer creates a new OAuthServer. The login-failure tracker locks
 // out an email after 5 password mismatches in 10 minutes (issue #36).
 func NewOAuthServer(store *db.Store, baseURL string, logger *slog.Logger) *OAuthServer {
 	return &OAuthServer{
-		store:         store,
-		baseURL:       baseURL,
-		logger:        logger,
-		loginFailures: NewLoginFailureTracker(5, 10*time.Minute),
+		store:                store,
+		baseURL:              baseURL,
+		logger:               logger,
+		loginFailures:        NewLoginFailureTracker(5, 10*time.Minute),
+		maxRegisteredClients: defaultMaxRegisteredOAuthClients,
 	}
 }
 
@@ -74,8 +82,8 @@ func (s *OAuthServer) HandleAuthServerMetadata(w http.ResponseWriter, r *http.Re
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"scopes_supported":                      []string{"learner"},
-		"registration_endpoint":                    s.baseURL + "/register",
-		"token_endpoint_auth_methods_supported":    []string{"none", "client_secret_basic", "client_secret_post"},
+		"registration_endpoint":                 s.baseURL + "/register",
+		"token_endpoint_auth_methods_supported": []string{"none", "client_secret_basic", "client_secret_post"},
 		// RFC 9207: we include iss in authorization responses.
 		"authorization_response_iss_parameter_supported": true,
 	}
@@ -615,8 +623,19 @@ func isPrivateIP(ip net.IP) bool {
 // HandleRegister implements RFC 7591 dynamic client registration.
 // Claude.ai must register as an OAuth client before starting the auth flow.
 func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.ContentLength > registerBodyLimitBytes {
+		writeRegistrationErrorStatus(w, http.StatusRequestEntityTooLarge, "invalid_client_metadata", "request body too large")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, registerBodyLimitBytes)
+
 	var req map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeRegistrationErrorStatus(w, http.StatusRequestEntityTooLarge, "invalid_client_metadata", "request body too large")
+			return
+		}
 		http.Error(w, `{"error":"invalid_client_metadata"}`, http.StatusBadRequest)
 		return
 	}
@@ -655,6 +674,10 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.requireRegistrationCapacity(w); err != nil {
+		return
+	}
+
 	clientID, err := generateCode()
 	if err != nil {
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
@@ -683,7 +706,11 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		secretHash = string(hash)
 	}
 
-	if err := s.store.CreateOAuthClientWithSecret(clientID, clientName, string(redirectURIsJSON), secretHash); err != nil {
+	if err := s.store.CreateOAuthClientWithSecretCapped(clientID, clientName, string(redirectURIsJSON), secretHash, s.maxRegisteredClients); err != nil {
+		if errors.Is(err, db.ErrOAuthClientLimitReached) {
+			writeRegistrationError(w, "registration_disabled", "client cap reached")
+			return
+		}
 		s.logger.Error("persist client registration failed", "err", err)
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 		return
@@ -725,6 +752,23 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (s *OAuthServer) requireRegistrationCapacity(w http.ResponseWriter) error {
+	if s.maxRegisteredClients <= 0 {
+		return nil
+	}
+	n, err := s.store.CountOAuthClients()
+	if err != nil {
+		s.logger.Error("count oauth clients failed", "err", err)
+		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
+		return err
+	}
+	if n >= s.maxRegisteredClients {
+		writeRegistrationError(w, "registration_disabled", "client cap reached")
+		return fmt.Errorf("oauth client cap reached")
+	}
+	return nil
+}
+
 func mapKeys(m map[string]interface{}) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -734,8 +778,12 @@ func mapKeys(m map[string]interface{}) []string {
 }
 
 func writeRegistrationError(w http.ResponseWriter, errCode, desc string) {
+	writeRegistrationErrorStatus(w, http.StatusBadRequest, errCode, desc)
+}
+
+func writeRegistrationErrorStatus(w http.ResponseWriter, status int, errCode, desc string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{
 		"error":             errCode,
 		"error_description": desc,

@@ -37,7 +37,7 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params LearningNegotiationParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("learning_negotiation: auth failed", "err", err)
+			logAuthFailure(deps, "learning_negotiation", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -115,6 +115,7 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			DomainID:  domain.ID,
 			Now:       time.Now().UTC(),
 			Config:    engine.NewDefaultPhaseConfig(),
+			Logger:    deps.Logger,
 		})
 		if orchErr != nil {
 			deps.Logger.Error("learning_negotiation: orchestrator failed", "err", orchErr, "learner", learnerID)

@@ -246,7 +246,7 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params InitDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("init_domain: auth failed", "err", err)
+			logAuthFailure(deps, "init_domain", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -377,7 +377,7 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params AddConceptsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("add_concepts: auth failed", "err", err)
+			logAuthFailure(deps, "add_concepts", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

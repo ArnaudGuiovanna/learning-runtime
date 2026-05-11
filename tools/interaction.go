@@ -19,7 +19,7 @@ type RecordInteractionParams struct {
 	ActivityType        string  `json:"activity_type" jsonschema:"activity type - MUST be one of the canonical values: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
 	Success             bool    `json:"success" jsonschema:"whether the exercise was completed successfully"`
 	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"response time in seconds"`
-	Confidence          float64 `json:"confidence" jsonschema:"estimated confidence between 0 and 1"`
+	Confidence          float64 `json:"confidence" jsonschema:"estimated confidence as a 0..1 float"`
 	ErrorType           string  `json:"error_type,omitempty" jsonschema:"error type on failure - leave empty or use exactly: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
 	Notes               string  `json:"notes" jsonschema:"optional notes about the interaction"`
 	DomainID            string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
@@ -39,7 +39,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordInteractionParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_interaction: auth failed", "err", err)
+			logAuthFailure(deps, "record_interaction", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}

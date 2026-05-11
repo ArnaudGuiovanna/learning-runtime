@@ -208,12 +208,12 @@ func (s *Scheduler) dispatchQueued(kind, alertTag string, fallback func(*models.
 		if err := s.sendDiscordEmbed(learner.WebhookURL, payload); err != nil {
 			s.logger.Error("scheduler: dispatch webhook", "err", err, "learner", learner.ID, "kind", kind)
 			if item != nil {
-				_ = s.store.MarkWebhookFailed(item.ID)
+				_ = s.store.MarkWebhookFailed(item.ID, learner.ID)
 			}
 			continue
 		}
 		if item != nil {
-			_ = s.store.MarkWebhookSent(item.ID, now)
+			_ = s.store.MarkWebhookSent(item.ID, learner.ID, now)
 		}
 		s.store.CreateScheduledAlert(learner.ID, alertTag, "", time.Now())
 		s.logger.Info("scheduler: dispatched", "learner", learner.ID, "kind", kind, "source", source)
@@ -424,7 +424,7 @@ func (s *Scheduler) sendOLM() {
 			item, _ := s.store.DequeueNextPending(learner.ID, kind, now, 30*time.Minute)
 			if item != nil && item.Content != "" {
 				embeds = append(embeds, embedFromQueueItem(item, snap.FocusUrgency))
-				_ = s.store.MarkWebhookSent(item.ID, now)
+				_ = s.store.MarkWebhookSent(item.ID, learner.ID, now)
 			} else {
 				embeds = append(embeds, fromExportedEmbed(FormatOLMEmbed(snap)))
 			}
@@ -499,7 +499,7 @@ func (s *Scheduler) sendMirrorMessages() {
 			// We still want to mark queued items as sent so they don't
 			// pile up — best-effort dequeue + mark.
 			if item, _ := s.store.DequeueNextPending(learner.ID, models.WebhookKindMirror, now, 30*time.Minute); item != nil {
-				_ = s.store.MarkWebhookSent(item.ID, now)
+				_ = s.store.MarkWebhookSent(item.ID, learner.ID, now)
 			}
 			continue
 		}
@@ -516,10 +516,10 @@ func (s *Scheduler) sendMirrorMessages() {
 		embed := mirrorEmbedFromContent(item.Content)
 		if err := s.sendDiscordEmbed(learner.WebhookURL, discordPayload{Embeds: []discordEmbed{embed}}); err != nil {
 			s.logger.Error("scheduler: mirror webhook", "err", err, "learner", learner.ID)
-			_ = s.store.MarkWebhookFailed(item.ID)
+			_ = s.store.MarkWebhookFailed(item.ID, learner.ID)
 			continue
 		}
-		_ = s.store.MarkWebhookSent(item.ID, now)
+		_ = s.store.MarkWebhookSent(item.ID, learner.ID, now)
 		_ = s.store.CreateScheduledAlert(learner.ID, MirrorAlertKind, "", now)
 		s.logger.Info("scheduler: mirror dispatched", "learner", learner.ID)
 	}

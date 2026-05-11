@@ -17,7 +17,8 @@ import (
 )
 
 type TransferChallengeParams struct {
-	ConceptID   string `json:"concept_id" jsonschema:"the concept to test in transfer"`
+	Concept     string `json:"concept,omitempty" jsonschema:"the concept to test in transfer; canonical key for concept-targeting tools; required unless concept_id is used"`
+	ConceptID   string `json:"concept_id,omitempty" jsonschema:"deprecated compatibility alias for concept; prefer concept"`
 	ContextType string `json:"context_type,omitempty" jsonschema:"context type: near, far, real_world, interview, teaching, debugging, creative (optional)"`
 	DomainID    string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
@@ -29,17 +30,22 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params TransferChallengeParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("transfer_challenge: auth failed", "err", err)
+			logAuthFailure(deps, "transfer_challenge", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
-		if params.ConceptID == "" {
-			r, _ := errorResult("concept_id is required")
+		concept, err := normalizeConceptParam(params.Concept, params.ConceptID)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if concept == "" {
+			r, _ := errorResult("concept is required")
 			return r, nil, nil
 		}
 
-		// String length caps (issue #82). concept_id flows into the
+		// String length caps (issue #82). concept flows into the
 		// transfer_records query / response and context_type ends up in the
 		// persisted row label — without these guards a misbehaving caller
 		// could push multi-MB strings into the read path and bloat downstream
@@ -49,8 +55,8 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 			value string
 			max   int
 		}{
-			{"concept_id", params.ConceptID, maxShortLabelLen},
 			{"context_type", params.ContextType, maxShortLabelLen},
+			{"domain_id", params.DomainID, maxShortLabelLen},
 		}
 		for _, f := range stringFields {
 			if err := validateString(f.name, f.value, f.max); err != nil {
@@ -59,7 +65,7 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		cs, err := deps.Store.GetConceptState(learnerID, params.ConceptID)
+		cs, err := deps.Store.GetConceptState(learnerID, concept)
 		if err != nil {
 			deps.Logger.Error("transfer_challenge: failed to get concept state", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("concept not found: %v", err))
@@ -76,8 +82,8 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		existingTransfers, _ := deps.Store.GetTransferScores(learnerID, params.ConceptID)
-		transferProfile := engine.BuildTransferProfile(params.ConceptID, existingTransfers)
+		existingTransfers, _ := deps.Store.GetTransferScores(learnerID, concept)
+		transferProfile := engine.BuildTransferProfile(concept, existingTransfers)
 
 		contextType := params.ContextType
 		if contextType == "" {
@@ -102,14 +108,15 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 				"in a context of type '%s'. "+
 				"The situation must NOT resemble previous exercises. "+
 				"The goal: verify that the learner can apply this concept in a context they have never seen.\n\n"+
-				"After the learner's response, evaluate the transfer_score (0-1) and "+
+				"After the learner's response, evaluate the transfer_score (0..1) and "+
 				"call record_transfer_result with the result.",
-			params.ConceptID, contextType,
+			concept, contextType,
 		)
 
 		r, _ := jsonResult(map[string]interface{}{
 			"eligible":           true,
-			"concept_id":         params.ConceptID,
+			"concept":            concept,
+			"concept_id":         concept,
 			"context_type":       contextType,
 			"transfer_dimension": string(transferDimension),
 			"prompt_text":        promptText,
@@ -123,9 +130,10 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 // ─── record_transfer_result ─────────────────────────────────────────────────
 
 type RecordTransferResultParams struct {
-	ConceptID   string  `json:"concept_id" jsonschema:"the concept being tested"`
+	Concept     string  `json:"concept,omitempty" jsonschema:"the concept being tested; canonical key for concept-targeting tools; required unless concept_id is used"`
+	ConceptID   string  `json:"concept_id,omitempty" jsonschema:"deprecated compatibility alias for concept; prefer concept"`
 	ContextType string  `json:"context_type" jsonschema:"challenge context type: near, far, real_world, interview, teaching, debugging, creative"`
-	Score       float64 `json:"score" jsonschema:"transfer score between 0 and 1"`
+	Score       float64 `json:"score" jsonschema:"transfer score as a 0..1 float (0=failed transfer, 1=perfect transfer)"`
 	SessionID   string  `json:"session_id,omitempty" jsonschema:"session ID (optional)"`
 	DomainID    string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
@@ -146,12 +154,22 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordTransferResultParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("record_transfer_result: auth failed", "err", err)
+			logAuthFailure(deps, "record_transfer_result", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
-		// String length caps (issue #82). concept_id, context_type and
+		concept, err := normalizeConceptParam(params.Concept, params.ConceptID)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if concept == "" {
+			r, _ := errorResult("concept is required")
+			return r, nil, nil
+		}
+
+		// String length caps (issue #82). concept, context_type and
 		// session_id end up in transfer_records rows; without these guards a
 		// misbehaving caller could push multi-MB strings into the table.
 		stringFields := []struct {
@@ -159,9 +177,9 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 			value string
 			max   int
 		}{
-			{"concept_id", params.ConceptID, maxShortLabelLen},
 			{"context_type", params.ContextType, maxShortLabelLen},
 			{"session_id", params.SessionID, maxShortLabelLen},
+			{"domain_id", params.DomainID, maxShortLabelLen},
 		}
 		for _, f := range stringFields {
 			if err := validateString(f.name, f.value, f.max); err != nil {
@@ -205,14 +223,14 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}
-		if err := validateConceptInDomain(domain, params.ConceptID); err != nil {
+		if err := validateConceptInDomain(domain, concept); err != nil {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
 		record := &models.TransferRecord{
 			LearnerID:   learnerID,
-			ConceptID:   params.ConceptID,
+			ConceptID:   concept,
 			ContextType: params.ContextType,
 			Score:       params.Score,
 			SessionID:   params.SessionID,
@@ -224,8 +242,8 @@ func registerRecordTransferResult(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		updatedTransfers, _ := deps.Store.GetTransferScores(learnerID, params.ConceptID)
-		transferProfile := engine.BuildTransferProfile(params.ConceptID, updatedTransfers)
+		updatedTransfers, _ := deps.Store.GetTransferScores(learnerID, concept)
+		transferProfile := engine.BuildTransferProfile(concept, updatedTransfers)
 
 		r, _ := jsonResult(map[string]interface{}{
 			"recorded":           true,

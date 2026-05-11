@@ -23,7 +23,7 @@ func registerGetAvailabilityModel(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetAvailabilityModelParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("get_availability_model: auth failed", "err", err)
+			logAuthFailure(deps, "get_availability_model", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
@@ -50,11 +50,11 @@ func registerGetAvailabilityModel(server *mcp.Server, deps *Deps) {
 		}
 
 		r, _ := jsonResult(map[string]interface{}{
-			"preferred_windows":          windows,
+			"preferred_windows":            windows,
 			"avg_session_duration_minutes": avail.AvgDuration,
-			"sessions_per_week":          avail.SessionsWeek,
-			"last_active":                lastActive,
-			"do_not_disturb":             avail.DoNotDisturb,
+			"sessions_per_week":            avail.SessionsWeek,
+			"last_active":                  lastActive,
+			"do_not_disturb":               avail.DoNotDisturb,
 		})
 		return r, nil, nil
 	})

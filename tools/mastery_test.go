@@ -50,6 +50,12 @@ func TestCheckMastery_NotReady(t *testing.T) {
 	if out["mastery_ready"] != false {
 		t.Fatalf("expected mastery_ready=false, got %v", out["mastery_ready"])
 	}
+	if out["mastery"] != 0.4 {
+		t.Fatalf("expected mastery=0.4, got %v", out["mastery"])
+	}
+	if out["current_mastery"] != 0.4 {
+		t.Fatalf("expected current_mastery alias=0.4, got %v", out["current_mastery"])
+	}
 }
 
 func TestCheckMastery_Ready(t *testing.T) {
@@ -85,6 +91,30 @@ func TestCheckMastery_Ready(t *testing.T) {
 	out := decodeResult(t, res)
 	if out["mastery_ready"] != true {
 		t.Fatalf("expected mastery_ready=true, got %v", out["mastery_ready"])
+	}
+	if out["mastery"] != 0.95 {
+		t.Fatalf("expected mastery=0.95, got %v", out["mastery"])
+	}
+	if out["current_mastery"] != 0.95 {
+		t.Fatalf("expected current_mastery alias=0.95, got %v", out["current_mastery"])
+	}
+}
+
+func TestCheckMastery_AcceptsLegacyConceptID(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	cs := models.NewConceptState("L_owner", "legacy_calc")
+	cs.PMastery = 0.4
+	if err := store.InsertConceptStateIfNotExists(cs); err != nil {
+		t.Fatal(err)
+	}
+
+	res := callTool(t, deps, registerCheckMastery, "L_owner", "check_mastery", map[string]any{"concept_id": "legacy_calc"})
+	if res.IsError {
+		t.Fatalf("did not expect error for legacy concept_id, got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if out["mastery"] != 0.4 {
+		t.Fatalf("expected mastery=0.4, got %v", out["mastery"])
 	}
 }
 

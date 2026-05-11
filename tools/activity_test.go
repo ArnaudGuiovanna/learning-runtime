@@ -4,12 +4,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +29,25 @@ func TestGetNextActivity_NoAuth(t *testing.T) {
 	res := callTool(t, deps, registerGetNextActivity, "", "get_next_activity", map[string]any{})
 	if !res.IsError {
 		t.Fatalf("expected auth error")
+	}
+}
+
+func TestGetNextActivity_AuthFailureLoggedAtInfo(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	var buf bytes.Buffer
+	deps.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	res := callTool(t, deps, registerGetNextActivity, "", "get_next_activity", map[string]any{})
+	if !res.IsError {
+		t.Fatalf("expected auth error")
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "level=INFO") || !strings.Contains(logs, "get_next_activity: auth failed") {
+		t.Fatalf("expected auth failure at INFO, got logs=%q", logs)
+	}
+	if strings.Contains(logs, "level=ERROR") {
+		t.Fatalf("auth failure should not be logged at ERROR, got logs=%q", logs)
 	}
 }
 
@@ -92,6 +113,114 @@ func TestGetNextActivity_ForeignDomainFallsBackToSetup(t *testing.T) {
 	// Foreign learner should fall through to needs_domain_setup since resolveDomain rejects.
 	if out["needs_domain_setup"] != true {
 		t.Fatalf("expected setup fallback for foreign domain, got %v", out)
+	}
+}
+
+func TestGetNextActivity_DomainNameSelectsMatchingDomain(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	goDomain, err := store.CreateDomainWithValueFramings("L_owner", "Golang", "", models.KnowledgeSpace{
+		Concepts:      []string{"Pointers"},
+		Prerequisites: map[string][]string{},
+	}, "")
+	if err != nil {
+		t.Fatalf("create go domain: %v", err)
+	}
+	if _, err := store.CreateDomainWithValueFramings("L_owner", "Conditional Probability", "", models.KnowledgeSpace{
+		Concepts:      []string{"Bayes"},
+		Prerequisites: map[string][]string{},
+	}, ""); err != nil {
+		t.Fatalf("create probability domain: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{
+		"domain_name": "golang",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if got := out["domain_id"]; got != goDomain.ID {
+		t.Fatalf("expected Golang domain %q, got %v", goDomain.ID, got)
+	}
+}
+
+func TestGetNextActivity_ReviewIntentAvoidsNewConcept(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d, err := store.CreateDomainWithValueFramings("L_owner", "Golang", "", models.KnowledgeSpace{
+		Concepts:      []string{"Pointers", "Generics"},
+		Prerequisites: map[string][]string{},
+	}, "")
+	if err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+	if _, err := store.MergeDomainGoalRelevance(d.ID, map[string]float64{
+		"Pointers": 0.2,
+		"Generics": 1.0,
+	}); err != nil {
+		t.Fatalf("seed relevance: %v", err)
+	}
+	lastReview := time.Now().UTC().Add(-10 * 24 * time.Hour)
+	cs := models.NewConceptState("L_owner", "Pointers")
+	cs.PMastery = 0.75
+	cs.CardState = "review"
+	cs.Stability = 2
+	cs.ElapsedDays = 10
+	cs.Reps = 2
+	cs.LastReview = &lastReview
+	if err := store.UpsertConceptState(cs); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{
+		"domain_id": d.ID,
+		"intent":    "review",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	activity, ok := out["activity"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected activity object, got %v", out["activity"])
+	}
+	if got := activity["type"]; got == string(models.ActivityNewConcept) {
+		t.Fatalf("review intent must not return NEW_CONCEPT, got %v", activity)
+	}
+	if got := activity["concept"]; got != "Pointers" {
+		t.Fatalf("expected review of Pointers, got %v", activity)
+	}
+	if got := out["intent_status"]; got != "applied" {
+		t.Fatalf("expected intent_status=applied, got %v", got)
+	}
+}
+
+func TestGetNextActivity_ReviewIntentNoReviewedConceptDoesNotIntroduce(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d, err := store.CreateDomainWithValueFramings("L_owner", "Golang", "", models.KnowledgeSpace{
+		Concepts:      []string{"Generics"},
+		Prerequisites: map[string][]string{},
+	}, "")
+	if err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{
+		"domain_id": d.ID,
+		"intent":    "revise",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	activity, ok := out["activity"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected activity object, got %v", out["activity"])
+	}
+	if got := activity["type"]; got == string(models.ActivityNewConcept) {
+		t.Fatalf("review intent with no reviewed concept must not introduce, got %v", activity)
+	}
+	if got := out["intent_status"]; got != "no_reviewable_concept" {
+		t.Fatalf("expected no_reviewable_concept, got %v", got)
 	}
 }
 
@@ -235,6 +364,8 @@ func TestGetNextActivity_FadeFlagOn_VerbosityDecreasesAsAutonomyRises(t *testing
 func TestGetNextActivity_PostOrchestratePhaseMatchesDB(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	d := makeOwnerDomain(t, store, "L_owner", "math")
+	var buf bytes.Buffer
+	deps.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// Seed phase = INSTRUCTION and goal-relevance so the FSM has
 	// something to evaluate.
@@ -282,6 +413,13 @@ func TestGetNextActivity_PostOrchestratePhaseMatchesDB(t *testing.T) {
 	}
 	if got.Phase != models.PhaseMaintenance {
 		t.Errorf("expected DB phase=MAINTENANCE after transition, got %q", got.Phase)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "pipeline decision") || !strings.Contains(logs, "route=orchestrator") {
+		t.Fatalf("expected pipeline decision with route=orchestrator, got logs=%q", logs)
+	}
+	if !strings.Contains(logs, "phase transition (FSM)") {
+		t.Fatalf("expected FSM transition to use deps.Logger, got logs=%q", logs)
 	}
 }
 

@@ -69,6 +69,12 @@ func TestGetDashboardState_ColorEnumIsEnglish(t *testing.T) {
 		t.Fatalf("unexpected error: %q", resultText(res))
 	}
 	out := decodeResult(t, res)
+	if _, ok := out["global_progress_percent"].(float64); !ok {
+		t.Fatalf("expected global_progress_percent key, got %v", out)
+	}
+	if out["global_progress_percent"] != out["global_progress"] {
+		t.Fatalf("expected global_progress alias to match global_progress_percent, got %v vs %v", out["global_progress"], out["global_progress_percent"])
+	}
 	domains, ok := out["domains"].([]any)
 	if !ok || len(domains) == 0 {
 		t.Fatalf("expected non-empty domains array, got %v", out)

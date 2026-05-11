@@ -636,6 +636,57 @@ func TestHandleRegister_BadJSON(t *testing.T) {
 	}
 }
 
+func TestHandleRegister_RejectsOversizedBody(t *testing.T) {
+	s, store := newTestServer(t)
+	body := `{"client_name":"` + strings.Repeat("x", int(registerBodyLimitBytes)) + `","redirect_uris":["https://app.example/cb"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.HandleRegister(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "request body too large") {
+		t.Fatalf("body missing size error: %q", rec.Body.String())
+	}
+	count, err := store.CountOAuthClients()
+	if err != nil {
+		t.Fatalf("count clients: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("registered clients = %d, want 0", count)
+	}
+}
+
+func TestHandleRegister_ClientCapReached(t *testing.T) {
+	s, store := newTestServer(t)
+	s.maxRegisteredClients = 1
+	if err := store.CreateOAuthClient("existing", "Existing", `["https://app.example/cb"]`); err != nil {
+		t.Fatalf("seed client: %v", err)
+	}
+
+	body := `{"client_name":"Blocked","redirect_uris":["https://app.example/cb"]}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.HandleRegister(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "registration_disabled") {
+		t.Fatalf("body missing registration_disabled: %q", rec.Body.String())
+	}
+	count, err := store.CountOAuthClients()
+	if err != nil {
+		t.Fatalf("count clients: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("registered clients = %d, want 1", count)
+	}
+}
+
 func TestHandleRegister_NoRedirectURIs(t *testing.T) {
 	s, _ := newTestServer(t)
 	req := httptest.NewRequest("POST", "/register", strings.NewReader(`{"client_name":"X"}`))

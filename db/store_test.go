@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -63,5 +64,42 @@ func TestGetOAuthClient(t *testing.T) {
 	}
 	if _, err := store.GetOAuthClient("missing"); err == nil {
 		t.Fatal("expected error for missing client")
+	}
+}
+
+func TestCountOAuthClients(t *testing.T) {
+	store := setupTestDB(t)
+	if err := store.CreateOAuthClient("c1", "n1", `["https://x.example/cb"]`); err != nil {
+		t.Fatalf("create c1: %v", err)
+	}
+	if err := store.CreateOAuthClient("c2", "n2", `["https://y.example/cb"]`); err != nil {
+		t.Fatalf("create c2: %v", err)
+	}
+
+	got, err := store.CountOAuthClients()
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+}
+
+func TestCreateOAuthClientWithSecretCappedRejectsAtLimit(t *testing.T) {
+	store := setupTestDB(t)
+	if err := store.CreateOAuthClientWithSecretCapped("c1", "n1", `["https://x.example/cb"]`, "", 1); err != nil {
+		t.Fatalf("create c1: %v", err)
+	}
+
+	err := store.CreateOAuthClientWithSecretCapped("c2", "n2", `["https://y.example/cb"]`, "", 1)
+	if !errors.Is(err, ErrOAuthClientLimitReached) {
+		t.Fatalf("err = %v, want ErrOAuthClientLimitReached", err)
+	}
+	got, err := store.CountOAuthClients()
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("count = %d, want 1", got)
 	}
 }

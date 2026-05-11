@@ -135,7 +135,7 @@ func TestDequeueNextPending(t *testing.T) {
 
 	// Mark high-priority as sent; next dequeue should pick the low-priority one.
 	sentAt := time.Now().UTC()
-	if err := store.MarkWebhookSent(idHigh, sentAt); err != nil {
+	if err := store.MarkWebhookSent(idHigh, "L1", sentAt); err != nil {
 		t.Fatalf("mark sent: %v", err)
 	}
 	var status string
@@ -174,7 +174,7 @@ func TestMarkWebhookFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if err := store.MarkWebhookFailed(id); err != nil {
+	if err := store.MarkWebhookFailed(id, "L1"); err != nil {
 		t.Fatalf("MarkWebhookFailed: %v", err)
 	}
 	var status string
@@ -185,6 +185,54 @@ func TestMarkWebhookFailed(t *testing.T) {
 	}
 	if status != "failed" {
 		t.Errorf("status = %q want 'failed'", status)
+	}
+}
+
+func TestMarkWebhookMutatorsRequireLearnerOwnership(t *testing.T) {
+	store := setupTestDB(t)
+	now := time.Now().UTC()
+	if _, err := store.db.Exec(
+		`INSERT INTO learners (id, email, password_hash, objective, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"L2", "l2@test.com", "h", "obj", now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	idSent, err := store.EnqueueWebhookMessage("L2", "reminder", "do not send", now, time.Time{}, 0)
+	if err != nil {
+		t.Fatalf("enqueue sent guard row: %v", err)
+	}
+	idFailed, err := store.EnqueueWebhookMessage("L2", "reminder", "do not fail", now, time.Time{}, 0)
+	if err != nil {
+		t.Fatalf("enqueue failed guard row: %v", err)
+	}
+
+	if err := store.MarkWebhookSent(idSent, "L1", now); err != nil {
+		t.Fatalf("MarkWebhookSent with wrong learner: %v", err)
+	}
+	if err := store.MarkWebhookFailed(idFailed, "L1"); err != nil {
+		t.Fatalf("MarkWebhookFailed with wrong learner: %v", err)
+	}
+
+	var sentGuardCount int
+	if err := store.db.QueryRow(
+		`SELECT COUNT(*) FROM webhook_message_queue WHERE id = ? AND status = 'pending' AND sent_at IS NULL`,
+		idSent,
+	).Scan(&sentGuardCount); err != nil {
+		t.Fatalf("scan sent guard row: %v", err)
+	}
+	if sentGuardCount != 1 {
+		t.Fatal("MarkWebhookSent changed a row owned by another learner")
+	}
+
+	var failedStatus string
+	if err := store.db.QueryRow(
+		`SELECT status FROM webhook_message_queue WHERE id = ?`, idFailed,
+	).Scan(&failedStatus); err != nil {
+		t.Fatalf("scan failed guard row: %v", err)
+	}
+	if failedStatus != "pending" {
+		t.Fatalf("MarkWebhookFailed status = %q want 'pending'", failedStatus)
 	}
 }
 
@@ -264,7 +312,7 @@ func TestGetPendingWebhookMessages(t *testing.T) {
 		t.Fatalf("c: %v", err)
 	}
 	// Mark one as sent: should not appear in pending list.
-	if err := store.MarkWebhookSent(idC, now); err != nil {
+	if err := store.MarkWebhookSent(idC, "L1", now); err != nil {
 		t.Fatalf("mark sent: %v", err)
 	}
 

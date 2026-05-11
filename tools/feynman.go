@@ -14,7 +14,8 @@ import (
 )
 
 type FeynmanChallengeParams struct {
-	ConceptID string `json:"concept_id" jsonschema:"the concept to explain using the Feynman method"`
+	Concept   string `json:"concept,omitempty" jsonschema:"the concept to explain using the Feynman method; canonical key for concept-targeting tools; required unless concept_id is used"`
+	ConceptID string `json:"concept_id,omitempty" jsonschema:"deprecated compatibility alias for concept; prefer concept"`
 	DomainID  string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
@@ -25,26 +26,30 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params FeynmanChallengeParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
-			deps.Logger.Error("feynman_challenge: auth failed", "err", err)
+			logAuthFailure(deps, "feynman_challenge", err)
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
-		if params.ConceptID == "" {
-			r, _ := errorResult("concept_id is required")
+		concept, err := normalizeConceptParam(params.Concept, params.ConceptID)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if concept == "" {
+			r, _ := errorResult("concept is required")
 			return r, nil, nil
 		}
 
-		// String length cap (issue #82). concept_id is echoed into the
-		// generated prompt_text via fmt.Sprintf and used to look up state;
-		// without this guard a misbehaving caller could push multi-MB
-		// strings into orchestrator output.
-		if err := validateString("concept_id", params.ConceptID, maxShortLabelLen); err != nil {
+		// String length cap (issue #82). concept is already checked by
+		// normalizeConceptParam; domain_id is bounded here for consistency
+		// with the other concept-targeting tools.
+		if err := validateString("domain_id", params.DomainID, maxShortLabelLen); err != nil {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
 
-		cs, err := deps.Store.GetConceptState(learnerID, params.ConceptID)
+		cs, err := deps.Store.GetConceptState(learnerID, concept)
 		if err != nil {
 			deps.Logger.Error("feynman_challenge: failed to get concept state", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("concept not found: %v", err))
@@ -68,13 +73,14 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 				"The goal is to verify that you truly understood it, not just that you can recite it.\n\n"+
 				"After your explanation, I will identify the fuzzy or incomplete points "+
 				"and turn them into micro-concepts to work on.",
-			params.ConceptID,
+			concept,
 		)
 
 		r, _ := jsonResult(map[string]interface{}{
 			"eligible":    true,
 			"prompt_text": promptText,
-			"concept_id":  params.ConceptID,
+			"concept":     concept,
+			"concept_id":  concept,
 			"instructions_for_llm": "After the learner's explanation, identify the specific conceptual gaps. " +
 				"For each gap, generate a short label and a description. " +
 				"Ask the learner for confirmation before injecting the gaps into the graph via add_concepts(). " +
@@ -83,7 +89,7 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 				"label":          "<nom court du gap>",
 				"description":    "<ce qui manque dans l'explication>",
 				"initial_pl0":    0.1,
-				"source_concept": params.ConceptID,
+				"source_concept": concept,
 			},
 		})
 		return r, nil, nil

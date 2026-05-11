@@ -3,7 +3,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -107,6 +109,53 @@ func TestMigrate_Idempotent(t *testing.T) {
 		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis) VALUES ('d1','m1','dn','{}','goal',0,'','')`,
 	); err != nil {
 		t.Fatalf("insert with domain framing columns: %v", err)
+	}
+}
+
+func TestMigrate_ConcurrentSerializesSchemaMigrations(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "race.db")
+	const runners = 4
+
+	dbs := make([]*sql.DB, runners)
+	for i := range dbs {
+		db, err := OpenDB(dbPath)
+		if err != nil {
+			t.Fatalf("open db %d: %v", i, err)
+		}
+		dbs[i] = db
+		t.Cleanup(func() { db.Close() })
+	}
+
+	start := make(chan struct{})
+	errs := make([]error, runners)
+	var wg sync.WaitGroup
+	for i, db := range dbs {
+		wg.Add(1)
+		go func(i int, db *sql.DB) {
+			defer wg.Done()
+			<-start
+			errs[i] = Migrate(db)
+		}(i, db)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			t.Fatalf("Migrate runner %d surfaced schema_migrations race: %v", i, err)
+		}
+		t.Fatalf("Migrate runner %d: %v", i, err)
+	}
+
+	var rowCount int
+	if err := dbs[0].QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&rowCount); err != nil {
+		t.Fatalf("count schema_migrations: %v", err)
+	}
+	if rowCount != len(buildMigrations()) {
+		t.Fatalf("schema_migrations row count = %d, want %d", rowCount, len(buildMigrations()))
 	}
 }
 
