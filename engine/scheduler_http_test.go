@@ -323,9 +323,9 @@ func TestQueueKindTitleAndColor(t *testing.T) {
 		color    int
 		titleSub string
 	}{
-		{"daily_motivation", "", 0x5865F2, "Bonjour"},
-		{"daily_recap", "", 0x57F287, "Ce soir"},
-		{"reactivation", "", 0xFEE75C, "Reprends"},
+		{"daily_motivation", "", 0x5865F2, "Good morning"},
+		{"daily_recap", "", 0x57F287, "Tonight"},
+		{"reactivation", "", 0xFEE75C, "Come back"},
 		{"reminder", "", 0x99AAB5, "Note"},
 		{"unknown", "", 0x99AAB5, "Message"},
 	}
@@ -347,8 +347,8 @@ func TestQueueKindTitleAndColor(t *testing.T) {
 
 func TestFallbackPayloads(t *testing.T) {
 	p := fallbackDailyMotivation(&models.Learner{ID: "L1"})
-	if len(p.Embeds) != 1 || !strings.Contains(p.Embeds[0].Title, "Bonjour") {
-		t.Errorf("fallbackDailyMotivation = %+v, want title with 'Bonjour'", p)
+	if len(p.Embeds) != 1 || !strings.Contains(p.Embeds[0].Title, "Good morning") {
+		t.Errorf("fallbackDailyMotivation = %+v, want title with 'Good morning'", p)
 	}
 	if p.Embeds[0].Color != 0x5865F2 {
 		t.Errorf("fallbackDailyMotivation color = %#x, want 0x5865F2", p.Embeds[0].Color)
@@ -358,8 +358,8 @@ func TestFallbackPayloads(t *testing.T) {
 	}
 
 	p2 := fallbackDailyRecap(&models.Learner{ID: "L1"})
-	if len(p2.Embeds) != 1 || !strings.Contains(p2.Embeds[0].Title, "Ce soir") {
-		t.Errorf("fallbackDailyRecap = %+v, want title with 'Ce soir'", p2)
+	if len(p2.Embeds) != 1 || !strings.Contains(p2.Embeds[0].Title, "Tonight") {
+		t.Errorf("fallbackDailyRecap = %+v, want title with 'Tonight'", p2)
 	}
 	if p2.Embeds[0].Color != 0x57F287 {
 		t.Errorf("fallbackDailyRecap color = %#x, want 0x57F287", p2.Embeds[0].Color)

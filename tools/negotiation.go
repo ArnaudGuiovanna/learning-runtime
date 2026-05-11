@@ -141,7 +141,7 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 					futureRet := algorithms.Retrievability(elapsed+1, systemCS.Stability)
 					tradeoffs = append(tradeoffs, tradeoff{
 						Factor:      "retention",
-						SystemPlan:  fmt.Sprintf("reviser %s maintient retention a %.0f%%", systemConcept, currentRet*100),
+						SystemPlan:  fmt.Sprintf("reviewing %s keeps retention at %.0f%%", systemConcept, currentRet*100),
 						LearnerPlan: fmt.Sprintf("postpone %s - retention will drop to %.0f%% tomorrow", systemConcept, futureRet*100),
 						Delta:       currentRet - futureRet,
 					})
@@ -186,8 +186,8 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 					DifficultyTarget: difficulty,
 					Format:           "mixed",
 					EstimatedMinutes: 15,
-					Rationale:        fmt.Sprintf("choix negocie de l'apprenant: %s", params.LearnerRationale),
-					PromptForLLM:     fmt.Sprintf("L'apprenant a choisi de travailler sur %s. Genere un exercice adapte.", params.LearnerConcept),
+					Rationale:        fmt.Sprintf("learner-negotiated choice: %s", params.LearnerRationale),
+					PromptForLLM:     fmt.Sprintf("The learner chose to work on %s. Generate a suitable exercise.", params.LearnerConcept),
 				}
 			}
 

@@ -158,7 +158,7 @@ func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 			frontier := algorithms.ComputeFrontier(graph, mastery)
 			nextAction := "continue reviewing"
 			if len(frontier) > 0 {
-				nextAction = fmt.Sprintf("nouveau concept: %s", frontier[0])
+				nextAction = fmt.Sprintf("new concept: %s", frontier[0])
 			}
 
 			progressPct := 0.0

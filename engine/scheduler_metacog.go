@@ -37,23 +37,23 @@ func metacogKindToWebhookKind(t models.AlertType) string {
 func metacogFallbackContent(a models.Alert) string {
 	switch a.Type {
 	case models.AlertDependencyIncreasing:
-		return "Ton score d'autonomie a baisse sur les 3 dernieres sessions. " +
-			"Quand tu reprends, on peut en parler — appelle get_metacognitive_mirror."
+		return "Your autonomy score has dropped over the last 3 sessions. " +
+			"When you come back, we can talk about it - call get_metacognitive_mirror."
 	case models.AlertCalibrationDiverging:
-		return "Ta calibration s'est ecartee de la realite (" + a.RecommendedAction + "). " +
-			"Une courte session de calibration peut aider — calibration_check."
+		return "Your calibration has drifted from reality (" + a.RecommendedAction + "). " +
+			"A short calibration session can help - calibration_check."
 	case models.AlertAffectNegative:
-		return "Deux sessions consecutives ont ete dures. " +
-			"On peut adapter le tutor_mode quand tu reviens."
+		return "The last two sessions have been hard. " +
+			"We can adjust tutor_mode when you return."
 	case models.AlertTransferBlocked:
 		concept := a.Concept
 		if concept == "" {
-			concept = "un concept maitrise"
+			concept = "a mastered concept"
 		}
-		return "Le transfert sur \"" + concept + "\" reste faible malgre la maitrise. " +
-			"Un Feynman challenge debloquerait probablement la situation."
+		return "Transfer on \"" + concept + "\" remains weak despite mastery. " +
+			"A Feynman challenge would likely unblock the situation."
 	}
-	return "Une nouvelle observation metacognitive est disponible."
+	return "A new metacognitive observation is available."
 }
 
 // dispatchMetacognitiveAlerts iterates over every active learner, computes

@@ -192,7 +192,7 @@ func ComposeBrief(in BriefInput, kind, pickedAxis string) *models.MotivationBrie
 				Threshold:  threshold,
 			}
 		}
-		brief.Instruction = "Celebre brievement le franchissement du seuil, sans emphase excessive. Relie a la progression globale en une phrase."
+		brief.Instruction = "Briefly celebrate crossing the threshold, without excessive emphasis. Tie it to overall progress in one sentence."
 
 	case models.MotivationKindCompetenceValue:
 		var framings *models.DomainValueFramings
@@ -211,9 +211,9 @@ func ComposeBrief(in BriefInput, kind, pickedAxis string) *models.MotivationBrie
 			Statement: statement,
 		}
 		if statement == "" {
-			brief.Instruction = "Compose une phrase soulignant le gain concret sur l'axe " + pickedAxis + " de la maitrise de ce concept. Puis persiste-la en rappelant a l'utilisateur que c'est une vue parmi d'autres."
+			brief.Instruction = "Compose one sentence highlighting the concrete gain on the " + pickedAxis + " axis from mastering this concept. Then ground it by reminding the user this is one view among others."
 		} else {
-			brief.Instruction = "Integre le gain sur l'axe " + pickedAxis + " en une phrase, relie au concept de l'exercice. Pas de chiffres invente, pas de copie verbatim du statement."
+			brief.Instruction = "Integrate the gain on the " + pickedAxis + " axis in one sentence, tied to the exercise concept. No invented numbers, no verbatim copy of the statement."
 		}
 		if in.Domain != nil {
 			brief.GoalLink = in.Domain.PersonalGoal
@@ -264,7 +264,7 @@ func ComposeBrief(in BriefInput, kind, pickedAxis string) *models.MotivationBrie
 		if in.Domain != nil {
 			brief.GoalLink = in.Domain.PersonalGoal
 		}
-		brief.Instruction = "Relie exercice -> concept -> goal_link en UNE phrase. Ni plus ni moins."
+		brief.Instruction = "Tie exercise -> concept -> goal_link in ONE sentence. No more, no less."
 	}
 
 	return brief

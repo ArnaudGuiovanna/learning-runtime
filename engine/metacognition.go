@@ -205,8 +205,8 @@ func DetectMirrorPattern(input MirrorInput) *models.MirrorMessage {
 		if declining {
 			return &models.MirrorMessage{
 				Pattern:      "dependency_increasing",
-				Message:      "Ton score d'autonomie a baisse sur les 3 dernieres sessions.",
-				OpenQuestion: "Est-ce que tu sens que tu as besoin de plus de guidage en ce moment, ou est-ce que tu voudrais essayer de travailler plus en autonomie ?",
+				Message:      "Your autonomy score has dropped over the last 3 sessions.",
+				OpenQuestion: "Do you feel you need more guidance right now, or would you like to try working more independently?",
 			}
 		}
 	}
@@ -231,8 +231,8 @@ func DetectMirrorPattern(input MirrorInput) *models.MirrorMessage {
 		if totalOnMastered >= 5 && float64(hintsOnMastered)/float64(totalOnMastered) > 0.5 {
 			return &models.MirrorMessage{
 				Pattern:      "hint_overuse",
-				Message:      "Tu demandes souvent des indices sur des concepts que tu maitrises deja.",
-				OpenQuestion: "Est-ce que c'est par reflexe, ou est-ce qu'il y a un aspect de ces concepts qui te semble encore flou ?",
+				Message:      "You often ask for hints on concepts you have already mastered.",
+				OpenQuestion: "Is it by reflex, or is there an aspect of these concepts that still feels unclear to you?",
 			}
 		}
 	}
