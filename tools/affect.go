@@ -16,18 +16,18 @@ import (
 )
 
 type RecordAffectParams struct {
-	SessionID           string `json:"session_id" jsonschema:"Identifiant unique de la session"`
-	Energy              int    `json:"energy,omitempty" jsonschema:"Énergie disponible: 1=fatigué, 2=neutre, 3=motivé, 4=en feu"`
-	Confidence          int    `json:"confidence,omitempty" jsonschema:"Confiance sur le sujet: 1=anxieux, 2=flou, 3=ok, 4=confiant"`
-	Satisfaction        int    `json:"satisfaction,omitempty" jsonschema:"Ressenti global (fin de session): 1=frustrant, 2=difficile, 3=bien, 4=flow"`
-	PerceivedDifficulty int    `json:"perceived_difficulty,omitempty" jsonschema:"Difficulté perçue (fin de session): 1=trop dur, 2=challengeant, 3=ok, 4=trop facile"`
-	NextSessionIntent   int    `json:"next_session_intent,omitempty" jsonschema:"Prochaine session: 1=maintenant, 2=demain, 3=cette semaine, 4=je sais pas"`
+	SessionID           string `json:"session_id" jsonschema:"unique session identifier"`
+	Energy              int    `json:"energy,omitempty" jsonschema:"available energy: 1=tired, 2=neutral, 3=motivated, 4=on fire"`
+	Confidence          int    `json:"confidence,omitempty" jsonschema:"subject confidence: 1=anxious, 2=foggy, 3=ok, 4=confident"`
+	Satisfaction        int    `json:"satisfaction,omitempty" jsonschema:"overall feeling (end of session): 1=frustrating, 2=hard, 3=good, 4=flow"`
+	PerceivedDifficulty int    `json:"perceived_difficulty,omitempty" jsonschema:"perceived difficulty (end of session): 1=too hard, 2=challenging, 3=ok, 4=too easy"`
+	NextSessionIntent   int    `json:"next_session_intent,omitempty" jsonschema:"next session intent: 1=now, 2=tomorrow, 3=this week, 4=not sure"`
 }
 
 func registerRecordAffect(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_affect",
-		Description: "Enregistre l'état émotionnel de l'apprenant. Appeler en début de session (energy, confidence) et en fin (satisfaction, perceived_difficulty, next_session_intent).",
+		Description: "Record the learner's emotional state. Call at session start (energy, confidence) and at session end (satisfaction, perceived_difficulty, next_session_intent).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordAffectParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

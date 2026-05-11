@@ -17,8 +17,8 @@ import (
 )
 
 type GetDashboardStateParams struct {
-	DomainID        string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel). Si absent, agrège tous les domaines actifs."`
-	IncludeArchived bool   `json:"include_archived,omitempty" jsonschema:"Si true, inclut les domaines archivés dans la réponse."`
+	DomainID        string `json:"domain_id,omitempty" jsonschema:"domain ID (optional). If absent, aggregates all active domains."`
+	IncludeArchived bool   `json:"include_archived,omitempty" jsonschema:"if true, includes archived domains in the response."`
 }
 
 type conceptProgress struct {
@@ -44,7 +44,7 @@ type domainDashboard struct {
 func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_dashboard_state",
-		Description: "Retourne l'état d'apprentissage en JSON structuré (progression par concept, alertes de rétention, signal de trajectoire, métriques d'autonomie, prochaine action). Le LLM peut formuler la réponse texte à partir de ce JSON pour l'apprenant.",
+		Description: "Return the learning state as structured JSON (per-concept progress, retention alerts, trajectory signal, autonomy metrics, next action). The LLM can formulate a text response from this JSON for the learner.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetDashboardStateParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

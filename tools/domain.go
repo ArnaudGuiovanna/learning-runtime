@@ -225,24 +225,24 @@ func validateValueFramings(vf *ValueFramingsInput) error {
 }
 
 type ValueFramingsInput struct {
-	Financial    string `json:"financial,omitempty" jsonschema:"Gain financier (1-2 phrases)"`
-	Employment   string `json:"employment,omitempty" jsonschema:"Gain employabilité / carrière (1-2 phrases)"`
-	Intellectual string `json:"intellectual,omitempty" jsonschema:"Gain intellectuel / beau raisonnement (1-2 phrases)"`
-	Innovation   string `json:"innovation,omitempty" jsonschema:"Gain création / innovation (1-2 phrases)"`
+	Financial    string `json:"financial,omitempty" jsonschema:"financial gain (1-2 sentences)"`
+	Employment   string `json:"employment,omitempty" jsonschema:"employability / career gain (1-2 sentences)"`
+	Intellectual string `json:"intellectual,omitempty" jsonschema:"intellectual / reasoning gain (1-2 sentences)"`
+	Innovation   string `json:"innovation,omitempty" jsonschema:"creation / innovation gain (1-2 sentences)"`
 }
 
 type InitDomainParams struct {
-	Name          string              `json:"name" jsonschema:"Nom du domaine d'apprentissage"`
-	Concepts      []string            `json:"concepts" jsonschema:"Liste des concepts du domaine"`
-	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"Graphe de prérequis (concept -> liste de prérequis)"`
-	PersonalGoal  string              `json:"personal_goal,omitempty" jsonschema:"Objectif personnel de l'apprenant dans ce domaine (optionnel)"`
-	ValueFramings *ValueFramingsInput `json:"value_framings,omitempty" jsonschema:"4 axes de valeur (financier/emploi/intellectuel/innovation). 1-2 phrases authored par axe. Optionnel — peut être rempli à la volée par la suite."`
+	Name          string              `json:"name" jsonschema:"learning domain name"`
+	Concepts      []string            `json:"concepts" jsonschema:"list of domain concepts"`
+	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"prerequisite graph (concept -> list of prerequisites)"`
+	PersonalGoal  string              `json:"personal_goal,omitempty" jsonschema:"learner's personal goal within this domain (optional)"`
+	ValueFramings *ValueFramingsInput `json:"value_framings,omitempty" jsonschema:"4 value axes (financial/employment/intellectual/innovation). 1-2 sentences per axis. Optional — can be filled in later."`
 }
 
 func registerInitDomain(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init_domain",
-		Description: "Initialise un domaine d'apprentissage avec ses concepts et prérequis. Ne détruit pas la progression existante.",
+		Description: "Initialize a learning domain with its concepts and prerequisites. Does not destroy existing progress.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params InitDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -358,15 +358,15 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 // ─── Add Concepts ────────────────────────────────────────────────────────────
 
 type AddConceptsParams struct {
-	DomainID      string              `json:"domain_id" jsonschema:"ID du domaine cible"`
-	Concepts      []string            `json:"concepts" jsonschema:"Nouveaux concepts à ajouter"`
-	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"Nouveaux prérequis (concept -> liste de prérequis). Peut inclure des liens vers des concepts existants."`
+	DomainID      string              `json:"domain_id" jsonschema:"target domain ID"`
+	Concepts      []string            `json:"concepts" jsonschema:"new concepts to add"`
+	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"new prerequisites (concept -> list of prerequisites). May include links to existing concepts."`
 }
 
 func registerAddConcepts(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_concepts",
-		Description: "Ajoute des concepts à un domaine existant sans détruire la progression. Utiliser pour enrichir un domaine en cours de route.",
+		Description: "Add concepts to an existing domain without destroying progress. Use to enrich a domain mid-course.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params AddConceptsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

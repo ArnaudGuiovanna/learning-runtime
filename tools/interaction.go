@@ -15,25 +15,25 @@ import (
 )
 
 type RecordInteractionParams struct {
-	Concept             string  `json:"concept" jsonschema:"Le concept concerné"`
-	ActivityType        string  `json:"activity_type" jsonschema:"Type d'activité — DOIT être l'une des valeurs canoniques: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
-	Success             bool    `json:"success" jsonschema:"L'exercice a été réussi"`
-	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"Temps de réponse en secondes"`
-	Confidence          float64 `json:"confidence" jsonschema:"Confiance estimée entre 0 et 1"`
-	ErrorType           string  `json:"error_type,omitempty" jsonschema:"Type d'erreur si échec — laisser vide ou utiliser exactement: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
-	Notes               string  `json:"notes" jsonschema:"Notes optionnelles sur l'interaction"`
-	DomainID            string  `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
-	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"Nombre d'indices demandés pendant l'échange (optionnel, défaut 0)"`
-	SelfInitiated       bool    `json:"self_initiated,omitempty" jsonschema:"true si la session a démarré sans alerte webhook"`
-	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"ID de la prédiction de calibration associée (optionnel)"`
-	MisconceptionType   string  `json:"misconception_type,omitempty" jsonschema:"Label libre de la misconception détectée (optionnel, ignoré si success=true)"`
-	MisconceptionDetail string  `json:"misconception_detail,omitempty" jsonschema:"Description de la misconception en une phrase (optionnel)"`
+	Concept             string  `json:"concept" jsonschema:"the concept being practiced"`
+	ActivityType        string  `json:"activity_type" jsonschema:"activity type — MUST be one of the canonical values: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
+	Success             bool    `json:"success" jsonschema:"whether the exercise was completed successfully"`
+	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"response time in seconds"`
+	Confidence          float64 `json:"confidence" jsonschema:"estimated confidence between 0 and 1"`
+	ErrorType           string  `json:"error_type,omitempty" jsonschema:"error type on failure — leave empty or use exactly: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
+	Notes               string  `json:"notes" jsonschema:"optional notes about the interaction"`
+	DomainID            string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
+	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"number of hints requested during the exchange (optional, default 0)"`
+	SelfInitiated       bool    `json:"self_initiated,omitempty" jsonschema:"true if the session started without a webhook alert"`
+	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"id of the associated calibration prediction (optional)"`
+	MisconceptionType   string  `json:"misconception_type,omitempty" jsonschema:"free-form label of the detected misconception (optional, ignored if success=true)"`
+	MisconceptionDetail string  `json:"misconception_detail,omitempty" jsonschema:"one-sentence description of the misconception (optional)"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_interaction",
-		Description: "Enregistre le résultat d'un exercice et met à jour l'état cognitif de l'apprenant. Supporte error_type pour ajuster le BKT selon le type d'erreur.",
+		Description: "Record the result of an exercise and update the learner's cognitive state. Supports error_type to adjust the BKT model according to the error type.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordInteractionParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

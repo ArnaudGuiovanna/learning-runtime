@@ -17,10 +17,10 @@ import (
 )
 
 type LearningNegotiationParams struct {
-	SessionID        string `json:"session_id" jsonschema:"ID de la session courante"`
-	LearnerConcept   string `json:"learner_concept,omitempty" jsonschema:"Concept proposé par l'apprenant (optionnel)"`
-	LearnerRationale string `json:"learner_rationale,omitempty" jsonschema:"Justification de l'apprenant (optionnel)"`
-	DomainID         string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	SessionID        string `json:"session_id" jsonschema:"current session ID"`
+	LearnerConcept   string `json:"learner_concept,omitempty" jsonschema:"concept proposed by the learner (optional)"`
+	LearnerRationale string `json:"learner_rationale,omitempty" jsonschema:"learner's rationale (optional)"`
+	DomainID         string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
 type tradeoff struct {
@@ -33,7 +33,7 @@ type tradeoff struct {
 func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "learning_negotiation",
-		Description: "Expose le plan de session avec justifications. L'apprenant peut proposer une alternative — le système accepte ou explique les compromis.",
+		Description: "Expose the session plan with rationale. The learner can propose an alternative — the system accepts or explains the trade-offs.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params LearningNegotiationParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

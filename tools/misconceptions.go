@@ -14,14 +14,14 @@ import (
 )
 
 type GetMisconceptionsParams struct {
-	DomainID string `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel, tous les domaines si absent)"`
-	Concept  string `json:"concept,omitempty" jsonschema:"Filtre par concept (optionnel)"`
+	DomainID string `json:"domain_id,omitempty" jsonschema:"domain ID (optional; all domains if absent)"`
+	Concept  string `json:"concept,omitempty" jsonschema:"filter by concept (optional)"`
 }
 
 func registerGetMisconceptions(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_misconceptions",
-		Description: "Liste les misconceptions détectées par concept, avec leur statut (active/resolved) et fréquence. Permet de suivre les confusions récurrentes de l'apprenant.",
+		Description: "List misconceptions detected per concept, with their status (active/resolved) and frequency. Enables tracking of the learner's recurring confusions.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetMisconceptionsParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

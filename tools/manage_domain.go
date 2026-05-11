@@ -12,13 +12,13 @@ import (
 )
 
 type ArchiveDomainParams struct {
-	DomainID string `json:"domain_id" jsonschema:"ID du domaine à archiver"`
+	DomainID string `json:"domain_id" jsonschema:"id of the domain to archive"`
 }
 
 func registerArchiveDomain(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archive_domain",
-		Description: "Archive un domaine — il disparaît du dashboard et du routing mais la progression est préservée. Utiliser unarchive_domain pour le réactiver.",
+		Description: "Archive a domain — it disappears from the dashboard and routing but progress is preserved. Use unarchive_domain to reactivate it.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params ArchiveDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -60,13 +60,13 @@ func registerArchiveDomain(server *mcp.Server, deps *Deps) {
 }
 
 type UnarchiveDomainParams struct {
-	DomainID string `json:"domain_id" jsonschema:"ID du domaine à réactiver"`
+	DomainID string `json:"domain_id" jsonschema:"id of the domain to reactivate"`
 }
 
 func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "unarchive_domain",
-		Description: "Réactive un domaine archivé — il réapparaît dans le dashboard et le routing avec toute sa progression préservée.",
+		Description: "Reactivate an archived domain — it reappears in the dashboard and routing with all its progress preserved.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UnarchiveDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -107,14 +107,14 @@ func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
 }
 
 type DeleteDomainParams struct {
-	DomainID string `json:"domain_id" jsonschema:"ID du domaine à supprimer définitivement"`
-	Confirm  bool   `json:"confirm" jsonschema:"Doit être true pour confirmer la suppression"`
+	DomainID string `json:"domain_id" jsonschema:"id of the domain to permanently delete"`
+	Confirm  bool   `json:"confirm" jsonschema:"must be true to confirm deletion"`
 }
 
 func registerDeleteDomain(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete_domain",
-		Description: "Supprime définitivement un domaine. Les concept_states et interactions sont préservés. Nécessite confirm=true.",
+		Description: "Permanently delete a domain. The concept_states and interactions are preserved. Requires confirm=true.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params DeleteDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
