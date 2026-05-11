@@ -42,19 +42,6 @@ Open an issue using the **Feature request** template. Describe the user-facing p
 
 ## Coding conventions
 
-### Language
-
-The codebase is English-only at the source level. This includes:
-
-- All Go source: identifiers, comments, godoc, log messages, error returns.
-- All tool `Description:` fields and `jsonschema:` parameter descriptions.
-- All learner-facing strings the server composes (handler messages, recap_brief, motivation_brief, DB notifications, engine rationales).
-- All documentation under `docs/`.
-
-The tutor MCP itself is language-agnostic at runtime: the LLM mirrors the learner's language on output, persisting it via `update_learner_profile(language)` on the first turn. See `docs/i18n.md` for the contract.
-
-The lint test in `tools/registration_test.go` enforces ASCII-only in learner-facing strings.
-
 ### Formatting
 
 - `gofmt` mandatory.
