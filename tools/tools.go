@@ -63,6 +63,19 @@ func filterInteractionsByConcepts(interactions []*models.Interaction, set map[st
 	return out
 }
 
+func filterInteractionsByDomainID(interactions []*models.Interaction, domainID string) []*models.Interaction {
+	if domainID == "" {
+		return interactions
+	}
+	out := make([]*models.Interaction, 0, len(interactions))
+	for _, i := range interactions {
+		if i.DomainID == "" || i.DomainID == domainID {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 // resolveDomain resolves a domain by ID or falls back to the learner's most recent domain.
 //
 // Archived domains are explicitly rejected when resolved by ID: see issue #94.
@@ -89,7 +102,7 @@ func resolveDomain(store *db.Store, learnerID, domainID string) (*models.Domain,
 }
 
 func jsonResult(v interface{}) (*mcp.CallToolResult, error) {
-	data, _ := json.MarshalIndent(v, "", "  ")
+	data, _ := json.Marshal(v)
 	return &mcp.CallToolResult{
 		Content:           []mcp.Content{&mcp.TextContent{Text: string(data)}},
 		StructuredContent: v,
@@ -130,6 +143,7 @@ func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerGetAvailabilityModel(server, deps)
 	registerInitDomain(server, deps)
 	registerAddConcepts(server, deps)
+	registerValidateDomainGraph(server, deps)
 	registerUpdateLearnerProfile(server, deps)
 	registerRecordAffect(server, deps)
 	registerCalibrationCheck(server, deps)
@@ -137,6 +151,8 @@ func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerGetAutonomyMetrics(server, deps)
 	registerGetMetacognitiveMirror(server, deps)
 	registerGetOLMSnapshot(server, deps)
+	registerGetPedagogicalSnapshots(server, deps)
+	registerGetDecisionReplaySummary(server, deps)
 	registerFeynmanChallenge(server, deps)
 	registerTransferChallenge(server, deps)
 	registerRecordTransferResult(server, deps)
