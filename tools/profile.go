@@ -27,18 +27,18 @@ import (
 // for ImplementationIntention in record_session_close. The ,omitempty on
 // the JSON tag is dropped because nil already serialises to absent.
 type UpdateLearnerProfileParams struct {
-	Device          string   `json:"device,omitempty" jsonschema:"Appareil principal (ex: laptop, phone, tablet)"`
-	Objective       string   `json:"objective,omitempty" jsonschema:"Objectif d'apprentissage mis à jour"`
-	Language        string   `json:"language,omitempty" jsonschema:"Langue préférée pour les exercices"`
-	CalibrationBias *float64 `json:"calibration_bias,omitempty" jsonschema:"Biais de calibration (positif=sur-estimé, négatif=sous-estimé). Fournir explicitement pour écraser; omettre pour laisser inchangé. 0 = calibration parfaite."`
-	AffectBaseline  string   `json:"affect_baseline,omitempty" jsonschema:"Baseline émotionnelle de l'apprenant"`
-	AutonomyScore   *float64 `json:"autonomy_score,omitempty" jsonschema:"Score d'autonomie actuel (0-1). Fournir explicitement pour écraser; omettre pour laisser inchangé. 0 = totalement dépendant."`
+	Device          string   `json:"device,omitempty" jsonschema:"primary device (e.g. laptop, phone, tablet)"`
+	Objective       string   `json:"objective,omitempty" jsonschema:"updated learning objective"`
+	Language        string   `json:"language,omitempty" jsonschema:"preferred language for exercises (BCP-47 hint to the LLM)"`
+	CalibrationBias *float64 `json:"calibration_bias,omitempty" jsonschema:"calibration bias (positive=over-estimated, negative=under-estimated). Provide explicitly to overwrite; omit to leave unchanged. 0 = perfect calibration."`
+	AffectBaseline  string   `json:"affect_baseline,omitempty" jsonschema:"learner's emotional baseline"`
+	AutonomyScore   *float64 `json:"autonomy_score,omitempty" jsonschema:"current autonomy score (0-1). Provide explicitly to overwrite; omit to leave unchanged. 0 = fully dependent."`
 }
 
 func registerUpdateLearnerProfile(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_learner_profile",
-		Description: "Met à jour les métadonnées persistantes de l'apprenant (device, objectif, langue, calibration, affect, autonomie). Seuls les champs fournis sont modifiés.",
+		Description: "Update the learner's persistent metadata (device, objective, language, calibration, affect, autonomy). Only provided fields are modified.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UpdateLearnerProfileParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

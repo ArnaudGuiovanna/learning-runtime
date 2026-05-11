@@ -16,15 +16,15 @@ import (
 )
 
 type CalibrationCheckParams struct {
-	ConceptID        string  `json:"concept_id" jsonschema:"Le concept à évaluer"`
-	PredictedMastery float64 `json:"predicted_mastery" jsonschema:"Auto-évaluation de l'apprenant: 1=aucune maîtrise, 5=maîtrise parfaite"`
-	DomainID         string  `json:"domain_id,omitempty" jsonschema:"ID du domaine (optionnel)"`
+	ConceptID        string  `json:"concept_id" jsonschema:"the concept to assess"`
+	PredictedMastery float64 `json:"predicted_mastery" jsonschema:"learner self-assessment: 1=no mastery, 5=perfect mastery"`
+	DomainID         string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
 
 func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "calibration_check",
-		Description: "Enregistre l'auto-évaluation de l'apprenant sur un concept avant un exercice. Retourne un prediction_id pour comparaison post-exercice.",
+		Description: "Record the learner's self-assessment on a concept before an exercise. Returns a prediction_id for post-exercise comparison.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params CalibrationCheckParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -95,14 +95,14 @@ func registerCalibrationCheck(server *mcp.Server, deps *Deps) {
 }
 
 type RecordCalibrationResultParams struct {
-	PredictionID string  `json:"prediction_id" jsonschema:"ID de la prédiction retournée par calibration_check"`
-	ActualScore  float64 `json:"actual_score" jsonschema:"Score réel entre 0 et 1 (0=échec total, 1=réussite parfaite)"`
+	PredictionID string  `json:"prediction_id" jsonschema:"prediction ID returned by calibration_check"`
+	ActualScore  float64 `json:"actual_score" jsonschema:"actual score between 0 and 1 (0=total failure, 1=perfect success)"`
 }
 
 func registerRecordCalibrationResult(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_calibration_result",
-		Description: "Compare la prédiction de l'apprenant avec le résultat réel. Met à jour le biais de calibration.",
+		Description: "Compare the learner's prediction with the actual result. Updates the calibration bias.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordCalibrationResultParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
