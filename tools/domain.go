@@ -283,6 +283,11 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 		if graph.Prerequisites == nil {
 			graph.Prerequisites = make(map[string][]string)
 		}
+		graphQualityReport := engine.EvaluateGraphQuality(graph)
+		if graphQualityReport.HasCriticalIssues() {
+			r, _ := graphQualityBlockedResult(graphQualityReport)
+			return r, nil, nil
+		}
 
 		valueFramingsJSON := ""
 		if params.ValueFramings != nil {
@@ -331,9 +336,11 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 		}
 
 		response := map[string]interface{}{
-			"domain_id":     domain.ID,
-			"concept_count": len(params.Concepts),
-			"message":       fmt.Sprintf("Domaine '%s' cree avec %d concepts. La progression existante est preservee.", params.Name, len(params.Concepts)),
+			"domain_id":              domain.ID,
+			"concept_count":          len(params.Concepts),
+			"graph_quality_report":   graphQualityReport,
+			"graph_quality_guidance": graphQualityGuidance(graphQualityReport),
+			"message":                fmt.Sprintf("Domaine '%s' cree avec %d concepts. La progression existante est preservee.", params.Name, len(params.Concepts)),
 		}
 		// [1] GoalDecomposer — instruct the LLM (versioned, structured,
 		// non-blocking per Q2). Only emitted when REGULATION_GOAL=on so
@@ -406,35 +413,30 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			batchSet[c] = true
 		}
 
+		candidateGraph := models.KnowledgeSpace{
+			Concepts:      append([]string(nil), domain.Graph.Concepts...),
+			Prerequisites: copyPrerequisites(domain.Graph.Prerequisites),
+		}
 		added := 0
 		for _, c := range params.Concepts {
-			domain.Graph.Concepts = append(domain.Graph.Concepts, c)
+			candidateGraph.Concepts = append(candidateGraph.Concepts, c)
 			existingSet[c] = true
 			added++
 		}
+		mergePrerequisites(candidateGraph.Prerequisites, params.Prerequisites)
 
 		// Validate against the MERGED universe — prereqs may legitimately
 		// reference concepts that already exist on the domain.
-		if err := validateConcepts(domain.Graph.Concepts, params.Prerequisites); err != nil {
+		if err := validateConcepts(candidateGraph.Concepts, candidateGraph.Prerequisites); err != nil {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
-
-		// Merge prerequisites
-		if domain.Graph.Prerequisites == nil {
-			domain.Graph.Prerequisites = make(map[string][]string)
+		graphQualityReport := engine.EvaluateGraphQuality(candidateGraph)
+		if graphQualityReport.HasCriticalIssues() {
+			r, _ := graphQualityBlockedResult(graphQualityReport)
+			return r, nil, nil
 		}
-		for concept, prereqs := range params.Prerequisites {
-			existing := make(map[string]bool)
-			for _, p := range domain.Graph.Prerequisites[concept] {
-				existing[p] = true
-			}
-			for _, p := range prereqs {
-				if !existing[p] {
-					domain.Graph.Prerequisites[concept] = append(domain.Graph.Prerequisites[concept], p)
-				}
-			}
-		}
+		domain.Graph = candidateGraph
 
 		// Persist updated graph
 		if err := deps.Store.UpdateDomainGraph(domain.ID, domain.Graph); err != nil {
@@ -454,10 +456,12 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 		}
 
 		response := map[string]interface{}{
-			"domain_id":      domain.ID,
-			"added":          added,
-			"total_concepts": len(domain.Graph.Concepts),
-			"message":        fmt.Sprintf("%d nouveaux concepts ajoutes. Total: %d. Progression existante preservee.", added, len(domain.Graph.Concepts)),
+			"domain_id":              domain.ID,
+			"added":                  added,
+			"total_concepts":         len(domain.Graph.Concepts),
+			"graph_quality_report":   graphQualityReport,
+			"graph_quality_guidance": graphQualityGuidance(graphQualityReport),
+			"message":                fmt.Sprintf("%d nouveaux concepts ajoutes. Total: %d. Progression existante preservee.", added, len(domain.Graph.Concepts)),
 		}
 		// [1] GoalDecomposer — after add_concepts the graph_version has
 		// advanced; per OQ-1.1 existing relevance entries remain valid but
