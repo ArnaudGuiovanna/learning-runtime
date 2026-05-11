@@ -236,7 +236,7 @@ type InitDomainParams struct {
 	Concepts      []string            `json:"concepts" jsonschema:"list of domain concepts"`
 	Prerequisites map[string][]string `json:"prerequisites" jsonschema:"prerequisite graph (concept -> list of prerequisites)"`
 	PersonalGoal  string              `json:"personal_goal,omitempty" jsonschema:"learner's personal goal within this domain (optional)"`
-	ValueFramings *ValueFramingsInput `json:"value_framings,omitempty" jsonschema:"4 value axes (financial/employment/intellectual/innovation). 1-2 sentences per axis. Optional — can be filled in later."`
+	ValueFramings *ValueFramingsInput `json:"value_framings,omitempty" jsonschema:"4 value axes (financial/employment/intellectual/innovation). 1-2 sentences per axis. Optional - can be filled in later."`
 }
 
 func registerInitDomain(server *mcp.Server, deps *Deps) {
@@ -341,7 +341,7 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 		if regulationGoalEnabled() {
 			reason := fmt.Sprintf("Decompose the personal_goal against the %d concepts via set_goal_relevance to activate goal-aware routing.", len(params.Concepts))
 			if params.PersonalGoal == "" {
-				reason = "personal_goal is empty — set_goal_relevance remains optional; call it if you want to manually annotate relevance per concept."
+				reason = "personal_goal is empty - set_goal_relevance remains optional; call it if you want to manually annotate relevance per concept."
 			}
 			response["next_action"] = map[string]any{
 				"version":  1,
@@ -466,7 +466,7 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			response["next_action"] = map[string]any{
 				"version":  1,
 				"tool":     "set_goal_relevance",
-				"reason":   fmt.Sprintf("%d new concepts added; call set_goal_relevance with their scores to preserve goal-aware routing (semantics are incremental — existing concepts are not erased).", added),
+				"reason":   fmt.Sprintf("%d new concepts added; call set_goal_relevance with their scores to preserve goal-aware routing (semantics are incremental - existing concepts are not erased).", added),
 				"required": false,
 			}
 		}

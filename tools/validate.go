@@ -18,7 +18,7 @@ import (
 // self-correct (call get_learner_context to refresh the concept list).
 func validateConceptInDomain(d *models.Domain, concept string) error {
 	if d == nil {
-		return fmt.Errorf("no active domain — call init_domain first")
+		return fmt.Errorf("no active domain - call init_domain first")
 	}
 	for _, c := range d.Graph.Concepts {
 		if c == concept {
@@ -120,7 +120,7 @@ func validateNonNegativeCount(field string, v, max int) error {
 const (
 	maxShortLabelLen = 200    // concept names, error_type, activity_type, session_id, kind labels
 	maxNoteLen       = 4096   // notes, misconception_detail, intent prompts
-	maxLongTextLen   = 16_384 // free-form payloads (rationale, content) — last-resort cap
+	maxLongTextLen   = 16_384 // free-form payloads (rationale, content) - last-resort cap
 )
 
 // validateString rejects strings longer than max bytes. Empty values are

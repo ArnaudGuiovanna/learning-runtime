@@ -18,7 +18,7 @@ type ArchiveDomainParams struct {
 func registerArchiveDomain(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "archive_domain",
-		Description: "Archive a domain — it disappears from the dashboard and routing but progress is preserved. Use unarchive_domain to reactivate it.",
+		Description: "Archive a domain - it disappears from the dashboard and routing but progress is preserved. Use unarchive_domain to reactivate it.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params ArchiveDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -66,7 +66,7 @@ type UnarchiveDomainParams struct {
 func registerUnarchiveDomain(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "unarchive_domain",
-		Description: "Reactivate an archived domain — it reappears in the dashboard and routing with all its progress preserved.",
+		Description: "Reactivate an archived domain - it reappears in the dashboard and routing with all its progress preserved.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params UnarchiveDomainParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {

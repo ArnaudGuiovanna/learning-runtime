@@ -258,8 +258,8 @@ func TestDispatchQueued_FallbackWhenQueueEmpty(t *testing.T) {
 	if len(bodies) != 1 {
 		t.Fatalf("got %d webhook hits, want 1 (fallback)", len(bodies))
 	}
-	if !contains(bodies[0], "Ce soir") {
-		t.Errorf("fallback payload should mention 'Ce soir', got %s", bodies[0])
+	if !contains(bodies[0], "Tonight") {
+		t.Errorf("fallback payload should mention 'Tonight', got %s", bodies[0])
 	}
 }
 

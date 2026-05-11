@@ -16,11 +16,11 @@ import (
 
 type RecordInteractionParams struct {
 	Concept             string  `json:"concept" jsonschema:"the concept being practiced"`
-	ActivityType        string  `json:"activity_type" jsonschema:"activity type — MUST be one of the canonical values: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
+	ActivityType        string  `json:"activity_type" jsonschema:"activity type - MUST be one of the canonical values: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
 	Success             bool    `json:"success" jsonschema:"whether the exercise was completed successfully"`
 	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"response time in seconds"`
 	Confidence          float64 `json:"confidence" jsonschema:"estimated confidence between 0 and 1"`
-	ErrorType           string  `json:"error_type,omitempty" jsonschema:"error type on failure — leave empty or use exactly: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
+	ErrorType           string  `json:"error_type,omitempty" jsonschema:"error type on failure - leave empty or use exactly: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
 	Notes               string  `json:"notes" jsonschema:"optional notes about the interaction"`
 	DomainID            string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"number of hints requested during the exchange (optional, default 0)"`
@@ -117,7 +117,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 				r, _ := errorResult("domain not found")
 				return r, nil, nil
 			}
-			deps.Logger.Info("record_interaction: no active domain — needs setup", "learner", learnerID)
+			deps.Logger.Info("record_interaction: no active domain - needs setup", "learner", learnerID)
 			r, _ := noActiveDomainResult()
 			return r, nil, nil
 		}

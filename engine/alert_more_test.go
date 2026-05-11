@@ -52,9 +52,9 @@ func TestComputeAlerts_ErrorTypeRecommendations(t *testing.T) {
 		errorType string
 		wantSub   string
 	}{
-		{"knowledge gap", "KNOWLEDGE_GAP", "lacune"},
-		{"logic error", "LOGIC_ERROR", "logique"},
-		{"syntax error", "SYNTAX_ERROR", "syntaxe"},
+		{"knowledge gap", "KNOWLEDGE_GAP", "conceptual gap"},
+		{"logic error", "LOGIC_ERROR", "logic errors"},
+		{"syntax error", "SYNTAX_ERROR", "syntax errors"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
