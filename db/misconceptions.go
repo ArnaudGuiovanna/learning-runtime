@@ -7,6 +7,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -62,14 +63,21 @@ type MisconceptionGroup struct {
 // GetMisconceptionGroups returns all misconception groups for a learner,
 // optionally filtered by concept. Groups are ordered by count descending.
 func (s *Store) GetMisconceptionGroups(learnerID string, conceptFilter map[string]bool) ([]MisconceptionGroup, error) {
-	rows, err := s.db.Query(
-		`SELECT concept, misconception_type, COUNT(*) AS cnt, MIN(created_at), MAX(created_at)
+	query := `SELECT concept, misconception_type, COUNT(*) AS cnt, MIN(created_at), MAX(created_at)
 		 FROM interactions
-		 WHERE learner_id = ? AND misconception_type IS NOT NULL
-		 GROUP BY concept, misconception_type
-		 ORDER BY cnt DESC`,
-		learnerID,
-	)
+		 WHERE learner_id = ? AND misconception_type IS NOT NULL`
+	args := []any{learnerID}
+	if len(conceptFilter) > 0 {
+		placeholders := make([]string, 0, len(conceptFilter))
+		for concept := range conceptFilter {
+			placeholders = append(placeholders, "?")
+			args = append(args, concept)
+		}
+		query += ` AND concept IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	query += ` GROUP BY concept, misconception_type ORDER BY cnt DESC`
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get misconception groups: %w", err)
 	}

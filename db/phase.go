@@ -7,6 +7,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"tutor-mcp/models"
@@ -55,16 +56,41 @@ func (s *Store) GetActiveMisconceptionsBatch(learnerID string, concepts []string
 	if len(concepts) == 0 {
 		return out, nil
 	}
+
+	placeholders := make([]string, 0, len(concepts))
+	args := make([]any, 0, len(concepts)+2)
+	args = append(args, learnerID)
 	for _, c := range concepts {
-		groups, err := s.GetActiveMisconceptions(learnerID, c)
-		if err != nil {
-			return nil, fmt.Errorf("batch active misconceptions on %q: %w", c, err)
-		}
-		if len(groups) > 0 {
-			out[c] = true
-		}
+		placeholders = append(placeholders, "?")
+		args = append(args, c)
 	}
-	return out, nil
+	args = append(args, MisconceptionResolutionWindow)
+
+	rows, err := s.db.Query(
+		`SELECT concept, misconception_type
+		 FROM (
+		    SELECT concept, misconception_type,
+		           ROW_NUMBER() OVER (PARTITION BY concept ORDER BY created_at DESC, id DESC) AS rn
+		    FROM interactions
+		    WHERE learner_id = ? AND concept IN (`+strings.Join(placeholders, ",")+`)
+		 )
+		 WHERE rn <= ? AND misconception_type IS NOT NULL`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("batch active misconceptions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var concept, misconceptionType string
+		if err := rows.Scan(&concept, &misconceptionType); err != nil {
+			return nil, fmt.Errorf("scan active misconception batch: %w", err)
+		}
+		_ = misconceptionType
+		out[concept] = true
+	}
+	return out, rows.Err()
 }
 
 // GetFirstActiveMisconception returns the highest-count active
