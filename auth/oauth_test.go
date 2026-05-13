@@ -446,6 +446,7 @@ func driveAuthorizePost(t *testing.T, s *OAuthServer, clientID, redirectURI, cod
 	form.Set("scope", "learner")
 	form.Set("email", email)
 	form.Set("password", password)
+	form.Set("approve_client", "yes")
 	if codeChallenge != "" {
 		form.Set("code_challenge", codeChallenge)
 		form.Set("code_challenge_method", codeChallengeMethod)

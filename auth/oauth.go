@@ -133,6 +133,12 @@ func (s *OAuthServer) HandleAuthorizeGet(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
+	client, err := s.store.GetOAuthClient(clientID)
+	if err != nil {
+		s.logger.Debug("authorize GET: client lookup failed", "err", err, "client_id", clientID)
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
 
 	codeChallenge := q.Get("code_challenge")
 	codeChallengeMethod := q.Get("code_challenge_method")
@@ -161,6 +167,7 @@ func (s *OAuthServer) HandleAuthorizeGet(w http.ResponseWriter, r *http.Request)
 
 	data := authPageData{
 		ClientID:            clientID,
+		ClientName:          client.ClientName,
 		RedirectURI:         redirectURI,
 		ResponseType:        q.Get("response_type"),
 		State:               q.Get("state"),
@@ -217,6 +224,12 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
+	client, err := s.store.GetOAuthClient(clientID)
+	if err != nil {
+		s.logger.Debug("authorize POST: client lookup failed", "err", err, "client_id", clientID)
+		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+		return
+	}
 
 	codeChallenge := r.FormValue("code_challenge")
 	codeChallengeMethod := r.FormValue("code_challenge_method")
@@ -234,6 +247,7 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 
 	data := authPageData{
 		ClientID:            clientID,
+		ClientName:          client.ClientName,
 		RedirectURI:         redirectURI,
 		ResponseType:        r.FormValue("response_type"),
 		State:               state,
@@ -273,6 +287,10 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			renderAuthPage(w, data, "An account with this email already exists.", "register")
 			return
 		}
+		if r.FormValue("approve_client") != "yes" {
+			renderAuthPage(w, data, "Please confirm that you recognize and approve this OAuth client before continuing.", "register")
+			return
+		}
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 		if err != nil {
@@ -310,6 +328,10 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			return
 		}
 		s.loginFailures.Reset(email)
+		if r.FormValue("approve_client") != "yes" {
+			renderAuthPage(w, data, "Please confirm that you recognize and approve this OAuth client before continuing.", "login")
+			return
+		}
 		learnerID = existing.ID
 	}
 
