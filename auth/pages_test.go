@@ -74,6 +74,9 @@ func TestRenderAuthPage_LoginNoError(t *testing.T) {
 		`value="challenge-xyz"`,
 		`value="S256"`,
 		`value="learner"`,
+		`name="approve_client"`,
+		`I recognize this client and approve sharing access.`,
+		`https://good.example`,
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(body, s) {
@@ -105,9 +108,12 @@ func TestRenderAuthPage_RegisterMode(t *testing.T) {
 	if !strings.Contains(body, "toggleView();") {
 		t.Fatal("register mode should include startup toggleView() call")
 	}
-	// Confirm-password input (register-only) must be present.
+	// Confirm-password and client-approval inputs (register-only) must be present.
 	if !strings.Contains(body, `name="password_confirm"`) {
 		t.Fatal("register mode missing password_confirm field")
+	}
+	if !strings.Contains(body, `name="approve_client"`) {
+		t.Fatal("register mode missing approve_client field")
 	}
 }
 

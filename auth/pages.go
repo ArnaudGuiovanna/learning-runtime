@@ -36,7 +36,9 @@ func formActionOriginFromRedirectURI(redirectURI string) string {
 
 type authPageData struct {
 	ClientID            string
+	ClientName          string
 	RedirectURI         string
+	RedirectOrigin      string
 	ResponseType        string
 	State               string
 	CodeChallenge       string
@@ -200,6 +202,32 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
       margin-bottom: 1.2rem;
     }
 
+    .consent-box {
+      margin-top: 1.2rem;
+      padding: 0.85rem 0.95rem;
+      border: 1px solid rgba(180, 150, 200, 0.35);
+      border-radius: 12px;
+      background: rgba(180, 150, 200, 0.08);
+      color: var(--ink-soft);
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+    .consent-box strong { color: var(--ink); }
+    .consent-check {
+      display: flex;
+      gap: 0.55rem;
+      align-items: flex-start;
+      margin-top: 0.75rem;
+      font-family: system-ui, -apple-system, "Inter Tight", "Segoe UI", Roboto, sans-serif;
+      font-size: 0.84rem;
+      color: var(--ink);
+    }
+    .consent-check input {
+      width: auto;
+      margin-top: 0.15rem;
+      accent-color: var(--terracotta);
+    }
+
     label {
       display: block;
       font-family: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -352,6 +380,15 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
           <label for="login-password">Password</label>
           <input id="login-password" type="password" name="password" placeholder="••••••••" required autocomplete="current-password" />
 
+          <div class="consent-box">
+            <p><strong>{{.Data.ClientName}}</strong> wants access to your tutor/mcp learner account.</p>
+            <p>After sign-in, tutor/mcp will send an authorization code to <strong>{{.Data.RedirectOrigin}}</strong>.</p>
+            <label class="consent-check" for="login-consent">
+              <input id="login-consent" type="checkbox" name="approve_client" value="yes" required />
+              <span>I recognize this client and approve sharing access.</span>
+            </label>
+          </div>
+
           <button type="submit">Sign in →</button>
         </form>
         <p class="toggle">No account? <a href="#" class="toggle-link">Create one</a></p>
@@ -379,6 +416,15 @@ var authTmpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
 
           <label for="reg-confirm">Confirm password</label>
           <input id="reg-confirm" type="password" name="password_confirm" placeholder="••••••••" required autocomplete="new-password" />
+
+          <div class="consent-box">
+            <p><strong>{{.Data.ClientName}}</strong> wants access to your tutor/mcp learner account.</p>
+            <p>After account creation, tutor/mcp will send an authorization code to <strong>{{.Data.RedirectOrigin}}</strong>.</p>
+            <label class="consent-check" for="register-consent">
+              <input id="register-consent" type="checkbox" name="approve_client" value="yes" required />
+              <span>I recognize this client and approve sharing access.</span>
+            </label>
+          </div>
 
           <button type="submit">Create account →</button>
         </form>
@@ -417,6 +463,12 @@ type tmplData struct {
 }
 
 func renderAuthPage(w http.ResponseWriter, data authPageData, errMsg string, mode string) {
+	if data.ClientName == "" {
+		data.ClientName = data.ClientID
+	}
+	if data.RedirectOrigin == "" {
+		data.RedirectOrigin = formActionOriginFromRedirectURI(data.RedirectURI)
+	}
 	nonce, err := generateNonce()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

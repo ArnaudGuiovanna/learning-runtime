@@ -903,6 +903,38 @@ func TestGenerateCSRFToken_UniqueAndBase64URL(t *testing.T) {
 
 // ─── HandleAuthorizePost: full happy paths + remaining branches ──────────────
 
+func TestAuthorizePost_LoginRequiresClientApproval(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://attacker.example/cb")
+	seedLearner(t, store, "victim@example.com", "correct-password")
+
+	form := url.Values{}
+	form.Set("csrf_token", "tkn")
+	form.Set("mode", "login")
+	form.Set("client_id", "cid")
+	form.Set("redirect_uri", "https://attacker.example/cb")
+	form.Set("code_challenge", "ch")
+	form.Set("code_challenge_method", "S256")
+	form.Set("email", "victim@example.com")
+	form.Set("password", "correct-password")
+
+	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "tkn"})
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizePost(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Fatalf("unexpected redirect without approval: %s", loc)
+	}
+	if !strings.Contains(rec.Body.String(), "approve this OAuth client") {
+		t.Fatalf("body missing approval message; body=%q", rec.Body.String())
+	}
+}
+
 func TestAuthorizePost_LoginSuccess_Redirects302WithCodeAndIss(t *testing.T) {
 	s, store := newTestServer(t)
 	seedClient(t, store, "cid", "https://good.example/cb")
@@ -919,6 +951,7 @@ func TestAuthorizePost_LoginSuccess_Redirects302WithCodeAndIss(t *testing.T) {
 	form.Set("code_challenge_method", "S256")
 	form.Set("email", "ok@e.com")
 	form.Set("password", "correct-password")
+	form.Set("approve_client", "yes")
 	form.Set("scope", "learner")
 
 	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
@@ -967,6 +1000,7 @@ func TestAuthorizePost_LoginSuccess_NoState_OmitsStateParam(t *testing.T) {
 	form.Set("code_challenge_method", "S256")
 	form.Set("email", "okns@e.com")
 	form.Set("password", "correct-password")
+	form.Set("approve_client", "yes")
 
 	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1001,6 +1035,7 @@ func TestAuthorizePost_RegisterSuccess_CreatesAndRedirects(t *testing.T) {
 	form.Set("email", "newuser@e.com")
 	form.Set("password", "password-1234")
 	form.Set("password_confirm", "password-1234")
+	form.Set("approve_client", "yes")
 
 	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
