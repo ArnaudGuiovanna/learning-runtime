@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"tutor-mcp/algorithms"
@@ -30,7 +31,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"When to call: this is the main tool of the learning cycle; it already includes alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief. " +
 			"When NOT to call: if another tool just returned needs_domain_setup=true (call init_domain first); do not call get_pending_alerts or get_metacognitive_mirror in the same turn unless the learner explicitly asks for those raw views. " +
 			"Precondition: a domain must exist; otherwise needs_domain_setup=true is returned with a setup_domain activity. " +
-			"Returns: {needs_domain_setup, domain_id, domain_name, intent, intent_status, activity, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
+			"Returns: {needs_domain_setup, domain_id, domain_name, intent, intent_status, activity, pedagogical_contract, goal_relevance_status, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetNextActivityParams) (*mcp.CallToolResult, any, error) {
 		totalStart := time.Now()
 		learnerID, err := getLearnerID(ctx)
@@ -132,26 +133,40 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		intentStatus := "auto"
 		route := "orchestrator"
 		now := time.Now().UTC()
+		input := engine.OrchestratorInput{
+			LearnerID:    learnerID,
+			DomainID:     domain.ID,
+			Now:          now,
+			SessionStart: sessionStart,
+			Config:       engine.NewDefaultPhaseConfig(),
+			Logger:       deps.Logger,
+		}
 		if intent == activityIntentReview {
-			activity, intentStatus = selectReviewIntentActivity(deps.Store, learnerID, domain, domainStates, domainInteractions, sessionConcepts, now)
-			orchPhase = models.PhaseMaintenance
-			route = "review_override"
-		} else {
-			// OrchestrateWithPhase returns the post-orchestrate phase so we
-			// can audit-log it without re-reading the domain row (perf #91).
-			activity, orchPhase, orchErr = engine.OrchestrateWithPhase(deps.Store, engine.OrchestratorInput{
-				LearnerID: learnerID,
-				DomainID:  domain.ID,
-				Now:       now,
-				Config:    engine.NewDefaultPhaseConfig(),
-				Logger:    deps.Logger,
-			})
+			input.ReviewOnly = true
+			intentStatus = "applied"
+			route = "orchestrator_review"
+		}
+		// OrchestrateWithPhase returns the post-orchestrate phase so we
+		// can audit-log it without re-reading the domain row (perf #91).
+		activity, orchPhase, orchErr = engine.OrchestrateWithPhase(deps.Store, input)
+		if input.ReviewOnly && strings.Contains(activity.Rationale, "no_reviewable_concept") {
+			intentStatus = "no_reviewable_concept"
 		}
 		orchestratorMs := time.Since(orchestratorStart).Milliseconds()
 		if orchErr != nil {
 			deps.Logger.Error("orchestrator failed", "err", orchErr, "learner", learnerID, "domain", domain.ID)
 			r, _ := errorResult("could not compute next activity")
 			return r, nil, nil
+		}
+		overrideResult := LearningNegotiationOverrideConsumeResult{Status: LearningNegotiationOverrideConsumeNone}
+		if overrideActivity, consumed, err := ConsumeLearningNegotiationOverride(deps.Store, learnerID, domain, activity, alerts, now); err != nil {
+			deps.Logger.Warn("get_next_activity: learning negotiation override consume failed", "err", err, "learner", learnerID, "domain", domain.ID)
+		} else {
+			overrideResult = consumed
+			if consumed.Status == LearningNegotiationOverrideConsumeConsumed {
+				activity = overrideActivity
+				route = "negotiation_override"
+			}
 		}
 
 		// Pipeline decision audit — one line per get_next_activity call.
@@ -182,6 +197,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"phase", loggedPhase,
 			"intent", intent,
 			"intent_status", intentStatus,
+			"negotiation_override_status", overrideResult.Status,
 			"activity_type", activity.Type,
 			"concept", activity.Concept,
 			"rationale", activity.Rationale,
@@ -327,8 +343,11 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		var masteryUncertainty any = map[string]any{}
 		var transferProfile any = map[string]any{}
 		var raschEloCalibration any = map[string]any{}
+		var selectedState *models.ConceptState
+		var evidenceQuality engine.EvidenceQualityAssessment
+		var uncertainty engine.MasteryUncertainty
+		var typedTransferProfile engine.TransferProfile
 		if activity.Concept != "" {
-			var selectedState *models.ConceptState
 			for _, cs := range domainStates {
 				if cs.Concept == activity.Concept {
 					selectedState = cs
@@ -342,11 +361,13 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 				conceptInteractions = filterInteractionsByDomainID(conceptInteractions, domain.ID)
 				now := time.Now().UTC()
 				profile := engine.BuildEvidenceProfile(learnerID, activity.Concept, conceptInteractions, now)
+				evidenceQuality = engine.MasteryEvidenceQuality(profile)
 				masteryEvidence = map[string]any{
 					"profile": profile,
-					"quality": engine.MasteryEvidenceQuality(profile),
+					"quality": evidenceQuality,
 				}
-				masteryUncertainty = engine.ComputeMasteryUncertainty(selectedState, conceptInteractions, engine.MasteryEvidenceProfile{Now: now})
+				uncertainty = engine.ComputeMasteryUncertainty(selectedState, conceptInteractions, engine.MasteryEvidenceProfile{Now: now})
+				masteryUncertainty = uncertainty
 			}
 			if selectedState != nil {
 				raschState := algorithms.NewRaschEloState(selectedState.Theta, algorithms.FSRSDifficultyToIRT(selectedState.Difficulty))
@@ -355,10 +376,37 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			if transferRecords, err := deps.Store.GetTransferScores(learnerID, activity.Concept); err != nil {
 				deps.Logger.Warn("get_next_activity: transfer diagnostics fetch failed", "err", err, "learner", learnerID, "concept", activity.Concept)
 			} else {
-				transferProfile = engine.BuildTransferProfile(activity.Concept, transferRecords)
+				typedTransferProfile = engine.BuildTransferProfile(activity.Concept, transferRecords)
+				transferProfile = typedTransferProfile
+			}
+		}
+		if decision := engine.ApplyEvidenceController(engine.EvidenceControllerInput{
+			Activity:           activity,
+			ConceptState:       selectedState,
+			EvidenceQuality:    evidenceQuality,
+			MasteryUncertainty: uncertainty,
+			TransferProfile:    typedTransferProfile,
+		}); decision.Adjusted {
+			activity = decision.Activity
+			extra["evidence_adjustment"] = decision.Rationale
+			if active, err := deps.Store.GetActiveMisconceptions(learnerID, activity.Concept); err == nil && len(active) > 0 {
+				misconceptionPrompt := fmt.Sprintf("\nATTENTION : l'apprenant a %d misconception(s) active(s) : ", len(active))
+				for i, m := range active {
+					if i > 0 {
+						misconceptionPrompt += " ; "
+					}
+					misconceptionPrompt += m.MisconceptionType
+					if m.LastErrorDetail != "" {
+						misconceptionPrompt += " - " + m.LastErrorDetail
+					}
+				}
+				misconceptionPrompt += ". Target these confusions in your explanation and exercise. Do not explicitly mention the misconceptions - design the exercise so the learner confronts them naturally."
+				activity.PromptForLLM += misconceptionPrompt
 			}
 		}
 		diagnosticsMs := time.Since(diagnosticsStart).Milliseconds()
+		goalRelevanceStatus := buildGoalRelevanceStatus(domain)
+		contract := buildPedagogicalContract(activity, intent, evidenceQuality, uncertainty, typedTransferProfile, goalRelevanceStatus, extra["fade_params"])
 
 		out := map[string]any{
 			"needs_domain_setup":        false,
@@ -377,6 +425,14 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"mastery_uncertainty":       masteryUncertainty,
 			"transfer_profile":          transferProfile,
 			"rasch_elo_calibration":     raschEloCalibration,
+			"goal_relevance_status":     goalRelevanceStatus,
+			"pedagogical_contract":      contract,
+			"audit_rationale":           contract.AuditRationale,
+			"llm_instruction":           contract.LLMInstruction,
+			"learner_explanation":       contract.LearnerExplanation,
+		}
+		if overrideResult.Status != LearningNegotiationOverrideConsumeNone {
+			out["learning_negotiation_override"] = overrideResult
 		}
 		for k, v := range extra {
 			out[k] = v
@@ -437,5 +493,184 @@ func applyFadeToMotivation(brief *models.MotivationBrief, level engine.HintLevel
 		return &clone
 	default: // HintLevelFull
 		return brief
+	}
+}
+
+func buildGoalRelevanceStatus(domain *models.Domain) models.GoalRelevanceStatus {
+	gr := domain.ParseGoalRelevance()
+	if gr == nil {
+		return models.GoalRelevanceStatus{
+			Status:          "missing",
+			Message:         "Goal-aware routing is using uniform relevance because no relevance vector exists.",
+			RecommendedTool: "set_goal_relevance",
+			MissingConcepts: append([]string(nil), domain.Graph.Concepts...),
+		}
+	}
+	missing := domain.UncoveredConcepts()
+	if len(missing) > 0 {
+		return models.GoalRelevanceStatus{
+			Status:          "partial",
+			Message:         "Goal-aware routing has a relevance vector, but some domain concepts are not covered.",
+			RecommendedTool: "set_goal_relevance",
+			MissingConcepts: missing,
+			Stale:           domain.IsGoalRelevanceStale(),
+		}
+	}
+	if domain.IsGoalRelevanceStale() {
+		return models.GoalRelevanceStatus{
+			Status:          "stale",
+			Message:         "Goal-aware routing has a complete relevance vector, but it was set for an older graph version.",
+			RecommendedTool: "set_goal_relevance",
+			Stale:           true,
+		}
+	}
+	return models.GoalRelevanceStatus{
+		Status:  "valid",
+		Message: "Goal-aware routing has a complete relevance vector for the current graph.",
+	}
+}
+
+func buildPedagogicalContract(
+	activity models.Activity,
+	intent string,
+	evidenceQuality engine.EvidenceQualityAssessment,
+	uncertainty engine.MasteryUncertainty,
+	transferProfile engine.TransferProfile,
+	goalStatus models.GoalRelevanceStatus,
+	fadeValue any,
+) models.PedagogicalContract {
+	constraints := models.PedagogicalConstraints{
+		MustCollect: []string{"learner_answer", "rubric_score"},
+		Avoid: []string{
+			"introducing_new_prerequisite",
+			"long_explanation_first",
+			"marking_mastery_without_evidence",
+		},
+	}
+	if goalStatus.Status == "missing" || goalStatus.Status == "partial" || goalStatus.Status == "stale" {
+		constraints.Avoid = append(constraints.Avoid, "assuming_goal_relevance_is_complete")
+	}
+	if evidenceQuality.Quality == engine.EvidenceQualityWeak || uncertainty.ConfidenceLabel == engine.MasteryConfidenceLow {
+		constraints.MustCollect = append(constraints.MustCollect, "reasoning_trace")
+	}
+	if transferProfile.ReadinessLabel == engine.TransferReadinessBlocked {
+		constraints.Avoid = append(constraints.Avoid, "jumping_to_mastery_challenge")
+	}
+
+	contract := models.PedagogicalContract{
+		Intent:                  contractIntent(intent, activity),
+		TargetConcept:           activity.Concept,
+		RecommendedActivityType: activity.Type,
+		Constraints:             constraints,
+		AllowedVariants:         allowedVariants(activity.Type),
+		LLMDiscretion: models.PedagogicalLLMDiscretion{
+			CanChangeFormat:                  activity.Type != models.ActivityCloseSession,
+			CanRequestClarification:          true,
+			CanProposeNegotiation:            activity.Type != models.ActivityCloseSession,
+			CannotMarkMasteryWithoutEvidence: true,
+		},
+		FadeGuidance:       fadeGuidance(fadeValue),
+		LearnerExplanation: learnerExplanation(activity),
+		AuditRationale:     activity.Rationale,
+		LLMInstruction:     activity.PromptForLLM,
+	}
+	return contract
+}
+
+func contractIntent(intent string, activity models.Activity) string {
+	if intent == activityIntentReview {
+		return "review_prior_material"
+	}
+	switch activity.Type {
+	case models.ActivityCloseSession:
+		return "close_overloaded_session"
+	case models.ActivityRecall:
+		return "stabilize_retention"
+	case models.ActivityPractice:
+		return "build_reliable_skill"
+	case models.ActivityDebugMisconception:
+		return "repair_misconception"
+	case models.ActivityFeynmanPrompt:
+		return "strengthen_explanation"
+	case models.ActivityTransferProbe:
+		return "test_transfer"
+	case models.ActivityMasteryChallenge:
+		return "verify_mastery"
+	case models.ActivitySetupDomain:
+		return "initialize_domain"
+	default:
+		return "continue_learning"
+	}
+}
+
+func allowedVariants(t models.ActivityType) []string {
+	switch t {
+	case models.ActivityCloseSession:
+		return []string{"recap_brief", "next_session_intention"}
+	case models.ActivityRecall:
+		return []string{"retrieval_prompt", "cloze_recall", "short_application"}
+	case models.ActivityDebugMisconception:
+		return []string{"contrastive_example", "micro_debug", "socratic_prompt"}
+	case models.ActivityFeynmanPrompt:
+		return []string{"teach_back", "analogy_check", "gap_explanation"}
+	case models.ActivityTransferProbe:
+		return []string{"near_transfer", "far_transfer", "debugging_transfer"}
+	case models.ActivityMasteryChallenge:
+		return []string{"build_challenge", "explain_then_apply", "rubric_scored_task"}
+	default:
+		return []string{"socratic_prompt", "worked_example_completion", "micro_practice"}
+	}
+}
+
+func learnerExplanation(activity models.Activity) string {
+	switch activity.Type {
+	case models.ActivityCloseSession:
+		return "We will close this session with a short recap and a clear next step."
+	case models.ActivityRecall:
+		return "We will refresh this concept so it stays available when you need it."
+	case models.ActivityDebugMisconception:
+		return "We will focus on a likely confusion and resolve it through a targeted example."
+	case models.ActivityFeynmanPrompt:
+		return "We will make the idea easier to explain, which usually makes it easier to reuse."
+	case models.ActivityTransferProbe:
+		return "We will check whether this idea transfers beyond the first context."
+	case models.ActivityMasteryChallenge:
+		return "We will verify that the concept is solid with a more complete challenge."
+	case models.ActivitySetupDomain:
+		return "We need to set up the learning domain before choosing an activity."
+	default:
+		return "We will consolidate this concept before moving to the next step."
+	}
+}
+
+func fadeGuidance(value any) *models.PedagogicalFadeGuidance {
+	var params engine.FadeParams
+	switch v := value.(type) {
+	case engine.FadeParams:
+		params = v
+	case *engine.FadeParams:
+		if v == nil {
+			return nil
+		}
+		params = *v
+	default:
+		return nil
+	}
+
+	instruction := "Use normal scaffolding."
+	switch params.HintLevel {
+	case engine.HintLevelFull:
+		instruction = "Offer explicit scaffolding and check understanding before increasing difficulty."
+	case engine.HintLevelPartial:
+		instruction = "Keep scaffolding concise and let the learner make the next move."
+	case engine.HintLevelNone:
+		instruction = "Avoid unsolicited hints; ask only brief clarifying questions when needed."
+	}
+	return &models.PedagogicalFadeGuidance{
+		HintLevel:              string(params.HintLevel),
+		WebhookFrequency:       string(params.WebhookFrequency),
+		ZPDAggressiveness:      string(params.ZPDAggressiveness),
+		ProactiveReviewEnabled: params.ProactiveReviewEnabled,
+		Instruction:            instruction,
 	}
 }

@@ -18,7 +18,13 @@ import (
 
 type LearningNegotiationParams struct {
 	SessionID        string `json:"session_id" jsonschema:"current session ID"`
+	Concept          string `json:"concept,omitempty" jsonschema:"concept proposed by the learner; canonical key for concept overrides"`
 	LearnerConcept   string `json:"learner_concept,omitempty" jsonschema:"concept proposed by the learner (optional)"`
+	Format           string `json:"format,omitempty" jsonschema:"requested activity format override (optional)"`
+	ActivityType     string `json:"activity_type,omitempty" jsonschema:"requested activity type override: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE"`
+	Scaffold         bool   `json:"scaffold,omitempty" jsonschema:"whether the next activity should include extra scaffolding"`
+	MicroDiagnostic  bool   `json:"micro_diagnostic,omitempty" jsonschema:"whether the next activity should be a short diagnostic prompt"`
+	DeferActivity    bool   `json:"defer_activity,omitempty" jsonschema:"whether the learner wants to defer the next activity briefly"`
 	LearnerRationale string `json:"learner_rationale,omitempty" jsonschema:"learner's rationale (optional)"`
 	DomainID         string `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
 }
@@ -42,25 +48,45 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			return r, nil, nil
 		}
 
-		// String length caps (issue #82). All three fields are echoed back
-		// into the JSON response (tradeoffs, accepted_plan.rationale) and
-		// learner_rationale ends up in the orchestrator-bound
-		// acceptedPlan.Rationale string. Without these guards a misbehaving
-		// caller could push multi-MB strings into orchestrator output.
+		// String length caps (issue #82). These fields are echoed back into
+		// the JSON response and learner_rationale ends up in the negotiated
+		// activity rationale. Without these guards a misbehaving caller could
+		// push multi-MB strings into orchestrator output.
 		stringFields := []struct {
 			name  string
 			value string
 			max   int
 		}{
 			{"session_id", params.SessionID, maxShortLabelLen},
+			{"concept", params.Concept, maxShortLabelLen},
 			{"learner_concept", params.LearnerConcept, maxShortLabelLen},
+			{"format", params.Format, maxShortLabelLen},
+			{"activity_type", params.ActivityType, maxShortLabelLen},
 			{"learner_rationale", params.LearnerRationale, maxNoteLen},
+			{"domain_id", params.DomainID, maxShortLabelLen},
 		}
 		for _, f := range stringFields {
 			if err := validateString(f.name, f.value, f.max); err != nil {
 				r, _ := errorResult(err.Error())
 				return r, nil, nil
 			}
+		}
+		concept, err := normalizeLearningNegotiationConcept(params.Concept, params.LearnerConcept)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if err := validateLearningNegotiationActivityType("activity_type", params.ActivityType); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if params.DeferActivity && params.MicroDiagnostic {
+			r, _ := errorResult("defer_activity and micro_diagnostic cannot both be true")
+			return r, nil, nil
+		}
+		if params.DeferActivity && params.ActivityType != "" && params.ActivityType != string(models.ActivityRest) {
+			r, _ := errorResult("defer_activity can only be combined with activity_type REST")
+			return r, nil, nil
 		}
 
 		domain, err := resolveDomain(deps.Store, learnerID, params.DomainID)
@@ -80,10 +106,10 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 		// guard the orchestrator silently builds an "accepted" plan around a
 		// hallucinated concept (no prereqs to break, no states to consult)
 		// and returns counts_as_self_initiated=true. Mirror the record_
-		// interaction / transfer_challenge guard pattern. LearnerConcept is
-		// optional (system_plan-only path), so only validate when non-empty.
-		if params.LearnerConcept != "" {
-			if err := validateConceptInDomain(domain, params.LearnerConcept); err != nil {
+		// interaction / transfer_challenge guard pattern. Concept overrides
+		// are optional (system_plan-only path), so only validate when non-empty.
+		if concept != "" {
+			if err := validateConceptInDomain(domain, concept); err != nil {
 				r, _ := errorResult(err.Error())
 				return r, nil, nil
 			}
@@ -102,18 +128,16 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			}
 		}
 
-		mastery := make(map[string]float64)
-		for _, cs := range domainStates {
-			mastery[cs.Concept] = cs.PMastery
-		}
+		mastery := masteryByConcept(domainStates)
 
 		// Same orchestrator path as get_next_activity, so the system_plan
 		// shown to the learner during negotiation matches what would be
 		// served on the next activity request.
+		now := time.Now().UTC()
 		systemActivity, orchErr := engine.Orchestrate(deps.Store, engine.OrchestratorInput{
 			LearnerID: learnerID,
 			DomainID:  domain.ID,
-			Now:       time.Now().UTC(),
+			Now:       now,
 			Config:    engine.NewDefaultPhaseConfig(),
 			Logger:    deps.Logger,
 		})
@@ -130,14 +154,24 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			},
 		}
 
-		if params.LearnerConcept != "" {
+		if hasLearningNegotiationProposal(params, concept) {
+			proposal := newLearningNegotiationProposal(params, concept)
 			var tradeoffs []tradeoff
 
+			if systemActivity.Type == models.ActivityCloseSession && !proposal.DeferActivity {
+				tradeoffs = append(tradeoffs, tradeoff{
+					Factor:      "overload",
+					SystemPlan:  "close the session now",
+					LearnerPlan: "continue with a negotiated activity",
+					Delta:       1.0,
+				})
+			}
+
 			systemConcept := systemActivity.Concept
-			if systemConcept != "" && systemConcept != params.LearnerConcept {
+			if concept != "" && systemConcept != "" && systemConcept != concept {
 				systemCS, _ := deps.Store.GetConceptState(learnerID, systemConcept)
 				if systemCS != nil && systemCS.LastReview != nil {
-					elapsed := int(time.Since(*systemCS.LastReview).Hours() / 24)
+					elapsed := int(now.Sub(*systemCS.LastReview).Hours() / 24)
 					currentRet := algorithms.Retrievability(elapsed, systemCS.Stability)
 					futureRet := algorithms.Retrievability(elapsed+1, systemCS.Stability)
 					tradeoffs = append(tradeoffs, tradeoff{
@@ -149,21 +183,69 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 				}
 			}
 
-			prereqs := domain.Graph.Prerequisites[params.LearnerConcept]
-			unmetPrereqs := 0
-			masteryMid := algorithms.MasteryMid()
-			for _, p := range prereqs {
-				if mastery[p] < masteryMid {
-					unmetPrereqs++
-				}
-			}
-			if unmetPrereqs > 0 {
+			unmetPrereqs := unmetHardPrerequisites(domain, mastery, concept)
+			if len(unmetPrereqs) > 0 {
 				tradeoffs = append(tradeoffs, tradeoff{
 					Factor:      "prerequisites",
 					SystemPlan:  "prerequis respectes",
-					LearnerPlan: fmt.Sprintf("%d prerequis non maitrises pour %s", unmetPrereqs, params.LearnerConcept),
-					Delta:       float64(unmetPrereqs) * 0.2,
+					LearnerPlan: fmt.Sprintf("%d prerequis non maitrises pour %s", len(unmetPrereqs), concept),
+					Delta:       float64(len(unmetPrereqs)) * 0.2,
 				})
+			}
+			if proposal.Format != "" && proposal.Format != systemActivity.Format {
+				tradeoffs = append(tradeoffs, tradeoff{
+					Factor:      "format",
+					SystemPlan:  fmt.Sprintf("format %s", systemActivity.Format),
+					LearnerPlan: fmt.Sprintf("format %s", proposal.Format),
+					Delta:       0.05,
+				})
+			}
+			if proposal.ActivityType != "" && proposal.ActivityType != systemActivity.Type {
+				tradeoffs = append(tradeoffs, tradeoff{
+					Factor:      "activity_type",
+					SystemPlan:  fmt.Sprintf("type %s", systemActivity.Type),
+					LearnerPlan: fmt.Sprintf("type %s", proposal.ActivityType),
+					Delta:       0.05,
+				})
+			}
+			if proposal.Scaffold {
+				tradeoffs = append(tradeoffs, tradeoff{
+					Factor:      "scaffold",
+					SystemPlan:  "standard support",
+					LearnerPlan: "more explicit scaffolding",
+					Delta:       0,
+				})
+			}
+			if proposal.MicroDiagnostic {
+				tradeoffs = append(tradeoffs, tradeoff{
+					Factor:      "micro_diagnostic",
+					SystemPlan:  "full activity",
+					LearnerPlan: "short diagnostic prompt first",
+					Delta:       0.05,
+				})
+			}
+			if proposal.DeferActivity {
+				tradeoffs = append(tradeoffs, tradeoff{
+					Factor:      "defer_activity",
+					SystemPlan:  "work on the selected activity now",
+					LearnerPlan: "briefly defer the activity",
+					Delta:       0.10,
+				})
+			}
+			if concept != "" {
+				learnerCS, _ := deps.Store.GetConceptState(learnerID, concept)
+				if proposal.ActivityType == models.ActivityMasteryChallenge ||
+					proposal.ActivityType == models.ActivityFeynmanPrompt ||
+					proposal.ActivityType == models.ActivityTransferProbe {
+					if learnerCS == nil || learnerCS.PMastery < algorithms.MasteryBKT() {
+						tradeoffs = append(tradeoffs, tradeoff{
+							Factor:      "mastery_readiness",
+							SystemPlan:  "wait until mastery evidence is strong enough",
+							LearnerPlan: fmt.Sprintf("attempt %s before mastery is ready", proposal.ActivityType),
+							Delta:       0.25,
+						})
+					}
+				}
 			}
 
 			accepted := true
@@ -175,29 +257,47 @@ func registerLearningNegotiation(server *mcp.Server, deps *Deps) {
 			}
 
 			acceptedPlan := systemActivity
-			if accepted && params.LearnerConcept != "" {
-				learnerCS, _ := deps.Store.GetConceptState(learnerID, params.LearnerConcept)
-				difficulty := 0.55
-				if learnerCS != nil {
-					difficulty = learnerCS.Difficulty / 10.0
+			var override *LearningNegotiationOverride
+			if accepted {
+				ov := buildLearningNegotiationOverride(params, domain.ID, systemActivity, domainStates, concept, now)
+				id, err := PersistLearningNegotiationOverride(deps.Store, learnerID, &ov, now)
+				if err != nil {
+					deps.Logger.Error("learning_negotiation: failed to persist override", "err", err, "learner", learnerID, "domain", domain.ID)
+					r, _ := errorResult("could not persist negotiated override")
+					return r, nil, nil
 				}
-				acceptedPlan = models.Activity{
-					Type:             models.ActivityRecall,
-					Concept:          params.LearnerConcept,
-					DifficultyTarget: difficulty,
-					Format:           "mixed",
-					EstimatedMinutes: 15,
-					Rationale:        fmt.Sprintf("learner-negotiated choice: %s", params.LearnerRationale),
-					PromptForLLM:     fmt.Sprintf("The learner chose to work on %s. Generate a suitable exercise.", params.LearnerConcept),
-				}
+				ov.ID = id
+				acceptedPlan = ov.Activity
+				override = &ov
 			}
 
-			result["learner_proposal"] = params.LearnerConcept
+			if concept != "" {
+				result["learner_proposal"] = concept
+			} else {
+				result["learner_proposal"] = "structured_override"
+			}
+			result["proposal"] = map[string]interface{}{
+				"concept":          concept,
+				"format":           params.Format,
+				"activity_type":    params.ActivityType,
+				"scaffold":         params.Scaffold,
+				"micro_diagnostic": params.MicroDiagnostic,
+				"defer_activity":   params.DeferActivity,
+			}
 			result["tradeoffs"] = tradeoffs
 			result["accepted"] = accepted
 			result["accepted_plan"] = map[string]interface{}{
 				"activity":  acceptedPlan,
 				"rationale": acceptedPlan.Rationale,
+			}
+			if override != nil {
+				result["override"] = override
+				result["override_persistence"] = map[string]interface{}{
+					"status":       "persisted",
+					"id":           override.ID,
+					"expires_at":   override.ExpiresAt,
+					"consume_with": "ConsumeLearningNegotiationOverride",
+				}
 			}
 			result["counts_as_self_initiated"] = accepted
 		}

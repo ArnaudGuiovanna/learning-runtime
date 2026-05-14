@@ -12,12 +12,16 @@ import (
 
 	"tutor-mcp/algorithms"
 	"tutor-mcp/db"
+	"tutor-mcp/engine"
 	"tutor-mcp/models"
 )
 
 const (
 	activityIntentAuto   = "auto"
 	activityIntentReview = "review"
+
+	reviewIntentStatusApplied      = "applied"
+	reviewIntentStatusNoReviewable = "no_reviewable_concept"
 )
 
 func normalizeActivityIntent(raw string) (string, error) {
@@ -101,20 +105,307 @@ type reviewCandidate struct {
 	hasActiveMis bool
 }
 
+type reviewIntentConstraints struct {
+	concepts                   []string
+	stateByConcept             map[string]*models.ConceptState
+	seenByInteraction          map[string]bool
+	activeMisconceptions       map[string]bool
+	restrictedToMisconceptions bool
+	sessionConceptFallbackUsed bool
+}
+
+// resolveReviewIntentActivity routes explicit review intent through the
+// regulation pipeline components with review-specific constraints:
+// MAINTENANCE phase, previously studied concepts only, and review-safe
+// activity families for concept-bearing activities. Gate escape actions still
+// win. The legacy selector is retained as a fallback for NoFringe/constraint-
+// miss cases until the engine grows first-class intent input.
+func resolveReviewIntentActivity(store *db.Store, learnerID string, domain *models.Domain, states []*models.ConceptState, interactions []*models.Interaction, sessionConcepts map[string]int, alerts []models.Alert, now time.Time) (models.Activity, models.Phase, string, error) {
+	activity, status, err := selectReviewIntentPipelineActivity(store, learnerID, domain, states, interactions, sessionConcepts, alerts, now)
+	if err != nil {
+		return models.Activity{}, "", "", err
+	}
+	if status == reviewIntentStatusApplied || status == reviewIntentStatusNoReviewable {
+		return activity, models.PhaseMaintenance, status, nil
+	}
+
+	activity, status = selectReviewIntentActivity(store, learnerID, domain, states, interactions, sessionConcepts, now)
+	return activity, models.PhaseMaintenance, status, nil
+}
+
+func selectReviewIntentPipelineActivity(store *db.Store, learnerID string, domain *models.Domain, states []*models.ConceptState, interactions []*models.Interaction, sessionConcepts map[string]int, alerts []models.Alert, now time.Time) (models.Activity, string, error) {
+	constraints, err := buildReviewIntentConstraints(store, learnerID, domain, states, interactions, sessionConcepts)
+	if err != nil {
+		return models.Activity{}, "", err
+	}
+	if len(constraints.concepts) == 0 {
+		return reviewUnavailableActivity(), reviewIntentStatusNoReviewable, nil
+	}
+
+	gateResult, err := engine.ApplyGate(engine.GateInput{
+		Phase:                models.PhaseMaintenance,
+		Concepts:             constraints.concepts,
+		States:               constraints.stateByConcept,
+		Graph:                domain.Graph,
+		ActiveMisconceptions: constraints.activeMisconceptions,
+		RecentConcepts:       recentConceptsFromInteractions(interactions),
+		Alerts:               alerts,
+		AntiRepeatWindow:     engine.DefaultAntiRepeatWindow,
+	})
+	if err != nil {
+		return models.Activity{}, "", fmt.Errorf("review intent gate: %w", err)
+	}
+	if gateResult.EscapeAction != nil {
+		return composeReviewEscapeActivity(*gateResult.EscapeAction), reviewIntentStatusApplied, nil
+	}
+	if gateResult.NoCandidate {
+		return reviewUnavailableActivity(), reviewIntentStatusNoReviewable, nil
+	}
+
+	allowedSet := make(map[string]bool, len(gateResult.AllowedConcepts))
+	for _, c := range gateResult.AllowedConcepts {
+		allowedSet[c] = true
+	}
+	var goalRelevance map[string]float64
+	if gr := domain.ParseGoalRelevance(); gr != nil {
+		goalRelevance = gr.Relevance
+	}
+	selection, err := engine.SelectConcept(models.PhaseMaintenance, states, models.KnowledgeSpace{
+		Concepts:      gateResult.AllowedConcepts,
+		Prerequisites: reviewPrerequisitesForAllowed(domain.Graph.Prerequisites, allowedSet),
+	}, goalRelevance)
+	if err != nil {
+		return models.Activity{}, "", fmt.Errorf("review intent concept selector: %w", err)
+	}
+	if selection.NoFringe {
+		return models.Activity{}, "pipeline_no_fringe", nil
+	}
+
+	cs := constraints.stateByConcept[selection.Concept]
+	var mc *db.MisconceptionGroup
+	if constraints.activeMisconceptions[selection.Concept] {
+		mc, err = store.GetFirstActiveMisconception(learnerID, selection.Concept)
+		if err != nil {
+			return models.Activity{}, "", fmt.Errorf("review intent misconception fetch: %w", err)
+		}
+	}
+	history, err := store.GetActionHistoryForConcept(learnerID, selection.Concept, 50)
+	if err != nil {
+		return models.Activity{}, "", fmt.Errorf("review intent action history: %w", err)
+	}
+	action := engine.SelectAction(selection.Concept, cs, mc, engine.ActionHistory{
+		InteractionsAboveBKT:  history.InteractionsAboveBKT,
+		MasteryChallengeCount: history.MasteryChallengeCount,
+		FeynmanCount:          history.FeynmanCount,
+		TransferCount:         history.TransferCount,
+	})
+	if restrictions, ok := gateResult.ActionRestriction[selection.Concept]; ok && len(restrictions) > 0 {
+		if !reviewIntentContainsActivityType(restrictions, action.Type) {
+			action.Type = restrictions[0]
+			action.Rationale = "gate ActionRestriction override : " + action.Rationale
+		}
+	}
+	action = constrainReviewIntentAction(selection.Concept, cs, constraints.activeMisconceptions[selection.Concept], action, now)
+
+	activity := composeReviewPipelineActivity(action, selection, constraints)
+	if !isReviewIntentAllowedActivityType(activity.Type) {
+		return models.Activity{}, "pipeline_unsupported_activity", nil
+	}
+	if !isReviewableConcept(cs, constraints.seenByInteraction[activity.Concept]) {
+		return models.Activity{}, "pipeline_unreviewable_concept", nil
+	}
+	return activity, reviewIntentStatusApplied, nil
+}
+
+func buildReviewIntentConstraints(store *db.Store, learnerID string, domain *models.Domain, states []*models.ConceptState, interactions []*models.Interaction, sessionConcepts map[string]int) (reviewIntentConstraints, error) {
+	stateByConcept := statesByConcept(states)
+	seenByInteraction := interactionConceptSet(interactions)
+	activeMisconceptions, err := store.GetActiveMisconceptionsBatch(learnerID, domain.Graph.Concepts)
+	if err != nil {
+		return reviewIntentConstraints{}, fmt.Errorf("review intent active misconceptions: %w", err)
+	}
+
+	concepts := reviewableConceptsForDomain(domain, stateByConcept, seenByInteraction, sessionConcepts, true)
+	sessionFallback := false
+	if len(concepts) == 0 {
+		concepts = reviewableConceptsForDomain(domain, stateByConcept, seenByInteraction, sessionConcepts, false)
+		sessionFallback = len(concepts) > 0
+	}
+
+	var misconceptionConcepts []string
+	for _, c := range concepts {
+		if activeMisconceptions[c] {
+			misconceptionConcepts = append(misconceptionConcepts, c)
+		}
+	}
+	restrictedToMisconceptions := len(misconceptionConcepts) > 0
+	if restrictedToMisconceptions {
+		concepts = misconceptionConcepts
+	}
+
+	return reviewIntentConstraints{
+		concepts:                   concepts,
+		stateByConcept:             stateByConcept,
+		seenByInteraction:          seenByInteraction,
+		activeMisconceptions:       activeMisconceptions,
+		restrictedToMisconceptions: restrictedToMisconceptions,
+		sessionConceptFallbackUsed: sessionFallback,
+	}, nil
+}
+
+func reviewableConceptsForDomain(domain *models.Domain, states map[string]*models.ConceptState, seen map[string]bool, sessionConcepts map[string]int, skipSessionConcepts bool) []string {
+	if domain == nil {
+		return nil
+	}
+	concepts := make([]string, 0, len(domain.Graph.Concepts))
+	for _, concept := range domain.Graph.Concepts {
+		if skipSessionConcepts && sessionConcepts[concept] > 0 {
+			continue
+		}
+		if !isReviewableConcept(states[concept], seen[concept]) {
+			continue
+		}
+		concepts = append(concepts, concept)
+	}
+	return concepts
+}
+
+func statesByConcept(states []*models.ConceptState) map[string]*models.ConceptState {
+	out := make(map[string]*models.ConceptState, len(states))
+	for _, cs := range states {
+		if cs == nil {
+			continue
+		}
+		out[cs.Concept] = cs
+	}
+	return out
+}
+
+func interactionConceptSet(interactions []*models.Interaction) map[string]bool {
+	out := make(map[string]bool, len(interactions))
+	for _, i := range interactions {
+		if i == nil || i.Concept == "" {
+			continue
+		}
+		out[i.Concept] = true
+	}
+	return out
+}
+
+func recentConceptsFromInteractions(interactions []*models.Interaction) []string {
+	seen := make(map[string]bool, len(interactions))
+	recent := make([]string, 0, len(interactions))
+	for _, i := range interactions {
+		if i == nil || i.Concept == "" || seen[i.Concept] {
+			continue
+		}
+		seen[i.Concept] = true
+		recent = append(recent, i.Concept)
+	}
+	return recent
+}
+
+func reviewPrerequisitesForAllowed(src map[string][]string, allowed map[string]bool) map[string][]string {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string][]string, len(allowed))
+	for concept := range allowed {
+		if prereqs, ok := src[concept]; ok {
+			out[concept] = prereqs
+		}
+	}
+	return out
+}
+
+func constrainReviewIntentAction(concept string, cs *models.ConceptState, hasActiveMisconception bool, action engine.Action, now time.Time) engine.Action {
+	if isReviewIntentAllowedActivityType(action.Type) {
+		return action
+	}
+	if hasActiveMisconception {
+		return engine.Action{
+			Type:             models.ActivityDebugMisconception,
+			DifficultyTarget: 0.55,
+			Format:           "misconception_targeted",
+			EstimatedMinutes: 12,
+			Rationale:        fmt.Sprintf("review intent constraint: active misconception on %s; action selector proposed %s", concept, action.Type),
+		}
+	}
+	if cs != nil && cs.CardState != "" && cs.CardState != "new" {
+		return engine.Action{
+			Type:             models.ActivityRecall,
+			DifficultyTarget: 0.60,
+			Format:           "retrieval_review",
+			EstimatedMinutes: 8,
+			Rationale:        fmt.Sprintf("review intent constraint: recall prior concept with retention %.0f%%; action selector proposed %s", reviewRetention(cs, now)*100, action.Type),
+		}
+	}
+	return engine.Action{
+		Type:             models.ActivityPractice,
+		DifficultyTarget: 0.55,
+		Format:           "review_practice",
+		EstimatedMinutes: 10,
+		Rationale:        fmt.Sprintf("review intent constraint: practice prior concept; action selector proposed %s", action.Type),
+	}
+}
+
+func composeReviewPipelineActivity(action engine.Action, selection engine.Selection, constraints reviewIntentConstraints) models.Activity {
+	priority := "retention"
+	if constraints.restrictedToMisconceptions {
+		priority = "misconception"
+	}
+	if constraints.sessionConceptFallbackUsed {
+		priority += "+session_fallback"
+	}
+	return models.Activity{
+		Type:             action.Type,
+		Concept:          selection.Concept,
+		DifficultyTarget: action.DifficultyTarget,
+		Format:           action.Format,
+		EstimatedMinutes: action.EstimatedMinutes,
+		Rationale:        fmt.Sprintf("[intent=review phase=%s priority=%s] %s - %s", selection.Phase, priority, selection.Rationale, action.Rationale),
+		PromptForLLM:     fmt.Sprintf("Generate a review activity on %s. Do not introduce a new concept; focus on retrieval, applied practice, or resolving an active misconception from prior material.", selection.Concept),
+	}
+}
+
+func composeReviewEscapeActivity(esc engine.EscapeAction) models.Activity {
+	return models.Activity{
+		Type:         esc.Type,
+		Format:       esc.Format,
+		Rationale:    "[intent=review] gate escape: " + esc.Rationale,
+		PromptForLLM: "Session terminee. Emets le recap_brief et appelle record_session_close.",
+	}
+}
+
+func isReviewIntentAllowedActivityType(t models.ActivityType) bool {
+	switch t {
+	case models.ActivityRecall, models.ActivityPractice, models.ActivityDebugMisconception:
+		return true
+	default:
+		return false
+	}
+}
+
+func reviewIntentContainsActivityType(set []models.ActivityType, t models.ActivityType) bool {
+	for _, candidate := range set {
+		if candidate == t {
+			return true
+		}
+	}
+	return false
+}
+
+// selectReviewIntentActivity is the legacy review selector. Keep it as a
+// fallback-only path for issue #146: normal integration should call
+// resolveReviewIntentActivity so Gate, ConceptSelector and ActionSelector stay
+// on the routing path before this selector is considered.
 func selectReviewIntentActivity(store *db.Store, learnerID string, domain *models.Domain, states []*models.ConceptState, interactions []*models.Interaction, sessionConcepts map[string]int, now time.Time) (models.Activity, string) {
 	candidates := reviewCandidatesForDomain(store, learnerID, domain, states, interactions, sessionConcepts, now, true)
 	if len(candidates) == 0 {
 		candidates = reviewCandidatesForDomain(store, learnerID, domain, states, interactions, sessionConcepts, now, false)
 	}
 	if len(candidates) == 0 {
-		return models.Activity{
-			Type:             models.ActivityRest,
-			DifficultyTarget: 0.3,
-			Format:           "review_unavailable",
-			EstimatedMinutes: 3,
-			Rationale:        "[intent=review] no previously studied concept is available in this domain",
-			PromptForLLM:     "No reviewed concept is available in this domain. Tell the learner there is nothing to revise yet in this domain and ask whether they want to start a new concept.",
-		}, "no_reviewable_concept"
+		return reviewUnavailableActivity(), reviewIntentStatusNoReviewable
 	}
 
 	c := candidates[0]
@@ -140,9 +431,20 @@ func selectReviewIntentActivity(store *db.Store, learnerID string, domain *model
 		DifficultyTarget: difficulty,
 		Format:           format,
 		EstimatedMinutes: minutes,
-		Rationale:        fmt.Sprintf("[intent=review] selected prior concept %q with retention %.2f", c.concept, c.retention),
+		Rationale:        fmt.Sprintf("[intent=review fallback] selected prior concept %q with retention %.2f", c.concept, c.retention),
 		PromptForLLM:     fmt.Sprintf("Generate a review activity on %s. Do not introduce a new concept; focus on retrieval or applied practice from prior material.", c.concept),
-	}, "applied"
+	}, reviewIntentStatusApplied
+}
+
+func reviewUnavailableActivity() models.Activity {
+	return models.Activity{
+		Type:             models.ActivityRest,
+		DifficultyTarget: 0.3,
+		Format:           "review_unavailable",
+		EstimatedMinutes: 3,
+		Rationale:        "[intent=review] no previously studied concept is available in this domain",
+		PromptForLLM:     "No reviewed concept is available in this domain. Tell the learner there is nothing to revise yet in this domain and ask whether they want to start a new concept.",
+	}
 }
 
 func reviewCandidatesForDomain(store *db.Store, learnerID string, domain *models.Domain, states []*models.ConceptState, interactions []*models.Interaction, sessionConcepts map[string]int, now time.Time, skipSessionConcepts bool) []reviewCandidate {

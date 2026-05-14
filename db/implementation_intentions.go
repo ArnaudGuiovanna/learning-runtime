@@ -41,11 +41,13 @@ func (s *Store) HasRecentImplementationIntention(learnerID, domainID string, sin
 	var query string
 	var args []any
 	if domainID == "" {
-		query = `SELECT COUNT(*) FROM implementation_intentions WHERE learner_id = ? AND created_at >= ?`
-		args = []any{learnerID, since.UTC()}
+		query = `SELECT COUNT(*) FROM implementation_intentions
+		 WHERE learner_id = ? AND trigger_text <> ? AND created_at >= ?`
+		args = []any{learnerID, learningNegotiationOverrideTrigger, since.UTC()}
 	} else {
-		query = `SELECT COUNT(*) FROM implementation_intentions WHERE learner_id = ? AND domain_id = ? AND created_at >= ?`
-		args = []any{learnerID, domainID, since.UTC()}
+		query = `SELECT COUNT(*) FROM implementation_intentions
+		 WHERE learner_id = ? AND domain_id = ? AND trigger_text <> ? AND created_at >= ?`
+		args = []any{learnerID, domainID, learningNegotiationOverrideTrigger, since.UTC()}
 	}
 	var count int
 	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
@@ -63,9 +65,9 @@ func (s *Store) GetRecentImplementationIntentions(learnerID string, since time.T
 	rows, err := s.db.Query(
 		`SELECT id, learner_id, domain_id, trigger_text, action_text, honored, created_at, scheduled_for
 		 FROM implementation_intentions
-		 WHERE learner_id = ? AND created_at >= ?
+		 WHERE learner_id = ? AND trigger_text <> ? AND created_at >= ?
 		 ORDER BY created_at DESC LIMIT ?`,
-		learnerID, since.UTC(), limit,
+		learnerID, learningNegotiationOverrideTrigger, since.UTC(), limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get implementation intentions: %w", err)

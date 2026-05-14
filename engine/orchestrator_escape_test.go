@@ -84,10 +84,9 @@ func TestOrchestrate_EscapePath_MaintenanceFallbackToInstruction_BothNoFringe(t 
 // orchestrator routes it through composeEscapeActivity
 // (engine/orchestrator.go:445), which is at 0% coverage today.
 //
-// We force OVERLOAD by passing input.Now far in the past — the alert
-// engine treats input.Now as the session start (engine/alert.go:154,
-// `time.Since(sessionStart) > 45*time.Minute`), so a 1-hour-old
-// "session start" reliably triggers the alert.
+// We force OVERLOAD by passing SessionStart far in the past. This
+// pins the contract that Now is the current clock while SessionStart
+// is the active-session boundary used by ComputeAlerts.
 func TestOrchestrate_GateEscape_OVERLOAD_ComposesCloseSession(t *testing.T) {
 	store := setupOrchStore(t)
 	domainID := seedOrchDomain(t, store, []string{"A", "B"}, nil, models.PhaseInstruction)
@@ -95,7 +94,7 @@ func TestOrchestrate_GateEscape_OVERLOAD_ComposesCloseSession(t *testing.T) {
 
 	input := defaultInput(domainID)
 	// OVERLOAD threshold is 45 min ; pass an "older than 45 min" timestamp.
-	input.Now = time.Now().UTC().Add(-1 * time.Hour)
+	input.SessionStart = time.Now().UTC().Add(-1 * time.Hour)
 
 	activity, err := Orchestrate(store, input)
 	if err != nil {
@@ -112,6 +111,23 @@ func TestOrchestrate_GateEscape_OVERLOAD_ComposesCloseSession(t *testing.T) {
 	}
 	if activity.PromptForLLM == "" {
 		t.Errorf("expected composeEscapeActivity to set a non-empty PromptForLLM")
+	}
+}
+
+func TestOrchestrate_GateEscape_FreshSessionDoesNotCloseSession(t *testing.T) {
+	store := setupOrchStore(t)
+	domainID := seedOrchDomain(t, store, []string{"A", "B"}, nil, models.PhaseInstruction)
+	setGoalRelevance(t, store, domainID, map[string]float64{"A": 0.9, "B": 0.5})
+
+	input := defaultInput(domainID)
+	input.SessionStart = time.Now().UTC()
+
+	activity, err := Orchestrate(store, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if activity.Type == models.ActivityCloseSession {
+		t.Fatalf("fresh session must not close, got %+v", activity)
 	}
 }
 

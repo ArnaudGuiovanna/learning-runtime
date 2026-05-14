@@ -165,6 +165,67 @@ func TestSystemPrompt_ToolRegistryConsistency(t *testing.T) {
 	}
 }
 
+func TestSystemPrompt_RegulationAppendicesAreDefaultOnAndPromptOnly(t *testing.T) {
+	t.Setenv("REGULATION_ACTION", "")
+	t.Setenv("REGULATION_CONCEPT", "")
+	t.Setenv("REGULATION_GATE", "")
+
+	prompt := buildSystemPrompt()
+
+	expected := []string{
+		"ACTION-AWARE (REGULATION_ACTION=on):",
+		"REGULATION_ACTION is a prompt-only flag.",
+		"the runtime action selector still runs through get_next_activity",
+		"CONCEPT-AWARE (REGULATION_CONCEPT=on):",
+		"REGULATION_CONCEPT is a prompt-only flag.",
+		"the runtime concept selector still runs through get_next_activity",
+		"GATE-AWARE (REGULATION_GATE=on):",
+		"REGULATION_GATE is a prompt-only flag.",
+		"the runtime gate still runs through get_next_activity",
+	}
+	for _, want := range expected {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q", want)
+		}
+	}
+}
+
+func TestSystemPrompt_RegulationAppendixLegacyOffFlags(t *testing.T) {
+	t.Setenv("REGULATION_ACTION", "off")
+	t.Setenv("REGULATION_CONCEPT", "off")
+	t.Setenv("REGULATION_GATE", "off")
+
+	prompt := buildSystemPrompt()
+
+	for _, unwanted := range []string{
+		"ACTION-AWARE (REGULATION_ACTION=on):",
+		"CONCEPT-AWARE (REGULATION_CONCEPT=on):",
+		"GATE-AWARE (REGULATION_GATE=on):",
+	} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("expected legacy flag value off to drop appendix %q", unwanted)
+		}
+	}
+}
+
+func TestSystemPrompt_RegulationAppendixFlagsRequireLiteralOff(t *testing.T) {
+	t.Setenv("REGULATION_ACTION", "OFF")
+	t.Setenv("REGULATION_CONCEPT", "false")
+	t.Setenv("REGULATION_GATE", "0")
+
+	prompt := buildSystemPrompt()
+
+	for _, want := range []string{
+		"ACTION-AWARE (REGULATION_ACTION=on):",
+		"CONCEPT-AWARE (REGULATION_CONCEPT=on):",
+		"GATE-AWARE (REGULATION_GATE=on):",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected non-literal off value to keep appendix %q", want)
+		}
+	}
+}
+
 // TestSystemPrompt_LanguageContract asserts that the system prompt
 // instructs the LLM to handle locale per the i18n contract documented
 // in docs/i18n.md.
