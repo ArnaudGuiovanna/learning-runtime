@@ -4,6 +4,33 @@ All notable changes to Tutor MCP are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-alpha.2] — 2026-05-14
+
+### Added
+
+- Learner memory package with markdown-backed episodic sessions, stable memory,
+  pending observations, concept notes, archives, atomic writes, YAML session
+  frontmatter parsing, and `TUTOR_MCP_MEMORY_ROOT` / `TUTOR_MCP_MEMORY_ENABLED`.
+- Memory MCP tools: `update_learner_memory`, `read_raw_session`, and
+  `get_memory_state`.
+- `episodic_context` and `reasoning_request` in `get_next_activity` so the
+  client LLM can produce an interpretation brief before generating the activity.
+- `interpretation_brief` storage on pedagogical snapshots and replay summaries.
+- Client-initiated consolidation: the server enqueues due monthly, quarterly,
+  and annual jobs in `pending_consolidations`, attaches `consolidation_request`
+  to `get_next_activity`, and marks jobs completed when the client writes the
+  archive through `update_learner_memory`.
+- `--version`, `-version`, and `version` CLI output for release binaries.
+
+### Changed
+
+- Consolidation no longer performs any server-side LLM or archive generation.
+  The connected MCP client authors the archive using its own LLM session.
+- OLM fallback focus reason and webhook/nudge runtime copy are normalized to
+  English.
+- Discord OLM push filtering now suppresses plain KST fallback pushes unless
+  recent narrative memory gives the message real learning value.
+
 ## [0.3.0-alpha.1] — 2026-05-08
 
 ### Refreshed 2026-05-09 — QA hardening pass

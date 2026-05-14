@@ -26,7 +26,18 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
+	if shouldPrintVersion(os.Args[1:]) {
+		fmt.Println(versionLine())
+		return
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLogLevel(os.Getenv("LOG_LEVEL")),
 	}))
@@ -70,7 +81,7 @@ func main() {
 	// Create MCP server
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "tutor-mcp",
-		Version: "0.3.0",
+		Version: mcpVersion(),
 	}, nil)
 
 	// Register tools
@@ -186,6 +197,23 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("server stopped cleanly")
+}
+
+func shouldPrintVersion(args []string) bool {
+	return len(args) == 1 && (args[0] == "--version" || args[0] == "-version" || args[0] == "version")
+}
+
+func versionLine() string {
+	return fmt.Sprintf("tutor-mcp %s (commit %s, built %s)", version, commit, buildDate)
+}
+
+func mcpVersion() string {
+	out := strings.TrimSpace(version)
+	out = strings.TrimPrefix(out, "v")
+	if out == "" {
+		return "dev"
+	}
+	return out
 }
 
 type statusRecorder struct {

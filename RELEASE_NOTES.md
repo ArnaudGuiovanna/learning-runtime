@@ -1,66 +1,61 @@
-# Tutor MCP — first alpha (v0.3.0-alpha.1)
+# Tutor MCP v0.3.0-alpha.2
 
-First public alpha of **Tutor MCP**, a deterministic Intelligent Tutoring
-System runtime that any MCP-compatible LLM can drive (Claude, ChatGPT, Le Chat,
-Gemini).
+Second public alpha of Tutor MCP. This release adds a Complementary Learning
+Systems-inspired learner memory layer and switches consolidation to a
+client-initiated MCP pattern: the server detects consolidation work, the
+connected LLM client authors the archive, and no server-side LLM provider or
+API key is required.
 
-Generic LLM chat covers the *interface* of an ITS. Tutor MCP supplies the
-three other pillars as pure runtime, calibrated in real time:
+## Highlights
 
-| ITS pillar | Provided by | How |
-|---|---|---|
-| **Domain model** | Tutor MCP runtime | KST-validated concept graph with prerequisites, cycle detection at `init_domain` |
-| **Learner model** | Tutor MCP runtime | BKT × IRT × PFA, snapshot pattern keeps the update chain order-invariant |
-| **Pedagogical model** | Tutor MCP runtime | FSRS spaced repetition, 7-stage regulation pipeline, alert engine, motivation engine, metacognitive loop |
-| **Interface & content** | Any MCP-compatible LLM | 28 tools, chat-only surface |
-
-## What works today
-
-- Five complementary cognitive algorithms (BKT, FSRS, IRT, PFA, KST) updating
-  the learner model on every interaction
-- Seven-stage regulation pipeline driving activity selection through an
-  explicit phase FSM (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE)
-- 28 MCP tools, OAuth 2.1 + PKCE, refresh-token rotation with client binding,
-  bcrypt cost 12, per-account login lockout, length caps on free-text params
-- Versioned schema migrations with SHA-256 checksum drift detection
-- Structured slog observability + 6 cron jobs (OLM, motivation, recap, mirror,
-  cleanup, metacognitive alerts)
-
-## Known limitations
-
-Three RESEARCH items deferred — none block daily use:
-
-- [#48 PFA fidelity to Pavlik 2009](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/48)
-- [#49 IRT statistical robustness (EAP/MAP prior)](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/49)
-- [#52 FSRS sub-day intervals](https://github.com/ArnaudGuiovanna/tutor-mcp/issues/52)
-
-## Quickstart
+- Markdown-backed learner memory:
+  - `MEMORY.md`
+  - `MEMORY_pending.md`
+  - `sessions/*.md`
+  - `concepts/*.md`
+  - `archives/*.md`
+- New MCP tools:
+  - `update_learner_memory`
+  - `read_raw_session`
+  - `get_memory_state`
+- `get_next_activity` can now return:
+  - `episodic_context`
+  - `pedagogical_contract.reasoning_request`
+  - `consolidation_request`
+- Pedagogical snapshots now store `interpretation_brief` for replay/audit.
+- Consolidation jobs are queued in `pending_consolidations`, delivered to the
+  client, and completed when the client writes the archive.
+- The release binary now supports:
 
 ```bash
-git clone https://github.com/ArnaudGuiovanna/tutor-mcp
-cd tutor-mcp
-export JWT_SECRET="$(openssl rand -base64 32)"
-go build -o tutor-mcp && ./tutor-mcp
+tutor-mcp --version
 ```
 
-See the README §[Setup workflow](https://github.com/ArnaudGuiovanna/tutor-mcp#setup-workflow)
-for OAuth client registration and host-side connector setup (Claude Desktop,
-Claude.ai, etc.).
+## Operational Notes
 
-## Caveats
+- Install URL remains unchanged:
 
-- **Alpha** quality: the API surface may break between alphas. Schema
-  migrations are forward-only — manual intervention required on body drift.
-- **No CI** runs in this repo. `go build ./... && go test ./...` is the
-  contract for contributors.
-- **Go 1.25+** and **SQLite >= 3.35** required.
+```bash
+curl -fsSL https://tutor-mcp.dev/install.sh | sh
+```
 
-## Compatibility
+- `latest` release assets include stable names such as
+  `tutor-mcp_linux_amd64.tar.gz`, so installers do not need to know the tag.
+- Memory is enabled by default and can be disabled with:
 
-- Tested with Claude Desktop and Claude.ai custom connectors.
-- Stateless per-request; SQLite as the only persistent store.
+```bash
+TUTOR_MCP_MEMORY_ENABLED=false
+```
 
----
+- Memory root defaults to `~/.tutor-mcp/` and can be changed with:
 
-Feedback welcome via [issues](https://github.com/ArnaudGuiovanna/tutor-mcp/issues).
+```bash
+TUTOR_MCP_MEMORY_ROOT=/path/to/memory
+```
+
+## Validation
+
+- `go test ./...`
+- `go build ./...`
+
 Full changelog: [`CHANGELOG.md`](CHANGELOG.md).
