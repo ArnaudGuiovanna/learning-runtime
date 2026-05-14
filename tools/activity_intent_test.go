@@ -85,6 +85,56 @@ func TestResolveReviewIntentActivity_NoReviewedConceptDoesNotIntroduce(t *testin
 	}
 }
 
+func TestResolveActivityDomain_DefaultCriticalRetentionOverridesPriorityRank(t *testing.T) {
+	store, _ := setupToolsTest(t)
+	math, err := store.CreateDomainWithValueFramings("L_owner", "math", "", models.KnowledgeSpace{
+		Concepts:      []string{"math_new"},
+		Prerequisites: map[string][]string{},
+	}, "")
+	if err != nil {
+		t.Fatalf("create math domain: %v", err)
+	}
+	critical, err := store.CreateDomainWithValueFramings("L_owner", "adaptive", "", models.KnowledgeSpace{
+		Concepts:      []string{"forgotten"},
+		Prerequisites: map[string][]string{},
+	}, "")
+	if err != nil {
+		t.Fatalf("create critical domain: %v", err)
+	}
+	if err := store.SetDomainPriority(math.ID, "L_owner", 1); err != nil {
+		t.Fatalf("set math priority: %v", err)
+	}
+	if err := store.SetDomainPriority(critical.ID, "L_owner", 2); err != nil {
+		t.Fatalf("set critical priority: %v", err)
+	}
+	seedReviewIntentState(t, store, "math_new", 0.10, 30, 1, "review")
+	seedReviewIntentState(t, store, "forgotten", 0.95, 1, 80, "review")
+
+	got, err := resolveActivityDomain(store, "L_owner", "", "")
+	if err != nil {
+		t.Fatalf("resolve default domain: %v", err)
+	}
+	if got.ID != critical.ID {
+		t.Fatalf("default domain = %q, want critical retention domain %q", got.ID, critical.ID)
+	}
+
+	explicit, err := resolveActivityDomain(store, "L_owner", math.ID, "")
+	if err != nil {
+		t.Fatalf("resolve explicit domain: %v", err)
+	}
+	if explicit.ID != math.ID {
+		t.Fatalf("explicit domain = %q, want math domain %q", explicit.ID, math.ID)
+	}
+
+	byName, err := resolveActivityDomain(store, "L_owner", "", "math")
+	if err != nil {
+		t.Fatalf("resolve domain by name: %v", err)
+	}
+	if byName.ID != math.ID {
+		t.Fatalf("domain_name selection = %q, want math domain %q", byName.ID, math.ID)
+	}
+}
+
 func TestResolveReviewIntentActivity_ConstrainsHighMasteryRotation(t *testing.T) {
 	store, _ := setupToolsTest(t)
 	d := makeReviewIntentDomain(t, store, []string{"stable"})

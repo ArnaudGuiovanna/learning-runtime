@@ -405,6 +405,15 @@ func runPipeline(
 	if gateResult.EscapeAction != nil {
 		return composeEscapeActivity(*gateResult.EscapeAction), pipelineSignal{}, nil
 	}
+	if !input.ReviewOnly {
+		if selection, ok := criticalForgettingBypassSelection(pf.Alerts, phase); ok {
+			action, err := selectActionForSelection(store, pf, selection, input)
+			if err != nil {
+				return models.Activity{}, pipelineSignal{}, err
+			}
+			return composeActivity(action, selection, phase), pipelineSignal{}, nil
+		}
+	}
 	if gateResult.NoCandidate {
 		return models.Activity{}, pipelineSignal{IsNoFringe: true}, nil
 	}
@@ -433,32 +442,12 @@ func runPipeline(
 	}
 
 	// ── [5] ActionSelector — on the chosen concept ────────────────
-	cs := pf.StatesByConcept[selection.Concept]
-	if cs == nil {
-		// Concept in the graph but no state — create a default state
-		// for SelectAction (mastery=0, theta=0) to avoid the panic.
-		// SelectAction's NaN-guard handles missing fields.
-		cs = models.NewConceptState(input.LearnerID, selection.Concept)
-	}
-	var mc *db.MisconceptionGroup
-	if pf.ActiveMisc[selection.Concept] {
-		mc, err = store.GetFirstActiveMisconception(input.LearnerID, selection.Concept)
-		if err != nil {
-			return models.Activity{}, pipelineSignal{}, fmt.Errorf("fetch misconception: %w", err)
-		}
-	}
-	history, err := store.GetActionHistoryForConcept(input.LearnerID, selection.Concept, 50)
+	action, err := selectActionForSelection(store, pf, selection, input)
 	if err != nil {
-		return models.Activity{}, pipelineSignal{}, fmt.Errorf("action history: %w", err)
+		return models.Activity{}, pipelineSignal{}, err
 	}
-	action := SelectAction(selection.Concept, cs, mc, ActionHistory{
-		InteractionsAboveBKT:  history.InteractionsAboveBKT,
-		MasteryChallengeCount: history.MasteryChallengeCount,
-		FeynmanCount:          history.FeynmanCount,
-		TransferCount:         history.TransferCount,
-	})
 	if input.ReviewOnly {
-		action = constrainReviewAction(action, cs)
+		action = constrainReviewAction(action, pf.StatesByConcept[selection.Concept])
 	}
 
 	// Honor Gate's ActionRestriction (defensive — [5] already
@@ -471,6 +460,64 @@ func runPipeline(
 	}
 
 	return composeActivity(action, selection, phase), pipelineSignal{}, nil
+}
+
+func criticalForgettingBypassSelection(alerts []models.Alert, phase models.Phase) (Selection, bool) {
+	bestConcept := ""
+	bestRetention := 1.0
+	for _, alert := range alerts {
+		if alert.Type != models.AlertForgetting || alert.Urgency != models.UrgencyCritical {
+			continue
+		}
+		if bestConcept == "" || alert.Retention < bestRetention {
+			bestConcept = alert.Concept
+			bestRetention = alert.Retention
+		}
+	}
+	if bestConcept == "" {
+		return Selection{}, false
+	}
+	return Selection{
+		Concept: bestConcept,
+		Score:   1 - bestRetention,
+		Phase:   models.Phase(fmt.Sprintf("%s+bypass_forgetting", phase)),
+		Rationale: fmt.Sprintf(
+			"FORGETTING-Critical bypass retention=%.2f",
+			bestRetention,
+		),
+	}, true
+}
+
+func selectActionForSelection(
+	store *db.Store,
+	pf *pipelineFixtures,
+	selection Selection,
+	input OrchestratorInput,
+) (Action, error) {
+	cs := pf.StatesByConcept[selection.Concept]
+	if cs == nil {
+		// Concept in the graph but no state — create a default state for
+		// SelectAction (mastery=0, theta=0) to avoid the panic.
+		cs = models.NewConceptState(input.LearnerID, selection.Concept)
+	}
+	var mc *db.MisconceptionGroup
+	if pf.ActiveMisc[selection.Concept] {
+		var err error
+		mc, err = store.GetFirstActiveMisconception(input.LearnerID, selection.Concept)
+		if err != nil {
+			return Action{}, fmt.Errorf("fetch misconception: %w", err)
+		}
+	}
+	history, err := store.GetActionHistoryForConcept(input.LearnerID, selection.Concept, 50)
+	if err != nil {
+		return Action{}, fmt.Errorf("action history: %w", err)
+	}
+	return SelectAction(selection.Concept, cs, mc, ActionHistory{
+		InteractionsAboveBKT:  history.InteractionsAboveBKT,
+		MasteryChallengeCount: history.MasteryChallengeCount,
+		FeynmanCount:          history.FeynmanCount,
+		TransferCount:         history.TransferCount,
+	}), nil
 }
 
 func filterPrerequisites(src map[string][]string, allowed map[string]bool) map[string][]string {
@@ -578,13 +625,17 @@ func constrainReviewAction(action Action, cs *models.ConceptState) Action {
 }
 
 func composeActivity(a Action, sel Selection, phase models.Phase) models.Activity {
+	phaseLabel := phase
+	if sel.Phase != "" {
+		phaseLabel = sel.Phase
+	}
 	return models.Activity{
 		Type:             a.Type,
 		Concept:          sel.Concept,
 		DifficultyTarget: a.DifficultyTarget,
 		Format:           a.Format,
 		EstimatedMinutes: a.EstimatedMinutes,
-		Rationale:        fmt.Sprintf("[phase=%s] %s - %s", phase, sel.Rationale, a.Rationale),
+		Rationale:        fmt.Sprintf("[phase=%s] %s - %s", phaseLabel, sel.Rationale, a.Rationale),
 		PromptForLLM:     BuildActivityPrompt(a.Type, sel.Concept, a.Format),
 	}
 }

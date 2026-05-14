@@ -38,6 +38,13 @@ func normalizeActivityIntent(raw string) (string, error) {
 
 func resolveActivityDomain(store *db.Store, learnerID, domainID, domainName string) (*models.Domain, error) {
 	if domainID != "" || strings.TrimSpace(domainName) == "" {
+		if domainID == "" {
+			if d, err := resolveCriticalRetentionDomain(store, learnerID); err != nil {
+				return nil, err
+			} else if d != nil {
+				return d, nil
+			}
+		}
 		return resolveDomain(store, learnerID, domainID)
 	}
 
@@ -72,6 +79,49 @@ func resolveActivityDomain(store *db.Store, learnerID, domainID, domainName stri
 	default:
 		return nil, fmt.Errorf("domain_name %q is ambiguous; matching domains: %s", domainName, domainNames(matches))
 	}
+}
+
+func resolveCriticalRetentionDomain(store *db.Store, learnerID string) (*models.Domain, error) {
+	domains, err := store.GetDomainsByLearner(learnerID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(domains) == 0 {
+		return nil, nil
+	}
+
+	states, err := store.GetConceptStatesByLearner(learnerID)
+	if err != nil {
+		return nil, err
+	}
+	stateByConcept := make(map[string]*models.ConceptState, len(states))
+	for _, cs := range states {
+		if cs != nil {
+			stateByConcept[cs.Concept] = cs
+		}
+	}
+
+	var bestDomain *models.Domain
+	bestRetention := 1.0
+	now := time.Now().UTC()
+	for _, d := range domains {
+		for _, concept := range d.Graph.Concepts {
+			cs := stateByConcept[concept]
+			if cs == nil || cs.CardState == "new" {
+				continue
+			}
+			elapsed := cs.ElapsedDays
+			if cs.LastReview != nil {
+				elapsed = int(now.Sub(*cs.LastReview).Hours() / 24)
+			}
+			retention := algorithms.Retrievability(elapsed, cs.Stability)
+			if retention < algorithms.RetentionAlertCriticalThreshold && retention < bestRetention {
+				bestRetention = retention
+				bestDomain = d
+			}
+		}
+	}
+	return bestDomain, nil
 }
 
 func compactToken(raw string) string {

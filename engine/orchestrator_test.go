@@ -113,6 +113,22 @@ func defaultInput(domainID string) OrchestratorInput {
 	}
 }
 
+func setReviewState(t *testing.T, store *db.Store, concept string, p, stability float64, elapsedDays int) {
+	t.Helper()
+	cs, err := store.GetConceptState("L1", concept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs.PMastery = p
+	cs.CardState = "review"
+	cs.Stability = stability
+	cs.ElapsedDays = elapsedDays
+	cs.Reps = 3
+	if err := store.UpsertConceptState(cs); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // ─── Phase NULL → INSTRUCTION fallback (legacy) ────────────────────────────
 
 func TestOrchestrate_DomainPhaseNull_DefaultsToInstruction(t *testing.T) {
@@ -132,6 +148,40 @@ func TestOrchestrate_DomainPhaseNull_DefaultsToInstruction(t *testing.T) {
 	d, _ := store.GetDomainByID(domainID)
 	if d.Phase != "" {
 		t.Errorf("expected phase to remain NULL on legacy domain, got %q", d.Phase)
+	}
+}
+
+func TestOrchestrate_ForgettingCriticalBypassesInstructionPrereqAndArgmax(t *testing.T) {
+	store := setupOrchStore(t)
+	domainID := seedOrchDomain(t, store,
+		[]string{"prereq", "forgotten", "fresh"},
+		map[string][]string{"forgotten": {"prereq"}},
+		models.PhaseInstruction,
+	)
+	setGoalRelevance(t, store, domainID, map[string]float64{
+		"prereq":    1.0,
+		"forgotten": 1.0,
+		"fresh":     1.0,
+	})
+	setReviewState(t, store, "prereq", 0.10, 30, 1)
+	setReviewState(t, store, "forgotten", 0.95, 1, 80)
+	setReviewState(t, store, "fresh", 0.10, 30, 1)
+
+	activity, err := Orchestrate(store, defaultInput(domainID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if activity.Concept != "forgotten" {
+		t.Fatalf("concept = %q, want forgotten critical-retention concept; activity=%+v", activity.Concept, activity)
+	}
+	if activity.Type != models.ActivityRecall {
+		t.Fatalf("activity type = %q, want RECALL_EXERCISE; activity=%+v", activity.Type, activity)
+	}
+	if !strings.Contains(activity.Rationale, "INSTRUCTION+bypass_forgetting") {
+		t.Fatalf("rationale should expose bypass phase, got %q", activity.Rationale)
+	}
+	if !strings.Contains(activity.Rationale, "retention FSRS basse") {
+		t.Fatalf("rationale should keep action-selector retention reason, got %q", activity.Rationale)
 	}
 }
 
