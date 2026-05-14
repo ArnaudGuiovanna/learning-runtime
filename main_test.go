@@ -24,17 +24,17 @@ func TestVersionLine(t *testing.T) {
 	defer func() {
 		version, commit, buildDate = oldVersion, oldCommit, oldBuildDate
 	}()
-	version = "v0.3.0-alpha.2"
+	version = "v0.3.1"
 	commit = "abc1234"
 	buildDate = "2026-05-14T16:00:00Z"
 
 	got := versionLine()
-	for _, want := range []string{"tutor-mcp", "v0.3.0-alpha.2", "abc1234", "2026-05-14T16:00:00Z"} {
+	for _, want := range []string{"tutor-mcp", "v0.3.1", "abc1234", "2026-05-14T16:00:00Z"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("versionLine() = %q, missing %q", got, want)
 		}
 	}
-	if mcpVersion() != "0.3.0-alpha.2" {
+	if mcpVersion() != "0.3.1" {
 		t.Fatalf("mcpVersion() = %q", mcpVersion())
 	}
 }

@@ -1,10 +1,9 @@
-# Tutor MCP v0.3.0-alpha.2
+# Tutor MCP v0.3.1
 
-Second public alpha of Tutor MCP. This release adds a Complementary Learning
-Systems-inspired learner memory layer and switches consolidation to a
-client-initiated MCP pattern: the server detects consolidation work, the
-connected LLM client authors the archive, and no server-side LLM provider or
-API key is required.
+Tutor MCP v0.3.1 adds a Complementary Learning Systems-inspired learner memory
+layer and switches consolidation to a client-initiated MCP pattern: the server
+detects consolidation work, the connected LLM client authors the archive, and
+no server-side LLM provider or API key is required.
 
 ## Highlights
 
