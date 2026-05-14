@@ -195,7 +195,7 @@ func BuildOLMSnapshot(store *db.Store, learnerID, domainID string) (*OLMSnapshot
 		frontier := algorithms.ComputeFrontier(graph, mastery)
 		if len(frontier) > 0 {
 			snap.FocusConcept = frontier[0]
-			snap.FocusReason = "prochain palier"
+			snap.FocusReason = "next frontier"
 			snap.FocusUrgency = models.UrgencyInfo
 		}
 	}
@@ -340,7 +340,7 @@ func FormatOLMEmbed(snap *OLMSnapshot) DiscordEmbed {
 
 	buckets := compactBuckets(snap)
 	if buckets != "" {
-		lines = append(lines, fmt.Sprintf("Sur **%s** :\n%s.", snap.DomainName, buckets))
+		lines = append(lines, fmt.Sprintf("For **%s**:\n%s.", snap.DomainName, buckets))
 	}
 
 	if snap.FocusConcept != "" {

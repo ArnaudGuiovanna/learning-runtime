@@ -249,22 +249,22 @@ func DetectMirrorPattern(input MirrorInput) *models.MirrorMessage {
 		if !hasSelfInitiated {
 			return &models.MirrorMessage{
 				Pattern:      "no_initiative",
-				Message:      "Toutes tes sessions recentes ont ete declenchees par une notification.",
-				OpenQuestion: "Est-ce que tu preferes que le systeme te rappelle, ou est-ce que tu aimerais definir tes propres moments d'apprentissage ?",
+				Message:      "All recent sessions were triggered by a notification.",
+				OpenQuestion: "Do you prefer reminders from the system, or would you like to define your own learning moments?",
 			}
 		}
 	}
 
 	// Priority 4: calibration_drift — bias increasing over 5 sessions
 	if math.Abs(input.CalibrationBias) > 1.0 && input.SessionCount >= 5 {
-		direction := "sur-estimer"
+		direction := "overestimate"
 		if input.CalibrationBias < 0 {
-			direction = "sous-estimer"
+			direction = "underestimate"
 		}
 		return &models.MirrorMessage{
 			Pattern:      "calibration_drift",
-			Message:      fmt.Sprintf("Tu as tendance a %s ton niveau de facon recurrente.", direction),
-			OpenQuestion: "Est-ce que tu veux qu'on travaille avec des auto-evaluations plus frequentes pour affiner ta perception ?",
+			Message:      fmt.Sprintf("You tend to %s your level repeatedly.", direction),
+			OpenQuestion: "Do you want to work with more frequent self-ratings to refine your perception?",
 		}
 	}
 

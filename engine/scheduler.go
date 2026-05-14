@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"tutor-mcp/db"
+	"tutor-mcp/memory"
 	"tutor-mcp/models"
 
 	"github.com/robfig/cron/v3"
@@ -84,6 +86,12 @@ func (s *Scheduler) Start() error {
 	if _, err := s.cron.AddFunc("0 13 * * *", s.sendOLM); err != nil {
 		return fmt.Errorf("add olm job: %w", err)
 	}
+	if _, err := s.cron.AddFunc("30 13 * * *", s.runConsolidationCycle); err != nil {
+		return fmt.Errorf("add consolidation job: %w", err)
+	}
+	if _, err := s.cron.AddFunc("*/5 * * * *", s.requeueStaleConsolidations); err != nil {
+		return fmt.Errorf("add consolidation timeout job: %w", err)
+	}
 	// Daily motivation: once at 8h UTC.
 	if _, err := s.cron.AddFunc("0 8 * * *", s.sendDailyMotivation); err != nil {
 		return fmt.Errorf("add daily motivation job: %w", err)
@@ -112,7 +120,7 @@ func (s *Scheduler) Start() error {
 	}
 
 	s.cron.Start()
-	s.logger.Info("scheduler started", "jobs", "olm(13h), motivation(8h), recap(21h), mirror(12h), cleanup(1h), metacog(30m)")
+	s.logger.Info("scheduler started", "jobs", "olm(13h), consolidation(13h30), consolidation_timeout(5m), motivation(8h), recap(21h), mirror(12h), cleanup(1h), metacog(30m)")
 	return nil
 }
 
@@ -279,7 +287,7 @@ func discordEmbedFromBrief(brief models.WebhookBrief, urgency models.AlertUrgenc
 		description = brief.LearningGain
 	}
 	if description == "" {
-		description = "Un signal utile est pret pour ta prochaine session."
+		description = "A useful signal is ready for your next session."
 	}
 
 	fields := []discordField{}
@@ -319,17 +327,7 @@ type webhookBriefLabels struct {
 	Footer       string
 }
 
-func briefLabels(language string) webhookBriefLabels {
-	if strings.HasPrefix(strings.ToLower(language), "fr") || language == "" {
-		return webhookBriefLabels{
-			WhyNow:       "Pourquoi maintenant",
-			LearningGain: "Gain d'apprentissage",
-			Evidence:     "Indices utiles",
-			GoalLink:     "Lien avec ton objectif",
-			NextAction:   "Prochaine action",
-			Footer:       "Message concis: le defi se resout dans la session, pas dans Discord.",
-		}
-	}
+func briefLabels(_ string) webhookBriefLabels {
 	return webhookBriefLabels{
 		WhyNow:       "Why now",
 		LearningGain: "Learning gain",
@@ -349,18 +347,18 @@ func briefTitle(brief models.WebhookBrief, urgency models.AlertUrgency) string {
 		subject = brief.Trigger
 	}
 	if subject == "" {
-		subject = "prochaine session"
+		subject = "next session"
 	}
 	switch urgency {
 	case models.UrgencyCritical:
-		return "A reprendre vite - " + subject
+		return "Review soon - " + subject
 	case models.UrgencyWarning:
-		return "Focus utile - " + subject
+		return "Useful focus - " + subject
 	default:
 		if brief.Trigger != "" {
 			return brief.Trigger + " - " + subject
 		}
-		return "Nudge d'apprentissage - " + subject
+		return "Learning nudge - " + subject
 	}
 }
 
@@ -600,6 +598,17 @@ func (s *Scheduler) sendOLM() {
 			if !snap.HasActionable {
 				continue
 			}
+			var memCtx *memory.EpisodicContext
+			if memory.Enabled() && snap.FocusReason == "next frontier" {
+				if ctx, err := memory.LoadContext(learner.ID, snap.FocusConcept, &memory.OLMView{FocusConcept: snap.FocusConcept}, nil); err == nil {
+					memCtx = ctx
+				} else {
+					s.logger.Warn("scheduler: olm memory context", "err", err, "learner", learner.ID, "domain", d.ID)
+				}
+			}
+			if !shouldPushDiscord(snap, memCtx) {
+				continue
+			}
 
 			kind := "olm:" + d.ID
 			item, _ := s.store.DequeueNextPending(learner.ID, kind, now, 30*time.Minute)
@@ -641,10 +650,79 @@ func (s *Scheduler) sendOLM() {
 	}
 }
 
+func (s *Scheduler) runConsolidationCycle() {
+	s.runConsolidationCycleAt(time.Now().UTC())
+}
+
+func (s *Scheduler) runConsolidationCycleAt(now time.Time) {
+	if !memory.Enabled() {
+		return
+	}
+	learners, err := s.store.GetActiveLearners()
+	if err != nil {
+		s.logger.Error("scheduler: consolidation get learners", "err", err)
+		return
+	}
+	for _, learner := range learners {
+		jobs, err := memory.PrepareJobs(learner.ID, now)
+		if err != nil {
+			s.logger.Warn("scheduler: consolidation prepare", "err", err, "learner", learner.ID)
+			continue
+		}
+		for _, job := range jobs {
+			if err := s.store.UpsertPendingConsolidation(learner.ID, string(job.Period), job.PeriodKey, now); err != nil {
+				s.logger.Warn("scheduler: consolidation enqueue failed", "err", err, "learner", learner.ID, "period", job.PeriodKey)
+			} else {
+				s.logger.Info("scheduler: consolidation pending", "learner", learner.ID, "period_type", job.Period, "period", job.PeriodKey)
+			}
+		}
+	}
+}
+
+func (s *Scheduler) requeueStaleConsolidations() {
+	if !memory.Enabled() {
+		return
+	}
+	cutoff := time.Now().UTC().Add(-consolidationDeliveryTimeout())
+	count, err := s.store.RequeueStaleDeliveredConsolidations(cutoff)
+	if err != nil {
+		s.logger.Warn("scheduler: consolidation timeout requeue failed", "err", err)
+		return
+	}
+	if count > 0 {
+		s.logger.Info("scheduler: consolidation timeout requeued", "count", count)
+	}
+}
+
+func consolidationDeliveryTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("TUTOR_MCP_CONSOLIDATION_DELIVERY_TIMEOUT_MINUTES"))
+	if raw == "" {
+		return 30 * time.Minute
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil || minutes <= 0 {
+		return 30 * time.Minute
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
 type preparedWebhookEmbed struct {
 	Embed discordEmbed
 	Item  *models.WebhookQueueItem
 	Brief *models.WebhookBrief
+}
+
+func shouldPushDiscord(olm *OLMSnapshot, memCtx *memory.EpisodicContext) bool {
+	if olm == nil || !olm.HasActionable {
+		return false
+	}
+	if !memory.Enabled() {
+		return true
+	}
+	if olm.FocusReason != "next frontier" {
+		return true
+	}
+	return memCtx != nil && memCtx.HasRecentNarrativeSignal()
 }
 
 // embedFromQueueItem renders a queued LLM-authored OLM message. Structured

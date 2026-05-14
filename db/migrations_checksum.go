@@ -145,7 +145,7 @@ func rollbackMigrationBody(ctx context.Context, tx migrationTx, version string, 
 // idempotent CREATE TABLE/INDEX list. The order here is the canonical apply
 // order; appending new entries is safe, reordering is not.
 func buildMigrations() []migration {
-	out := make([]migration, 0, 2+len(alterMigrations)+1+len(idempotentMigrations))
+	out := make([]migration, 0, 2+len(alterMigrations)+1+len(idempotentMigrations)+3)
 	out = append(out, migration{
 		Version: "0001_base_schema",
 		Body:    schemaSQL,
@@ -183,6 +183,29 @@ func buildMigrations() []migration {
 			Body:    body,
 		})
 	}
+	out = append(out, migration{
+		Version:          "0005_alter_pedagogical_snapshots_interpretation_brief",
+		Body:             `ALTER TABLE pedagogical_snapshots ADD COLUMN interpretation_brief TEXT NOT NULL DEFAULT ''`,
+		IgnoreExecErrors: true,
+	})
+	out = append(out, migration{
+		Version: "0006_create_pending_consolidations",
+		Body: `CREATE TABLE IF NOT EXISTS pending_consolidations (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    learner_id     TEXT    NOT NULL,
+    period_type    TEXT    NOT NULL CHECK (period_type IN ('monthly','quarterly','annual')),
+    period_key     TEXT    NOT NULL,
+    status         TEXT    NOT NULL CHECK (status IN ('pending','delivered','completed','failed')) DEFAULT 'pending',
+    detected_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delivered_at   TIMESTAMP,
+    completed_at   TIMESTAMP,
+    UNIQUE(learner_id, period_type, period_key)
+)`,
+	})
+	out = append(out, migration{
+		Version: "0007_index_pending_consolidations_learner_status",
+		Body:    `CREATE INDEX IF NOT EXISTS idx_pending_consolidations_learner_status ON pending_consolidations(learner_id, status)`,
+	})
 	return out
 }
 

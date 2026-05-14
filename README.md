@@ -153,6 +153,8 @@ The default-on regulation flags use a strict literal `off`: any other value (inc
 | `REGULATION_CONCEPT` | on | Drops the concept-selector appendix. Selector keeps running. | prompt only |
 | `REGULATION_GATE` | on | Drops the gate appendix. Gate keeps running. | prompt only |
 | `REGULATION_FADE` | **off** | **Opt-in** (the only opt-in flag). Set to the literal `on` to enable [6] FadeController: maps `autonomy_score` × trend to fade params (hint verbosity, webhook frequency, ZPD aggressiveness, proactive review). When on, the fader modulates the `motivation_brief` so that the more autonomous the learner, the terser (and ultimately silent) the brief becomes; the resulting `fade_params` are also surfaced in the `get_next_activity` JSON for downstream consumers. Strict equality with `on` — any other value (including `ON`, `true`, `1`) keeps the fader off. See `docs/regulation-design/06-fade-controller.md`. | runtime |
+| `TUTOR_MCP_MEMORY_ENABLED` | on | Enables markdown learner memory (`MEMORY.md`, `sessions/`, `concepts/`, `archives/`) and `reasoning_request`. Set to `false`, `off`, `0`, or `no` to return to the pre-memory contract. | runtime |
+| `TUTOR_MCP_MEMORY_ROOT` | `~/.tutor-mcp/` | Root directory for learner memory markdown files. | runtime |
 
 ## Surface
 
@@ -166,8 +168,8 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 |------|-------------|
 | `get_learner_context` | Session context: active domain, concept states, recent history, active misconceptions |
 | `get_pending_alerts` | Critical alerts requiring immediate action |
-| `get_next_activity` | Next optimal activity + metacognitive mirror + tutor mode + motivation brief + mastery evidence/uncertainty + transfer profile + Rasch/Elo calibration |
-| `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA and individualized BKT signals; tracks hints, initiative, proactive reviews, error type, misconception type/detail, structured rubric evidence |
+| `get_next_activity` | Next optimal activity + episodic context + reasoning request + metacognitive mirror + tutor mode + motivation brief + mastery evidence/uncertainty + transfer profile + Rasch/Elo calibration |
+| `record_interaction` | Log result; updates BKT/FSRS/IRT/PFA and individualized BKT signals; tracks hints, initiative, proactive reviews, error type, misconception type/detail, structured rubric evidence, interpretation brief |
 | `check_mastery` | Check if a concept is eligible for a mastery challenge using BKT + evidence diversity + uncertainty + transfer status |
 | `get_dashboard_state` | Full dashboard: progress, retention, autonomy score, calibration bias, affect history |
 | `get_olm_snapshot` | Open Learner Model snapshot: per-concept mastery, retention, last-seen, fringe membership, anti-repeat status |
@@ -175,6 +177,9 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 | `update_learner_profile` | Persist learner metadata (device, objective, language, calibration bias, affect baseline, autonomy score) |
 | `get_pedagogical_snapshots` | Recent pedagogical decision traces: before state, observation, after state and decision metadata |
 | `get_decision_replay_summary` | Offline audit summary over snapshots: replay coverage, missing rubrics, transfer gaps and JSON issues |
+| `update_learner_memory` | Write learner memory markdown for sessions, concepts, pending observations, stable memory, or archives |
+| `read_raw_session` | Read one raw memory session by timestamp with parsed YAML frontmatter |
+| `get_memory_state` | Inspect memory file counts, session bounds, consolidation lag, and recent narrative signal status |
 
 ### Domain Management
 
@@ -213,7 +218,7 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 
 | Tool | Description |
 |------|-------------|
-| `record_session_close` | Closes session: persists optional implementation intention (Gollwitzer if-then) and returns a recap brief (concepts practiced, wins, struggles, next review, intent prompt) |
+| `record_session_close` | Closes session: persists optional implementation intention (Gollwitzer if-then) and returns a recap brief plus a memory summary request when memory is enabled |
 | `queue_webhook_message` | Queues a Discord nudge. Prefer the structured `brief` payload (`why_now`, `learning_gain`, `open_loop`, `next_action`) so the scheduler can render a concise learner-facing embed and track the push. |
 
 All tools accept an optional `domain_id` for multi-domain support. Without it, the most recently active (non-archived) domain is used.
@@ -279,6 +284,19 @@ The system adapts its communication register based on affect state:
 | `scaffolding` | Learner reports high anxiety (confidence = 1) |
 | `lighter` | Learner reports fatigue (energy = 1), frustration, or boredom (negative affect with low satisfaction) |
 
+## Learner Memory Architecture
+
+Tutor MCP uses a Complementary Learning Systems-inspired memory split:
+
+- **Episodic layer** (`sessions/`): sparse, recent markdown traces with required YAML frontmatter. This is the fast-encoding layer used to preserve salient exchanges, affect, energy, touched concepts, and implementation intentions.
+- **Semantic layer** (`MEMORY.md` and `concepts/`): slower, durable markdown notes. Stable claims should be promoted here only when repeated or explicitly stated by the learner as durable.
+- **Consolidation layer** (`archives/`): periodic markdown summaries requested by the scheduler but authored by the connected MCP client. The server detects due monthly/quarterly/annual jobs in `pending_consolidations`, attaches a `consolidation_request` to `get_next_activity`, then marks the job completed when the client writes the archive through `update_learner_memory(scope="archive", period_type=..., period_key=...)`. No server-side LLM provider, API key, or outbound LLM call is required.
+- **OLM overlay** (`get_olm_snapshot`): quantitative state remains authoritative for counters and routing. Markdown memory adds qualitative context and flags consumption-time inconsistencies such as a concept counted as solid while also carrying a critical forgetting alert.
+
+`get_next_activity` injects `episodic_context` when memory is available, attaches `consolidation_request` when offline consolidation is due, and adds `pedagogical_contract.reasoning_request` when the tutor should first write a brief hypothesis before generating the activity. The resulting `interpretation_brief` can be passed to `record_interaction` and is stored on `pedagogical_snapshots` for replay/audit.
+
+References: McClelland, McNaughton & O'Reilly (1995), and Kumaran, Hassabis & McClelland (2016).
+
 ## Authentication
 
 OAuth 2.1 with PKCE. Learners register and authenticate through a built-in flow:
@@ -309,7 +327,7 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   ├── graph_quality.go        Deterministic domain graph quality report
 │   ├── metacognition.go        Autonomy score, mirror detection, tutor mode
 │   ├── motivation.go           Brief selection + composition (6 kinds, Hidi-Renninger phase)
-│   ├── scheduler.go            Cron jobs: critical alerts, reviews, queued nudges, cleanup
+│   ├── scheduler.go            Cron jobs: OLM, client-initiated memory consolidation, nudges, cleanup, metacog
 │   ├── olm.go / olm_graph.go   Open Learner Model snapshot (per-concept + global)
 │   ├── action_selector.go      [5] Pure activity-type selection (PRACTICE / DEBUG_MISCONCEPTION / …)
 │   ├── concept_selector.go     [4] Pure phase-aware concept selection (info-gain, FSRS overdue, max-entropy)
@@ -334,6 +352,11 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   ├── phase.go                     Phase transitions, action history, anti-repeat queries
 │   ├── schema.sql                   Table definitions (embedded)
 │   └── migrations.go                Idempotent migrations for existing databases
+├── memory/
+│   ├── store.go            Atomic markdown file I/O for MEMORY, sessions, concepts, archives
+│   ├── loader.go           Episodic context loading + OLM inconsistency detection
+│   ├── consolidator.go     Due-period detection and interleaved replay selection for client-side consolidation
+│   └── prompts.go          Centralized memory/reasoning templates
 └── tools/                MCP tool handlers + system prompt + rubrics + pedagogical snapshots + flag-gated appendices
 ```
 

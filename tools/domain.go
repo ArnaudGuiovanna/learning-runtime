@@ -340,7 +340,7 @@ func registerInitDomain(server *mcp.Server, deps *Deps) {
 			"concept_count":          len(params.Concepts),
 			"graph_quality_report":   graphQualityReport,
 			"graph_quality_guidance": graphQualityGuidance(graphQualityReport),
-			"message":                fmt.Sprintf("Domaine '%s' cree avec %d concepts. La progression existante est preservee.", params.Name, len(params.Concepts)),
+			"message":                fmt.Sprintf("Domain %q was created with %d concepts. Existing progress was preserved.", params.Name, len(params.Concepts)),
 		}
 		// [1] GoalDecomposer — instruct the LLM (versioned, structured,
 		// non-blocking per Q2). Only emitted when REGULATION_GOAL=on so
@@ -461,7 +461,7 @@ func registerAddConcepts(server *mcp.Server, deps *Deps) {
 			"total_concepts":         len(domain.Graph.Concepts),
 			"graph_quality_report":   graphQualityReport,
 			"graph_quality_guidance": graphQualityGuidance(graphQualityReport),
-			"message":                fmt.Sprintf("%d nouveaux concepts ajoutes. Total: %d. Progression existante preservee.", added, len(domain.Graph.Concepts)),
+			"message":                fmt.Sprintf("%d new concepts added. Total: %d. Existing progress was preserved.", added, len(domain.Graph.Concepts)),
 		}
 		// [1] GoalDecomposer — after add_concepts the graph_version has
 		// advanced; per OQ-1.1 existing relevance entries remain valid but

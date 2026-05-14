@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"tutor-mcp/memory"
 	"tutor-mcp/models"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -90,7 +91,18 @@ func registerRecordSessionClose(server *mcp.Server, deps *Deps) {
 		}
 
 		recap := buildRecapBrief(deps, learnerID, domain)
-		r, _ := jsonResult(map[string]any{"recap_brief": recap})
+		payload := map[string]any{"recap_brief": recap}
+		if memory.Enabled() {
+			payload["summary_request"] = map[string]any{
+				"template": memory.SessionSummaryTemplate,
+				"expected_calls": []string{
+					"update_learner_memory(scope='session', ...)",
+					"optionally update_learner_memory(scope='concept', ...)",
+					"optionally update_learner_memory(scope='memory_pending', ...)",
+				},
+			}
+		}
+		r, _ := jsonResult(payload)
 		return r, nil, nil
 	})
 }

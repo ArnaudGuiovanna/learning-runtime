@@ -138,13 +138,13 @@ func TestQueueWebhookMessage_StructuredBrief(t *testing.T) {
 		"brief": map[string]any{
 			"domain_id":         "d1",
 			"domain_name":       "Python",
-			"concept":           "boucles",
-			"why_now":           "La retention baisse sur les boucles, donc une reprise courte est plus rentable maintenant.",
-			"learning_gain":     "Stabiliser le concept avant de passer a des exercices plus longs.",
-			"open_loop":         "J'ai garde un mini-bug de boucle pour la prochaine session.",
-			"next_action":       "Ouvre Claude et commence par le mini-bug sur les boucles.",
+			"concept":           "loops",
+			"why_now":           "Retention is dropping on loops, so a short review is more valuable now.",
+			"learning_gain":     "Stabilize the concept before moving to longer exercises.",
+			"open_loop":         "I kept a small loop bug for the next session.",
+			"next_action":       "Open Claude and start with the loop bug.",
 			"estimated_minutes": 8,
-			"language":          "fr",
+			"language":          "en",
 		},
 	})
 	if res.IsError {
@@ -157,7 +157,7 @@ func TestQueueWebhookMessage_StructuredBrief(t *testing.T) {
 	if len(pending) != 1 {
 		t.Fatalf("expected 1 pending message, got %d", len(pending))
 	}
-	if !strings.Contains(pending[0].Content, `"why_now"`) || !strings.Contains(pending[0].Content, "boucles") {
+	if !strings.Contains(pending[0].Content, `"why_now"`) || !strings.Contains(pending[0].Content, "loops") {
 		t.Fatalf("structured brief was not persisted as JSON: %q", pending[0].Content)
 	}
 }
@@ -168,10 +168,10 @@ func TestQueueWebhookMessage_StructuredBriefRejectsInternalToolNames(t *testing.
 		"kind":          "daily_motivation",
 		"scheduled_for": "2026-05-03T08:00:00Z",
 		"brief": map[string]any{
-			"why_now":       "On va appeler calibration_check demain.",
-			"learning_gain": "Mieux calibrer ton niveau.",
-			"open_loop":     "J'ai garde un mini-test.",
-			"next_action":   "Ouvre Claude.",
+			"why_now":       "We will call calibration_check tomorrow.",
+			"learning_gain": "Calibrate your level better.",
+			"open_loop":     "I kept a mini-test.",
+			"next_action":   "Open Claude.",
 		},
 	})
 	if !res.IsError || !strings.Contains(resultText(res), "internal tool names") {

@@ -152,7 +152,7 @@ func registerDeleteDomain(server *mcp.Server, deps *Deps) {
 			"deleted":     true,
 			"domain_id":   domain.ID,
 			"domain_name": domain.Name,
-			"message":     fmt.Sprintf("Domaine '%s' supprime definitivement. Les concept_states et l'historique d'interactions sont preserves.", domain.Name),
+			"message":     fmt.Sprintf("Domain %q was permanently deleted. concept_states and interaction history were preserved.", domain.Name),
 		})
 		return r, nil, nil
 	})

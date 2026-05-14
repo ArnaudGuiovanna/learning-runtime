@@ -163,6 +163,33 @@ func TestRecordInteraction_ReturnsRubricObservation(t *testing.T) {
 	}
 }
 
+func TestRecordInteraction_PersistsInterpretationBrief(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":               "a",
+		"activity_type":         "RECALL_EXERCISE",
+		"success":               true,
+		"response_time_seconds": 12.0,
+		"confidence":            0.9,
+		"notes":                 "## Interpretation brief\nThe learner likely knows the formula but not the transfer cue.\n\n## Activity\nShort recall task.",
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	snapshots, err := store.GetPedagogicalSnapshots("L_owner", "", "a", 5)
+	if err != nil {
+		t.Fatalf("get snapshots: %v", err)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("got %d snapshots, want 1", len(snapshots))
+	}
+	if snapshots[0].InterpretationBrief != "The learner likely knows the formula but not the transfer cue." {
+		t.Fatalf("brief = %q", snapshots[0].InterpretationBrief)
+	}
+}
+
 func TestRecordInteraction_ReturnsSemanticObservation(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	makeOwnerDomain(t, store, "L_owner", "math")

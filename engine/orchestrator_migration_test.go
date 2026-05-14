@@ -43,7 +43,7 @@ func TestMigration_PreExistingDomain_StaysInInstruction(t *testing.T) {
 }
 
 // TestEntryPoint_OffOnOff_ApprenantObservable simulates the operational
-// scenario : the flag flips off → on → off → on around an apprenant's
+// scenario: the flag flips off -> on -> off -> on around a learner's
 // session. Each toggle must produce a coherent Activity for the
 // learner, and the DB state must remain consistent.
 //
@@ -81,7 +81,7 @@ func TestEntryPoint_OffOnOff_ApprenantObservable(t *testing.T) {
 	}
 	dFinal, _ := store.GetDomainByID(domainID)
 
-	// Observable side : the apprenant's progress (concept_states)
+	// Observable side: the learner's progress (concept_states)
 	// must be unchanged across toggles (Orchestrate is read-only on
 	// concept_states ; only domain.phase moves).
 	statesBefore, _ := store.GetConceptStatesByLearner("L1")

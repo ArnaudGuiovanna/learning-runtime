@@ -41,6 +41,7 @@ func TestBuildDecisionReplaySummary_AggregatesFindings(t *testing.T) {
 	}
 	interactions[0].RubricJSON = `{"criteria":["correctness"]}`
 	interactions[0].RubricScoreJSON = `{"overall":0.8}`
+	snapshots[1].InterpretationBrief = "The learner may be overfitting the worked example."
 
 	summary := BuildDecisionReplaySummary(snapshots, interactions)
 
@@ -62,6 +63,9 @@ func TestBuildDecisionReplaySummary_AggregatesFindings(t *testing.T) {
 	if summary.SuspiciousJumpCount != 1 || summary.SuspiciousJumps[0].SnapshotID != 2 {
 		t.Fatalf("unexpected suspicious jumps: %+v", summary.SuspiciousJumps)
 	}
+	if summary.SuspiciousJumps[0].InterpretationBrief != "The learner may be overfitting the worked example." {
+		t.Fatalf("missing interpretation brief on suspicious jump: %+v", summary.SuspiciousJumps[0])
+	}
 	if summary.NegativeDeltaCount != 1 || summary.NegativeDeltas[0].SnapshotID != 3 {
 		t.Fatalf("unexpected negative deltas: %+v", summary.NegativeDeltas)
 	}
@@ -73,6 +77,9 @@ func TestBuildDecisionReplaySummary_AggregatesFindings(t *testing.T) {
 	}
 	if summary.TransferAfterMasteryGapCount != 1 || summary.TransferAfterMasteryGaps[0].Concept != "fractions" {
 		t.Fatalf("unexpected transfer gaps: %+v", summary.TransferAfterMasteryGaps)
+	}
+	if summary.TransferAfterMasteryGaps[0].MasteryInterpretationBrief != "The learner may be overfitting the worked example." {
+		t.Fatalf("missing interpretation brief on transfer gap: %+v", summary.TransferAfterMasteryGaps[0])
 	}
 	if summary.SnapshotJSONIssueCount != 0 {
 		t.Fatalf("unexpected JSON issues: %+v", summary.SnapshotJSONIssues)

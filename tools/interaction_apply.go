@@ -38,6 +38,7 @@ type interactionInput struct {
 	RubricWarnings      []string
 	RubricScoreWarnings []string
 	SemanticObservation map[string]any
+	InterpretationBrief string
 }
 
 // applyInteraction persists the interaction and updates the learner's
@@ -217,16 +218,17 @@ func applyInteraction(
 		return nil, nil, fmt.Errorf("applyInteraction: upsert concept state: %w", err)
 	}
 	if err := deps.Store.CreatePedagogicalSnapshot(&models.PedagogicalSnapshot{
-		InteractionID:   interaction.ID,
-		LearnerID:       learnerID,
-		DomainID:        input.DomainID,
-		Concept:         input.Concept,
-		ActivityType:    input.ActivityType,
-		BeforeJSON:      mustSnapshotJSON(conceptStateSnapshot(priorPMastery, priorPLearn, priorPForget, priorPSlip, priorPGuess, priorStability, priorDifficulty, priorElapsedDays, priorScheduledDays, priorReps, priorLapses, priorCardState, priorTheta, priorLastReview, priorNextReview)),
-		ObservationJSON: mustSnapshotJSON(observationSnapshot(input, bktResult.Params.PLearn, slipUsed, guessUsed, observation)),
-		AfterJSON:       mustSnapshotJSON(conceptStateAfterSnapshot(cs)),
-		DecisionJSON:    mustSnapshotJSON(decisionSnapshot(input, interaction.IsProactiveReview)),
-		CreatedAt:       now,
+		InteractionID:       interaction.ID,
+		LearnerID:           learnerID,
+		DomainID:            input.DomainID,
+		Concept:             input.Concept,
+		ActivityType:        input.ActivityType,
+		BeforeJSON:          mustSnapshotJSON(conceptStateSnapshot(priorPMastery, priorPLearn, priorPForget, priorPSlip, priorPGuess, priorStability, priorDifficulty, priorElapsedDays, priorScheduledDays, priorReps, priorLapses, priorCardState, priorTheta, priorLastReview, priorNextReview)),
+		ObservationJSON:     mustSnapshotJSON(observationSnapshot(input, bktResult.Params.PLearn, slipUsed, guessUsed, observation)),
+		AfterJSON:           mustSnapshotJSON(conceptStateAfterSnapshot(cs)),
+		DecisionJSON:        mustSnapshotJSON(decisionSnapshot(input, interaction.IsProactiveReview)),
+		InterpretationBrief: input.InterpretationBrief,
+		CreatedAt:           now,
 	}); err != nil {
 		return nil, nil, fmt.Errorf("applyInteraction: create pedagogical snapshot: %w", err)
 	}

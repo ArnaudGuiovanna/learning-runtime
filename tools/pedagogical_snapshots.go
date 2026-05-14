@@ -91,17 +91,18 @@ func normalizePedagogicalSnapshots(snapshots []*models.PedagogicalSnapshot) any 
 			continue
 		}
 		out = append(out, map[string]any{
-			"id":             s.ID,
-			"interaction_id": s.InteractionID,
-			"learner_id":     s.LearnerID,
-			"domain_id":      s.DomainID,
-			"concept":        s.Concept,
-			"activity_type":  s.ActivityType,
-			"before":         parseSnapshotJSON(s.BeforeJSON),
-			"observation":    parseSnapshotJSON(s.ObservationJSON),
-			"after":          parseSnapshotJSON(s.AfterJSON),
-			"decision":       parseSnapshotJSON(s.DecisionJSON),
-			"created_at":     s.CreatedAt,
+			"id":                   s.ID,
+			"interaction_id":       s.InteractionID,
+			"learner_id":           s.LearnerID,
+			"domain_id":            s.DomainID,
+			"concept":              s.Concept,
+			"activity_type":        s.ActivityType,
+			"before":               parseSnapshotJSON(s.BeforeJSON),
+			"observation":          parseSnapshotJSON(s.ObservationJSON),
+			"after":                parseSnapshotJSON(s.AfterJSON),
+			"decision":             parseSnapshotJSON(s.DecisionJSON),
+			"interpretation_brief": s.InterpretationBrief,
+			"created_at":           s.CreatedAt,
 		})
 	}
 	return out

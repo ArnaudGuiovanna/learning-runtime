@@ -36,15 +36,16 @@ func TestGetPedagogicalSnapshots_ReturnsLearnerSnapshots(t *testing.T) {
 		t.Fatalf("create interaction: %v", err)
 	}
 	if err := store.CreatePedagogicalSnapshot(&models.PedagogicalSnapshot{
-		InteractionID:   interaction.ID,
-		LearnerID:       "L_owner",
-		DomainID:        domain.ID,
-		Concept:         "a",
-		ActivityType:    string(models.ActivityPractice),
-		BeforeJSON:      `{"p_mastery":0.1}`,
-		ObservationJSON: `{"success":true}`,
-		AfterJSON:       `{"p_mastery":0.3}`,
-		DecisionJSON:    `{"source":"test"}`,
+		InteractionID:       interaction.ID,
+		LearnerID:           "L_owner",
+		DomainID:            domain.ID,
+		Concept:             "a",
+		ActivityType:        string(models.ActivityPractice),
+		BeforeJSON:          `{"p_mastery":0.1}`,
+		ObservationJSON:     `{"success":true}`,
+		AfterJSON:           `{"p_mastery":0.3}`,
+		DecisionJSON:        `{"source":"test"}`,
+		InterpretationBrief: "The learner is ready for a narrow recall cue.",
 	}); err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
@@ -69,6 +70,9 @@ func TestGetPedagogicalSnapshots_ReturnsLearnerSnapshots(t *testing.T) {
 	first := rawSnapshots[0].(map[string]any)
 	if first["concept"] != "a" {
 		t.Fatalf("concept = %v, want a", first["concept"])
+	}
+	if first["interpretation_brief"] != "The learner is ready for a narrow recall cue." {
+		t.Fatalf("interpretation_brief = %v", first["interpretation_brief"])
 	}
 
 	before := first["before"].(map[string]any)

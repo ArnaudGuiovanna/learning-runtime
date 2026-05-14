@@ -1,0 +1,445 @@
+// Copyright (c) 2026 Arnaud Guiovanna <https://www.aguiovanna.fr>
+// SPDX-License-Identifier: MIT
+
+package tools
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"tutor-mcp/memory"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const maxMemoryContentLen = 64 * 1024
+
+var allowedMemoryScopes = []string{
+	string(memory.ScopeMemory),
+	string(memory.ScopeMemoryPending),
+	string(memory.ScopeSession),
+	string(memory.ScopeConcept),
+	string(memory.ScopeArchive),
+}
+
+var allowedMemoryOperations = []string{
+	string(memory.OpAppend),
+	string(memory.OpReplaceSection),
+	string(memory.OpReplaceFile),
+}
+
+type UpdateLearnerMemoryParams struct {
+	Scope       string `json:"scope" jsonschema:"memory scope: memory, memory_pending, session, concept, or archive"`
+	Content     string `json:"content" jsonschema:"markdown content to write"`
+	Operation   string `json:"operation,omitempty" jsonschema:"write operation: append, replace_section, or replace_file"`
+	ConceptSlug string `json:"concept_slug,omitempty" jsonschema:"required when scope=concept; must match an active concept"`
+	Period      string `json:"period,omitempty" jsonschema:"archive period key alias, for example 2026-05 or 2026-Q2"`
+	PeriodType  string `json:"period_type,omitempty" jsonschema:"required with period_key when scope=archive consolidation completion: monthly, quarterly, or annual"`
+	PeriodKey   string `json:"period_key,omitempty" jsonschema:"required when scope=archive; for example 2026-05, 2026-Q2, or 2026"`
+	Timestamp   string `json:"timestamp,omitempty" jsonschema:"required when scope=session, ISO 8601 timestamp"`
+	SectionKey  string `json:"section_key,omitempty" jsonschema:"required when operation=replace_section"`
+}
+
+func registerUpdateLearnerMemory(server *mcp.Server, deps *Deps) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_learner_memory",
+		Description: "Write learner memory markdown files for session summaries, concept notes, pending observations, stable memory, or archives.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params UpdateLearnerMemoryParams) (*mcp.CallToolResult, any, error) {
+		learnerID, err := getLearnerID(ctx)
+		if err != nil {
+			logAuthFailure(deps, "update_learner_memory", err)
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if !memory.Enabled() {
+			r, _ := jsonResult(map[string]any{"ok": false, "status": "not_enabled"})
+			return r, nil, nil
+		}
+		if err := validateMemoryWriteParams(deps, learnerID, params); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		ts, err := parseMemoryTimestamp(params.Timestamp)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		scope := memory.Scope(params.Scope)
+		op := memory.Operation(params.Operation)
+		if op == "" {
+			op = defaultMemoryOperation(scope)
+		}
+		periodKey := archivePeriodKey(params)
+		writeReq := memory.WriteRequest{
+			LearnerID:   learnerID,
+			Scope:       scope,
+			ConceptSlug: params.ConceptSlug,
+			Period:      periodKey,
+			Timestamp:   ts,
+			Operation:   op,
+			Content:     params.Content,
+			SectionKey:  params.SectionKey,
+		}
+		if err := memory.Write(writeReq); err != nil {
+			deps.Logger.Warn("update_learner_memory: write failed", "err", err, "learner", learnerID, "scope", params.Scope)
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if scope == memory.ScopeArchive && params.PeriodType != "" && periodKey != "" {
+			if err := deps.Store.MarkConsolidationCompleted(learnerID, params.PeriodType, periodKey, time.Now().UTC()); err != nil {
+				deps.Logger.Warn("update_learner_memory: mark consolidation completed failed", "err", err, "learner", learnerID, "period_type", params.PeriodType, "period_key", periodKey)
+			}
+		}
+		key := memoryReadKey(scope, params.ConceptSlug, periodKey, ts)
+		path, _ := memory.PathForRead(learnerID, scope, key)
+		r, _ := jsonResult(map[string]any{
+			"ok":            true,
+			"source_path":   path,
+			"bytes_written": len(params.Content),
+		})
+		return r, nil, nil
+	})
+}
+
+type ReadRawSessionParams struct {
+	Timestamp string `json:"timestamp" jsonschema:"ISO 8601 timestamp of an existing memory session"`
+}
+
+func registerReadRawSession(server *mcp.Server, deps *Deps) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "read_raw_session",
+		Description: "Read one raw learner memory session by timestamp, including parsed YAML frontmatter and markdown body.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params ReadRawSessionParams) (*mcp.CallToolResult, any, error) {
+		learnerID, err := getLearnerID(ctx)
+		if err != nil {
+			logAuthFailure(deps, "read_raw_session", err)
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if !memory.Enabled() {
+			r, _ := jsonResult(map[string]any{"ok": false, "status": "not_enabled", "session_payload": nil})
+			return r, nil, nil
+		}
+		if err := validateString("timestamp", params.Timestamp, maxShortLabelLen); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		ts, err := parseMemoryTimestamp(params.Timestamp)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		raw, err := memory.Read(learnerID, memory.ScopeSession, ts.Format(time.RFC3339))
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if strings.TrimSpace(raw) == "" {
+			r, _ := jsonResult(map[string]any{"ok": true, "session_payload": nil})
+			return r, nil, nil
+		}
+		payload, err := memory.ParseSessionPayload(ts, raw)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		r, _ := jsonResult(map[string]any{"ok": true, "session_payload": payload})
+		return r, nil, nil
+	})
+}
+
+func registerGetMemoryState(server *mcp.Server, deps *Deps) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_memory_state",
+		Description: "Inspect learner memory file counts, sizes, session bounds, consolidation lag, and recent narrative signal status.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct{}) (*mcp.CallToolResult, any, error) {
+		learnerID, err := getLearnerID(ctx)
+		if err != nil {
+			logAuthFailure(deps, "get_memory_state", err)
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		if !memory.Enabled() {
+			r, _ := jsonResult(map[string]any{"ok": false, "status": "not_enabled"})
+			return r, nil, nil
+		}
+		if err := memory.EnsureLearnerDirs(learnerID); err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
+		sessions, _ := memory.ListSessions(learnerID)
+		archives, _ := memory.ListArchives(learnerID)
+		concepts, _ := memory.ListConcepts(learnerID)
+		pending, _ := memory.Read(learnerID, memory.ScopeMemoryPending, "")
+		ec, _ := memory.LoadContext(learnerID, "", nil, nil)
+
+		var oldest, newest any
+		if len(sessions) > 0 {
+			newest = sessions[0]
+			oldest = sessions[len(sessions)-1]
+		}
+		r, _ := jsonResult(map[string]any{
+			"ok":                          true,
+			"memory_size_bytes":           learnerMemorySize(learnerID),
+			"pending_count":               countPendingMemoryItems(pending),
+			"session_count":               len(sessions),
+			"archive_count":               len(archives),
+			"concept_count":               len(concepts),
+			"oldest_session":              oldest,
+			"newest_session":              newest,
+			"consolidation_lag_days":      consolidationLagDays(learnerID, sessions, archives),
+			"has_recent_narrative_signal": ec != nil && ec.HasRecentNarrativeSignal(),
+		})
+		return r, nil, nil
+	})
+}
+
+func validateMemoryWriteParams(deps *Deps, learnerID string, params UpdateLearnerMemoryParams) error {
+	for _, f := range []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{"scope", params.Scope, maxShortLabelLen},
+		{"operation", params.Operation, maxShortLabelLen},
+		{"concept_slug", params.ConceptSlug, maxShortLabelLen},
+		{"period", params.Period, maxShortLabelLen},
+		{"period_type", params.PeriodType, maxShortLabelLen},
+		{"period_key", params.PeriodKey, maxShortLabelLen},
+		{"timestamp", params.Timestamp, maxShortLabelLen},
+		{"section_key", params.SectionKey, maxShortLabelLen},
+		{"content", params.Content, maxMemoryContentLen},
+	} {
+		if err := validateString(f.name, f.value, f.max); err != nil {
+			return err
+		}
+	}
+	if params.Scope == "" {
+		return fmt.Errorf("scope is required")
+	}
+	if err := validateEnum("scope", params.Scope, allowedMemoryScopes); err != nil {
+		return err
+	}
+	if params.Operation != "" {
+		if err := validateEnum("operation", params.Operation, allowedMemoryOperations); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(params.Content) == "" {
+		return fmt.Errorf("content is required")
+	}
+	scope := memory.Scope(params.Scope)
+	op := memory.Operation(params.Operation)
+	if op == "" {
+		op = defaultMemoryOperation(scope)
+	}
+	if op == memory.OpReplaceSection && strings.TrimSpace(params.SectionKey) == "" {
+		return fmt.Errorf("section_key is required for replace_section")
+	}
+	switch scope {
+	case memory.ScopeConcept:
+		if params.ConceptSlug == "" {
+			return fmt.Errorf("concept_slug is required for concept scope")
+		}
+		active, err := deps.Store.ActiveDomainConceptSet(learnerID)
+		if err != nil {
+			return fmt.Errorf("active concept lookup failed: %w", err)
+		}
+		if !active[params.ConceptSlug] {
+			return fmt.Errorf("concept_slug must match an active concept")
+		}
+	case memory.ScopeArchive:
+		periodKey := archivePeriodKey(params)
+		if periodKey == "" {
+			return fmt.Errorf("period_key is required for archive scope")
+		}
+		if params.PeriodType != "" {
+			if err := validateEnum("period_type", params.PeriodType, []string{string(memory.PeriodMonthly), string(memory.PeriodQuarterly), string(memory.PeriodAnnual)}); err != nil {
+				return err
+			}
+		}
+		if !validMemoryPeriod(periodKey) {
+			return fmt.Errorf("period_key must look like YYYY-MM, YYYY-Qn, or YYYY")
+		}
+	case memory.ScopeSession:
+		if params.Timestamp == "" {
+			return fmt.Errorf("timestamp is required for session scope")
+		}
+		ts, err := parseMemoryTimestamp(params.Timestamp)
+		if err != nil {
+			return err
+		}
+		if err := validateSessionMemoryContent(ts, params.Content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func defaultMemoryOperation(scope memory.Scope) memory.Operation {
+	switch scope {
+	case memory.ScopeMemoryPending:
+		return memory.OpAppend
+	case memory.ScopeSession, memory.ScopeArchive:
+		return memory.OpReplaceFile
+	default:
+		return memory.OpReplaceSection
+	}
+}
+
+func parseMemoryTimestamp(raw string) (time.Time, error) {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}, nil
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("timestamp must be ISO 8601/RFC3339: %v", err)
+	}
+	return ts.UTC(), nil
+}
+
+func memoryReadKey(scope memory.Scope, conceptSlug, period string, ts time.Time) string {
+	switch scope {
+	case memory.ScopeConcept:
+		return conceptSlug
+	case memory.ScopeArchive:
+		return period
+	case memory.ScopeSession:
+		return ts.Format(time.RFC3339)
+	default:
+		return ""
+	}
+}
+
+func archivePeriodKey(params UpdateLearnerMemoryParams) string {
+	if strings.TrimSpace(params.PeriodKey) != "" {
+		return strings.TrimSpace(params.PeriodKey)
+	}
+	return strings.TrimSpace(params.Period)
+}
+
+func validMemoryPeriod(period string) bool {
+	period = strings.TrimSpace(period)
+	if len(period) == 4 {
+		for _, r := range period {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	if len(period) == 7 && period[4] == '-' && period[5] == 'Q' {
+		return period[6] >= '1' && period[6] <= '4'
+	}
+	if len(period) == 7 && period[4] == '-' {
+		_, err := time.Parse("2006-01", period)
+		return err == nil
+	}
+	return false
+}
+
+func validateSessionMemoryContent(fallback time.Time, content string) error {
+	payload, err := memory.ParseSessionPayload(fallback, content)
+	if err != nil {
+		return err
+	}
+	required := []string{
+		"timestamp",
+		"duration_minutes",
+		"affect_start",
+		"affect_end",
+		"energy_level",
+		"concepts_touched",
+		"session_type",
+		"novelty_flag",
+	}
+	for _, key := range required {
+		if _, ok := payload.Frontmatter[key]; !ok {
+			return fmt.Errorf("session memory frontmatter missing %q", key)
+		}
+	}
+	return nil
+}
+
+func countPendingMemoryItems(content string) int {
+	count := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			count++
+		}
+	}
+	return count
+}
+
+func learnerMemorySize(learnerID string) int64 {
+	var total int64
+	for _, scope := range []memory.Scope{memory.ScopeMemory, memory.ScopeMemoryPending} {
+		if path, err := memory.PathForRead(learnerID, scope, ""); err == nil {
+			if info, statErr := os.Stat(path); statErr == nil {
+				total += info.Size()
+			}
+		}
+	}
+	for _, concept := range mustListMemoryConcepts(learnerID) {
+		if path, err := memory.PathForRead(learnerID, memory.ScopeConcept, concept); err == nil {
+			if info, statErr := os.Stat(path); statErr == nil {
+				total += info.Size()
+			}
+		}
+	}
+	for _, archive := range mustListMemoryArchives(learnerID) {
+		if path, err := memory.PathForRead(learnerID, memory.ScopeArchive, archive); err == nil {
+			if info, statErr := os.Stat(path); statErr == nil {
+				total += info.Size()
+			}
+		}
+	}
+	for _, ts := range mustListMemorySessions(learnerID) {
+		if path, err := memory.PathForRead(learnerID, memory.ScopeSession, ts.Format(time.RFC3339)); err == nil {
+			if info, statErr := os.Stat(path); statErr == nil {
+				total += info.Size()
+			}
+		}
+	}
+	return total
+}
+
+func consolidationLagDays(learnerID string, sessions []time.Time, archives []string) int {
+	if len(sessions) == 0 {
+		return 0
+	}
+	var newestArchive time.Time
+	for _, archive := range archives {
+		if path, err := memory.PathForRead(learnerID, memory.ScopeArchive, archive); err == nil {
+			if info, statErr := os.Stat(path); statErr == nil && info.ModTime().After(newestArchive) {
+				newestArchive = info.ModTime()
+			}
+		}
+	}
+	if newestArchive.IsZero() {
+		return int(time.Since(sessions[len(sessions)-1]).Hours() / 24)
+	}
+	if sessions[0].Before(newestArchive) {
+		return 0
+	}
+	return int(time.Since(newestArchive).Hours() / 24)
+}
+
+func mustListMemoryConcepts(learnerID string) []string {
+	out, _ := memory.ListConcepts(learnerID)
+	return out
+}
+
+func mustListMemoryArchives(learnerID string) []string {
+	out, _ := memory.ListArchives(learnerID)
+	return out
+}
+
+func mustListMemorySessions(learnerID string) []time.Time {
+	out, _ := memory.ListSessions(learnerID)
+	return out
+}

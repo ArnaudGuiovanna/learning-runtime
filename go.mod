@@ -7,6 +7,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.49.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.47.0
 )
 

@@ -30,25 +30,25 @@ func BuildOLMNudgeBrief(snap *OLMSnapshot) models.WebhookBrief {
 		return models.WebhookBrief{}
 	}
 	concept := snap.FocusConcept
-	trigger := "Etat d'apprentissage"
-	whyNow := "Un point de ton modele d'apprentissage merite une reprise courte aujourd'hui."
+	trigger := "Learning state"
+	whyNow := "One part of your learning model is worth a short review today."
 	if concept != "" {
 		switch snap.FocusUrgency {
 		case models.UrgencyCritical:
-			trigger = "Rappel prioritaire"
-			whyNow = fmt.Sprintf("%s est en zone fragile (%s). Le reprendre maintenant evite une revision plus lourde plus tard.", concept, snap.FocusReason)
+			trigger = "Priority review"
+			whyNow = fmt.Sprintf("%s is in a fragile zone (%s). Reviewing it now avoids a heavier review later.", concept, snap.FocusReason)
 		case models.UrgencyWarning:
-			trigger = "Focus du moment"
-			whyNow = fmt.Sprintf("%s ressort comme le meilleur levier actuel (%s).", concept, snap.FocusReason)
+			trigger = "Current focus"
+			whyNow = fmt.Sprintf("%s currently looks like the best learning lever (%s).", concept, snap.FocusReason)
 		default:
-			trigger = "Prochain palier"
-			whyNow = fmt.Sprintf("%s est le prochain petit palier utile.", concept)
+			trigger = "Next frontier"
+			whyNow = fmt.Sprintf("%s is the next useful small step.", concept)
 		}
 	}
 
 	evidence := []string{}
 	if buckets := compactBuckets(snap); buckets != "" {
-		evidence = append(evidence, "Repartition: "+buckets)
+		evidence = append(evidence, "Distribution: "+buckets)
 	}
 	if snap.FocusReason != "" {
 		evidence = append(evidence, "Signal: "+snap.FocusReason)
@@ -57,11 +57,11 @@ func BuildOLMNudgeBrief(snap *OLMSnapshot) models.WebhookBrief {
 		evidence = append(evidence, "Meta: "+line)
 	}
 
-	openLoop := "J'ai garde un micro-defi pour verifier ce point sans te donner la solution ici."
-	nextAction := "Ouvre Claude et commence par le focus du jour."
+	openLoop := "I kept a small challenge to check this point without giving the solution here."
+	nextAction := "Open Claude and start with today's focus."
 	if concept != "" {
-		openLoop = fmt.Sprintf("J'ai garde un micro-defi sur %s: assez court pour le tenter, pas assez trivial pour le faire dans Discord.", concept)
-		nextAction = fmt.Sprintf("Ouvre Claude et demande le defi sur %s.", concept)
+		openLoop = fmt.Sprintf("I kept a small challenge on %s: short enough to try, not trivial enough to solve in Discord.", concept)
+		nextAction = fmt.Sprintf("Open Claude and ask for the challenge on %s.", concept)
 	}
 
 	return models.WebhookBrief{
@@ -71,16 +71,16 @@ func BuildOLMNudgeBrief(snap *OLMSnapshot) models.WebhookBrief {
 		DomainName:        snap.DomainName,
 		Concept:           concept,
 		Trigger:           trigger,
-		PedagogicalIntent: "orienter la prochaine session vers le meilleur gain d'apprentissage",
-		LearningGain:      "Eviter une revision vague: tu sais quoi reprendre, pourquoi, et par quelle action commencer.",
+		PedagogicalIntent: "Route the next session toward the highest learning gain.",
+		LearningGain:      "Avoid vague review: you know what to revisit, why, and which action to start with.",
 		WhyNow:            whyNow,
 		Evidence:          evidence,
 		GoalLink:          goalLinkSentence(snap.PersonalGoal, snap.KSTProgress),
 		OpenLoop:          openLoop,
 		NextAction:        nextAction,
 		EstimatedMinutes:  8,
-		Language:          "fr",
-		Tone:              "clair, concret, encourageant",
+		Language:          "en",
+		Tone:              "clear, concrete, encouraging",
 	}
 }
 
@@ -134,50 +134,50 @@ func metacognitiveBrief(_ *models.Learner, domain *models.Domain, alert models.A
 		DomainName:        domainName(domain),
 		Concept:           alert.Concept,
 		EstimatedMinutes:  8,
-		Language:          "fr",
-		Tone:              "simple, concret, non culpabilisant",
-		PedagogicalIntent: "transformer un signal metacognitif en action d'apprentissage courte",
+		Language:          "en",
+		Tone:              "simple, concrete, non-blaming",
+		PedagogicalIntent: "Turn a metacognitive signal into a short learning action.",
 	}
 
 	switch alert.Type {
 	case models.AlertTransferBlocked:
 		concept := alert.Concept
 		if concept == "" {
-			concept = "un concept deja travaille"
+			concept = "a previously practiced concept"
 		}
-		brief.Trigger = "Transfert bloque"
-		brief.LearningGain = "Transformer une connaissance reconnue en competence reutilisable dans un nouveau contexte."
-		brief.WhyNow = fmt.Sprintf("%s semble connu, mais le transfert reste fragile: c'est le bon moment pour changer de contexte.", concept)
-		brief.Evidence = []string{"Maitrise elevee detectee", "Au moins deux contextes de transfert faibles"}
-		brief.OpenLoop = fmt.Sprintf("J'ai garde une question Feynman sur %s: elle force a expliquer, pas seulement reconnaitre.", concept)
-		brief.NextAction = fmt.Sprintf("Ouvre Claude et commence par expliquer %s avec tes mots.", concept)
+		brief.Trigger = "Transfer blocked"
+		brief.LearningGain = "Turn recognized knowledge into reusable competence in a new context."
+		brief.WhyNow = fmt.Sprintf("%s looks familiar, but transfer is still fragile: this is the right moment to change context.", concept)
+		brief.Evidence = []string{"High mastery detected", "At least two weak transfer contexts"}
+		brief.OpenLoop = fmt.Sprintf("I kept a Feynman question on %s: it forces explanation, not just recognition.", concept)
+		brief.NextAction = fmt.Sprintf("Open Claude and start by explaining %s in your own words.", concept)
 	case models.AlertCalibrationDiverging:
-		brief.Trigger = "Calibration a reprendre"
-		brief.LearningGain = "Mieux estimer ton niveau pour choisir des exercices ni trop simples ni trop durs."
-		brief.WhyNow = "Ton auto-evaluation s'ecarte de tes resultats recents: une verification a froid donnera une meilleure boussole."
+		brief.Trigger = "Calibration to revisit"
+		brief.LearningGain = "Estimate your level more accurately so exercises are neither too easy nor too hard."
+		brief.WhyNow = "Your self-rating is drifting away from recent results: a cold check will give you a better compass."
 		brief.Evidence = []string{alert.RecommendedAction}
-		brief.OpenLoop = "J'ai garde un mini-test sans indice: il dira vite si ton impression colle a ce que tu sais faire."
-		brief.NextAction = "Ouvre Claude et commence par une verification courte avant tout nouvel exercice."
+		brief.OpenLoop = "I kept a mini-test without hints: it will quickly show whether your impression matches what you can do."
+		brief.NextAction = "Open Claude and start with a short check before any new exercise."
 	case models.AlertDependencyIncreasing:
-		brief.Trigger = "Autonomie en baisse"
-		brief.LearningGain = "Reprendre la main progressivement, sans retirer l'aide quand elle est utile."
-		brief.WhyNow = "Les derniers signaux montrent plus d'appui sur le tutorat. Le gain vient d'un essai court avec moins d'aide."
-		brief.Evidence = []string{"Tendance sur plusieurs sessions", alert.RecommendedAction}
-		brief.OpenLoop = "J'ai garde un exercice ou le premier pas est a toi; l'aide revient seulement apres ton essai."
-		brief.NextAction = "Ouvre Claude et demande un premier essai sans hint, puis compare avec le feedback."
+		brief.Trigger = "Autonomy declining"
+		brief.LearningGain = "Regain control gradually, without removing help when it is useful."
+		brief.WhyNow = "Recent signals show more reliance on tutoring. The gain comes from a short attempt with less help."
+		brief.Evidence = []string{"Trend across several sessions", alert.RecommendedAction}
+		brief.OpenLoop = "I kept an exercise where the first move is yours; help returns only after your attempt."
+		brief.NextAction = "Open Claude and ask for a first attempt without hints, then compare with feedback."
 	case models.AlertAffectNegative:
-		brief.Trigger = "Charge a ajuster"
-		brief.LearningGain = "Garder la progression sans transformer la difficulte en fatigue inutile."
-		brief.WhyNow = "Les dernieres sessions ont ete couteuses. Une reprise plus courte et mieux calibree produira plus d'apprentissage."
-		brief.Evidence = []string{"Satisfaction ou difficulte basse sur deux sessions recentes"}
-		brief.OpenLoop = "J'ai garde une version allegee du prochain exercice: meme concept, moins de charge parasite."
-		brief.NextAction = "Ouvre Claude et commence par une activite courte, puis decide si on augmente."
+		brief.Trigger = "Load to adjust"
+		brief.LearningGain = "Keep progressing without turning difficulty into unnecessary fatigue."
+		brief.WhyNow = "Recent sessions were costly. A shorter, better-calibrated return will produce more learning."
+		brief.Evidence = []string{"Low satisfaction or difficulty across two recent sessions"}
+		brief.OpenLoop = "I kept a lighter version of the next exercise: same concept, less extraneous load."
+		brief.NextAction = "Open Claude and start with a short activity, then decide whether to increase difficulty."
 	default:
-		brief.Trigger = "Signal d'apprentissage"
-		brief.LearningGain = "Transformer le signal en prochaine action claire."
+		brief.Trigger = "Learning signal"
+		brief.LearningGain = "Turn the signal into a clear next action."
 		brief.WhyNow = alert.RecommendedAction
-		brief.OpenLoop = "J'ai garde une question courte pour verifier le point utile."
-		brief.NextAction = "Ouvre Claude et commence par ce point."
+		brief.OpenLoop = "I kept a short question to check the useful point."
+		brief.NextAction = "Open Claude and start with that point."
 	}
 	brief.GoalLink = goalLinkFromDomain(domain)
 	return brief
@@ -211,14 +211,14 @@ func goalLinkSentence(goal string, progress float64) string {
 	if goal == "" {
 		return ""
 	}
-	return fmt.Sprintf("Objectif: %s. Etat actuel: %s.", goal, progressPhrase(progress))
+	return fmt.Sprintf("Goal: %s. Current state: %s.", goal, progressPhrase(progress))
 }
 
 func goalLinkFromDomain(domain *models.Domain) string {
 	if domain == nil || strings.TrimSpace(domain.PersonalGoal) == "" {
 		return ""
 	}
-	return "Lien avec ton objectif: " + strings.TrimSpace(domain.PersonalGoal) + "."
+	return "Goal link: " + strings.TrimSpace(domain.PersonalGoal) + "."
 }
 
 func domainID(domain *models.Domain) string {

@@ -59,6 +59,14 @@ func TestRecordSessionClose_HappyPath_NoIntention(t *testing.T) {
 	if len(wins) == 0 || wins[0] != "a" {
 		t.Fatalf("expected wins=[a], got %v", wins)
 	}
+	summaryRequest, ok := out["summary_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected summary_request when memory is enabled, got %v", out)
+	}
+	template, _ := summaryRequest["template"].(string)
+	if !strings.Contains(template, "You have just closed a session") {
+		t.Fatalf("unexpected summary template: %q", template)
+	}
 }
 
 func TestRecordSessionClose_PersistsImplementationIntention(t *testing.T) {

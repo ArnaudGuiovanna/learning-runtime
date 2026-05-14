@@ -45,38 +45,41 @@ type DecisionReplaySummary struct {
 }
 
 type MasteryDeltaFinding struct {
-	SnapshotID    int64     `json:"snapshot_id"`
-	InteractionID int64     `json:"interaction_id"`
-	LearnerID     string    `json:"learner_id"`
-	DomainID      string    `json:"domain_id"`
-	Concept       string    `json:"concept"`
-	ActivityType  string    `json:"activity_type"`
-	Before        float64   `json:"before"`
-	After         float64   `json:"after"`
-	Delta         float64   `json:"delta"`
-	CreatedAt     time.Time `json:"created_at"`
+	SnapshotID          int64     `json:"snapshot_id"`
+	InteractionID       int64     `json:"interaction_id"`
+	LearnerID           string    `json:"learner_id"`
+	DomainID            string    `json:"domain_id"`
+	Concept             string    `json:"concept"`
+	ActivityType        string    `json:"activity_type"`
+	InterpretationBrief string    `json:"interpretation_brief,omitempty"`
+	Before              float64   `json:"before"`
+	After               float64   `json:"after"`
+	Delta               float64   `json:"delta"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type RubricEvidenceFinding struct {
-	SnapshotID    int64     `json:"snapshot_id"`
-	InteractionID int64     `json:"interaction_id"`
-	LearnerID     string    `json:"learner_id"`
-	DomainID      string    `json:"domain_id"`
-	Concept       string    `json:"concept"`
-	ActivityType  string    `json:"activity_type"`
-	Missing       []string  `json:"missing"`
-	CreatedAt     time.Time `json:"created_at"`
+	SnapshotID          int64     `json:"snapshot_id"`
+	InteractionID       int64     `json:"interaction_id"`
+	LearnerID           string    `json:"learner_id"`
+	DomainID            string    `json:"domain_id"`
+	Concept             string    `json:"concept"`
+	ActivityType        string    `json:"activity_type"`
+	InterpretationBrief string    `json:"interpretation_brief,omitempty"`
+	Missing             []string  `json:"missing"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type TransferAfterMasteryGap struct {
-	LearnerID            string    `json:"learner_id"`
-	DomainID             string    `json:"domain_id"`
-	Concept              string    `json:"concept"`
-	MasterySnapshotID    int64     `json:"mastery_snapshot_id"`
-	MasteryInteractionID int64     `json:"mastery_interaction_id"`
-	MasteryAt            time.Time `json:"mastery_at"`
-	MasteryPMastery      float64   `json:"mastery_p_mastery"`
-	PostMasteryDecisions int       `json:"post_mastery_decisions"`
+	LearnerID                  string    `json:"learner_id"`
+	DomainID                   string    `json:"domain_id"`
+	Concept                    string    `json:"concept"`
+	MasterySnapshotID          int64     `json:"mastery_snapshot_id"`
+	MasteryInteractionID       int64     `json:"mastery_interaction_id"`
+	MasteryInterpretationBrief string    `json:"mastery_interpretation_brief,omitempty"`
+	MasteryAt                  time.Time `json:"mastery_at"`
+	MasteryPMastery            float64   `json:"mastery_p_mastery"`
+	PostMasteryDecisions       int       `json:"post_mastery_decisions"`
 }
 
 type SnapshotJSONIssue struct {
@@ -171,14 +174,15 @@ func BuildDecisionReplaySummary(
 		if replayRequiresRubricEvidence(snapshot.ActivityType) {
 			if missing := missingRubricEvidence(ps.observation, interactionByID[snapshot.InteractionID]); len(missing) > 0 {
 				summary.MissingRubricEvidence = append(summary.MissingRubricEvidence, RubricEvidenceFinding{
-					SnapshotID:    snapshot.ID,
-					InteractionID: snapshot.InteractionID,
-					LearnerID:     snapshot.LearnerID,
-					DomainID:      snapshot.DomainID,
-					Concept:       snapshot.Concept,
-					ActivityType:  snapshot.ActivityType,
-					Missing:       missing,
-					CreatedAt:     snapshot.CreatedAt,
+					SnapshotID:          snapshot.ID,
+					InteractionID:       snapshot.InteractionID,
+					LearnerID:           snapshot.LearnerID,
+					DomainID:            snapshot.DomainID,
+					Concept:             snapshot.Concept,
+					ActivityType:        snapshot.ActivityType,
+					InterpretationBrief: snapshot.InterpretationBrief,
+					Missing:             missing,
+					CreatedAt:           snapshot.CreatedAt,
 				})
 			}
 		}
@@ -338,16 +342,17 @@ func snapshotJSONIssue(snapshot *models.PedagogicalSnapshot, field, errText stri
 
 func masteryDeltaFinding(snapshot *models.PedagogicalSnapshot, before, after, delta float64) MasteryDeltaFinding {
 	return MasteryDeltaFinding{
-		SnapshotID:    snapshot.ID,
-		InteractionID: snapshot.InteractionID,
-		LearnerID:     snapshot.LearnerID,
-		DomainID:      snapshot.DomainID,
-		Concept:       snapshot.Concept,
-		ActivityType:  snapshot.ActivityType,
-		Before:        before,
-		After:         after,
-		Delta:         delta,
-		CreatedAt:     snapshot.CreatedAt,
+		SnapshotID:          snapshot.ID,
+		InteractionID:       snapshot.InteractionID,
+		LearnerID:           snapshot.LearnerID,
+		DomainID:            snapshot.DomainID,
+		Concept:             snapshot.Concept,
+		ActivityType:        snapshot.ActivityType,
+		InterpretationBrief: snapshot.InterpretationBrief,
+		Before:              before,
+		After:               after,
+		Delta:               delta,
+		CreatedAt:           snapshot.CreatedAt,
 	}
 }
 
@@ -396,11 +401,12 @@ type replayConceptKey struct {
 }
 
 type replayMasteryEvent struct {
-	key           replayConceptKey
-	snapshotID    int64
-	interactionID int64
-	createdAt     time.Time
-	pMastery      float64
+	key                 replayConceptKey
+	snapshotID          int64
+	interactionID       int64
+	interpretationBrief string
+	createdAt           time.Time
+	pMastery            float64
 }
 
 func transferAfterMasteryGaps(
@@ -419,11 +425,12 @@ func transferAfterMasteryGaps(
 		}
 
 		event := replayMasteryEvent{
-			key:           replayKey(ps.snapshot),
-			snapshotID:    ps.snapshot.ID,
-			interactionID: ps.snapshot.InteractionID,
-			createdAt:     ps.snapshot.CreatedAt,
-			pMastery:      value,
+			key:                 replayKey(ps.snapshot),
+			snapshotID:          ps.snapshot.ID,
+			interactionID:       ps.snapshot.InteractionID,
+			interpretationBrief: ps.snapshot.InterpretationBrief,
+			createdAt:           ps.snapshot.CreatedAt,
+			pMastery:            value,
 		}
 		if existing, exists := masteryEvents[event.key]; !exists || replayEventBefore(event.createdAt, event.snapshotID, existing.createdAt, existing.snapshotID) {
 			masteryEvents[event.key] = event
@@ -482,14 +489,15 @@ func transferAfterMasteryGaps(
 			continue
 		}
 		gaps = append(gaps, TransferAfterMasteryGap{
-			LearnerID:            key.learnerID,
-			DomainID:             key.domainID,
-			Concept:              key.concept,
-			MasterySnapshotID:    event.snapshotID,
-			MasteryInteractionID: event.interactionID,
-			MasteryAt:            event.createdAt,
-			MasteryPMastery:      event.pMastery,
-			PostMasteryDecisions: postMasteryDecisions,
+			LearnerID:                  key.learnerID,
+			DomainID:                   key.domainID,
+			Concept:                    key.concept,
+			MasterySnapshotID:          event.snapshotID,
+			MasteryInteractionID:       event.interactionID,
+			MasteryInterpretationBrief: event.interpretationBrief,
+			MasteryAt:                  event.createdAt,
+			MasteryPMastery:            event.pMastery,
+			PostMasteryDecisions:       postMasteryDecisions,
 		})
 	}
 	return gaps

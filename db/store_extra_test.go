@@ -149,12 +149,12 @@ func TestWebhookPushLogLifecycle(t *testing.T) {
 		Kind:              "olm:d1",
 		DomainID:          "d1",
 		DomainName:        "Python",
-		Concept:           "boucles",
-		Trigger:           "Focus utile",
-		PedagogicalIntent: "reprendre le bon concept",
-		LearningGain:      "Stabiliser une connaissance fragile.",
-		OpenLoop:          "J'ai garde un mini-bug de boucle.",
-		NextAction:        "Ouvre Claude et reprends les boucles.",
+		Concept:           "loops",
+		Trigger:           "Useful focus",
+		PedagogicalIntent: "revisit the right concept",
+		LearningGain:      "Stabilize fragile knowledge.",
+		OpenLoop:          "I kept a small loop bug.",
+		NextAction:        "Open Claude and revisit loops.",
 	}
 	if _, err := store.CreateWebhookPushLog("L1", 42, brief, now); err != nil {
 		t.Fatalf("CreateWebhookPushLog: %v", err)
@@ -163,7 +163,7 @@ func TestWebhookPushLogLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLatestOpenWebhookPush: %v", err)
 	}
-	if push == nil || push.Concept != "boucles" || push.QueueID != 42 {
+	if push == nil || push.Concept != "loops" || push.QueueID != 42 {
 		t.Fatalf("unexpected push: %+v", push)
 	}
 	if err := store.MarkWebhookPushSessionOpened("L1", now.Add(time.Minute), now.Add(-time.Hour)); err != nil {
@@ -173,7 +173,7 @@ func TestWebhookPushLogLifecycle(t *testing.T) {
 	if push == nil || push.OpenedSessionAt == nil {
 		t.Fatalf("expected opened session marker, got %+v", push)
 	}
-	if err := store.MarkWebhookPushConceptAddressed("L1", "d1", "boucles", now.Add(2*time.Minute), now.Add(-time.Hour)); err != nil {
+	if err := store.MarkWebhookPushConceptAddressed("L1", "d1", "loops", now.Add(2*time.Minute), now.Add(-time.Hour)); err != nil {
 		t.Fatalf("MarkWebhookPushConceptAddressed: %v", err)
 	}
 	push, err = store.GetLatestOpenWebhookPush("L1", "d1", now.Add(-time.Hour))

@@ -13,6 +13,7 @@ import (
 
 	"tutor-mcp/algorithms"
 	"tutor-mcp/engine"
+	"tutor-mcp/memory"
 	"tutor-mcp/models"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -31,7 +32,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"When to call: this is the main tool of the learning cycle; it already includes alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief. " +
 			"When NOT to call: if another tool just returned needs_domain_setup=true (call init_domain first); do not call get_pending_alerts or get_metacognitive_mirror in the same turn unless the learner explicitly asks for those raw views. " +
 			"Precondition: a domain must exist; otherwise needs_domain_setup=true is returned with a setup_domain activity. " +
-			"Returns: {needs_domain_setup, domain_id, domain_name, intent, intent_status, activity, pedagogical_contract, goal_relevance_status, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
+			"Returns: {needs_domain_setup, domain_id, domain_name, intent, intent_status, activity, pedagogical_contract, consolidation_request, goal_relevance_status, session_concepts_done, metacognitive_mirror, tutor_mode, active_misconceptions, known_misconception_types, motivation_brief, mastery_evidence, mastery_uncertainty, transfer_profile, rasch_elo_calibration}.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetNextActivityParams) (*mcp.CallToolResult, any, error) {
 		totalStart := time.Now()
 		learnerID, err := getLearnerID(ctx)
@@ -285,13 +286,15 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		enrichmentStart := time.Now()
 		var activeMisconceptions any = []any{}
 		var knownMisconceptionTypes any = []string{}
+		activeMisconceptionCount := 0
 
 		if activity.Concept != "" {
 			if active, err := deps.Store.GetActiveMisconceptions(learnerID, activity.Concept); err == nil && len(active) > 0 {
 				activeMisconceptions = active
+				activeMisconceptionCount = len(active)
 
 				// Inject misconceptions into prompt
-				misconceptionPrompt := fmt.Sprintf("\nATTENTION : l'apprenant a %d misconception(s) active(s) : ", len(active))
+				misconceptionPrompt := fmt.Sprintf("\nWARNING: the learner has %d active misconception(s): ", len(active))
 				for i, m := range active {
 					if i > 0 {
 						misconceptionPrompt += " ; "
@@ -403,7 +406,9 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			activity = decision.Activity
 			extra["evidence_adjustment"] = decision.Rationale
 			if active, err := deps.Store.GetActiveMisconceptions(learnerID, activity.Concept); err == nil && len(active) > 0 {
-				misconceptionPrompt := fmt.Sprintf("\nATTENTION : l'apprenant a %d misconception(s) active(s) : ", len(active))
+				activeMisconceptions = active
+				activeMisconceptionCount = len(active)
+				misconceptionPrompt := fmt.Sprintf("\nWARNING: the learner has %d active misconception(s): ", len(active))
 				for i, m := range active {
 					if i > 0 {
 						misconceptionPrompt += " ; "
@@ -419,7 +424,8 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		}
 		diagnosticsMs := time.Since(diagnosticsStart).Milliseconds()
 		goalRelevanceStatus := buildGoalRelevanceStatus(domain)
-		contract := buildPedagogicalContract(activity, intent, evidenceQuality, uncertainty, typedTransferProfile, goalRelevanceStatus, extra["fade_params"])
+		episodicContext, olmSnapshot := loadEpisodicContextForActivity(deps, learnerID, domain, domainStates, activity.Concept, alerts)
+		contract := buildPedagogicalContract(activity, intent, evidenceQuality, uncertainty, typedTransferProfile, goalRelevanceStatus, extra["fade_params"], episodicContext, activeMisconceptionCount, olmSnapshot)
 
 		out := map[string]any{
 			"needs_domain_setup":        false,
@@ -443,6 +449,12 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			"audit_rationale":           contract.AuditRationale,
 			"llm_instruction":           contract.LLMInstruction,
 			"learner_explanation":       contract.LearnerExplanation,
+		}
+		if episodicContextVisible(episodicContext) {
+			out["episodic_context"] = episodicContext
+		}
+		if consolidationRequest := maybeBuildConsolidationRequest(deps, learnerID, now); consolidationRequest != nil {
+			out["consolidation_request"] = consolidationRequest
 		}
 		if overrideResult.Status != LearningNegotiationOverrideConsumeNone {
 			out["learning_negotiation_override"] = overrideResult
@@ -502,11 +514,74 @@ func applyFadeToMotivation(brief *models.MotivationBrief, level engine.HintLevel
 		// terse one-liner. The kind + structured fields stay so
 		// downstream context is preserved.
 		clone := *brief
-		clone.Instruction = "Bref. Reste minimal."
+		clone.Instruction = "Keep it brief and minimal."
 		return &clone
 	default: // HintLevelFull
 		return brief
 	}
+}
+
+func loadEpisodicContextForActivity(
+	deps *Deps,
+	learnerID string,
+	domain *models.Domain,
+	domainStates []*models.ConceptState,
+	focusConcept string,
+	alerts []models.Alert,
+) (*memory.EpisodicContext, *engine.OLMSnapshot) {
+	if !memory.Enabled() {
+		return nil, nil
+	}
+	var olmSnapshot *engine.OLMSnapshot
+	if snap, err := engine.BuildOLMSnapshot(deps.Store, learnerID, domain.ID); err == nil {
+		olmSnapshot = snap
+	} else if deps.Logger != nil {
+		deps.Logger.Warn("get_next_activity: OLM snapshot for memory context failed", "err", err, "learner", learnerID, "domain", domain.ID)
+	}
+	view := &memory.OLMView{
+		FocusConcept:  focusConcept,
+		ConceptBucket: buildMemoryConceptBuckets(domain, domainStates),
+	}
+	if olmSnapshot != nil && olmSnapshot.FocusConcept != "" {
+		view.FocusConcept = olmSnapshot.FocusConcept
+	}
+	ec, err := memory.LoadContext(learnerID, focusConcept, view, alerts)
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("get_next_activity: episodic context load failed", "err", err, "learner", learnerID)
+		}
+		return nil, olmSnapshot
+	}
+	return ec, olmSnapshot
+}
+
+func buildMemoryConceptBuckets(domain *models.Domain, states []*models.ConceptState) map[string]string {
+	out := map[string]string{}
+	stateByConcept := map[string]*models.ConceptState{}
+	for _, cs := range states {
+		if cs != nil {
+			stateByConcept[cs.Concept] = cs
+		}
+	}
+	if domain == nil {
+		return out
+	}
+	for _, concept := range domain.Graph.Concepts {
+		out[concept] = string(engine.NodeClassify(stateByConcept[concept]))
+	}
+	return out
+}
+
+func episodicContextVisible(ec *memory.EpisodicContext) bool {
+	if ec == nil {
+		return false
+	}
+	return strings.TrimSpace(ec.LearnerMemory) != "" ||
+		strings.TrimSpace(ec.PendingMemory) != "" ||
+		strings.TrimSpace(ec.ConceptNotes) != "" ||
+		len(ec.RecentSessions) > 0 ||
+		len(ec.RecentArchives) > 0 ||
+		len(ec.OLMInconsistencies) > 0
 }
 
 func buildGoalRelevanceStatus(domain *models.Domain) models.GoalRelevanceStatus {
@@ -551,6 +626,9 @@ func buildPedagogicalContract(
 	transferProfile engine.TransferProfile,
 	goalStatus models.GoalRelevanceStatus,
 	fadeValue any,
+	episodicContext *memory.EpisodicContext,
+	activeMisconceptionCount int,
+	olmSnapshot *engine.OLMSnapshot,
 ) models.PedagogicalContract {
 	constraints := models.PedagogicalConstraints{
 		MustCollect: []string{"learner_answer", "rubric_score"},
@@ -583,11 +661,72 @@ func buildPedagogicalContract(
 			CannotMarkMasteryWithoutEvidence: true,
 		},
 		FadeGuidance:       fadeGuidance(fadeValue),
+		EpisodicContext:    contractEpisodicContext(episodicContext),
 		LearnerExplanation: learnerExplanation(activity),
 		AuditRationale:     activity.Rationale,
 		LLMInstruction:     activity.PromptForLLM,
 	}
+	if episodicContextVisible(episodicContext) {
+		contract.LLMInstruction = strings.TrimSpace(contract.LLMInstruction + "\n\n" + memory.EpisodicContextInstruction)
+	}
+	contract.ReasoningRequest = buildReasoningRequest(activity, episodicContext, activeMisconceptionCount, olmSnapshot, uncertainty)
 	return contract
+}
+
+func contractEpisodicContext(ec *memory.EpisodicContext) any {
+	if !episodicContextVisible(ec) {
+		return nil
+	}
+	return ec
+}
+
+func buildReasoningRequest(
+	activity models.Activity,
+	episodicContext *memory.EpisodicContext,
+	activeMisconceptionCount int,
+	olmSnapshot *engine.OLMSnapshot,
+	uncertainty engine.MasteryUncertainty,
+) *models.ReasoningRequest {
+	if skipReasoningActivity(activity.Type) {
+		return nil
+	}
+	var reasons []string
+	if episodicContext != nil && (strings.TrimSpace(episodicContext.LearnerMemory) != "" || len(episodicContext.RecentSessions) > 0) {
+		reasons = append(reasons, "episodic_context_available")
+	}
+	if activeMisconceptionCount > 0 {
+		reasons = append(reasons, "active_misconceptions_present")
+	}
+	if olmSnapshot != nil && (olmSnapshot.AutonomyTrend == "declining" || olmSnapshot.AffectTrend == "declining") {
+		reasons = append(reasons, "metacognitive_signal_negative")
+	}
+	if uncertainty.ConfidenceLabel == engine.MasteryConfidenceLow {
+		reasons = append(reasons, "high_uncertainty_on_target")
+	}
+	if episodicContext != nil && strings.TrimSpace(episodicContext.PendingMemory) != "" {
+		reasons = append(reasons, "pending_observations_to_arbitrate")
+	}
+	if episodicContext != nil && len(episodicContext.OLMInconsistencies) > 0 {
+		reasons = append(reasons, "olm_inconsistencies_to_compensate")
+	}
+	if len(reasons) == 0 {
+		return nil
+	}
+	return &models.ReasoningRequest{
+		Task:           memory.ReasoningRequestTask,
+		Constraints:    append([]string(nil), memory.ReasoningRequestConstraints...),
+		OutputRequired: "interpretation_brief+activity",
+		EnabledBecause: reasons,
+	}
+}
+
+func skipReasoningActivity(t models.ActivityType) bool {
+	switch t {
+	case models.ActivityRest, models.ActivitySetupDomain, models.ActivityCloseSession:
+		return true
+	default:
+		return false
+	}
 }
 
 func contractIntent(intent string, activity models.Activity) string {

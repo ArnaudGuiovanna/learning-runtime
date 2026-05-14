@@ -140,8 +140,8 @@ func TestSendMirrorMessages_DispatchesQueuedItem(t *testing.T) {
 
 	mirror := &models.MirrorMessage{
 		Pattern:      "no_initiative",
-		Message:      "Toutes tes sessions ont ete declenchees par une notification.",
-		OpenQuestion: "Tu preferes que le systeme te rappelle ?",
+		Message:      "All your sessions were triggered by a notification.",
+		OpenQuestion: "Do you prefer system reminders?",
 	}
 	// Emit, but bypass the helper's same-day alert record so the scheduler
 	// can actually dispatch (the in-session emit + scheduler tick are
@@ -162,10 +162,10 @@ func TestSendMirrorMessages_DispatchesQueuedItem(t *testing.T) {
 	if len(bodies) != 1 {
 		t.Fatalf("got %d webhook hits, want 1", len(bodies))
 	}
-	if !contains(bodies[0], "Toutes tes sessions") {
+	if !contains(bodies[0], "All your sessions") {
 		t.Errorf("payload should contain the mirror message, got %s", bodies[0])
 	}
-	if !contains(bodies[0], "preferes que le systeme") {
+	if !contains(bodies[0], "prefer system reminders") {
 		t.Errorf("payload should contain the open question, got %s", bodies[0])
 	}
 
@@ -210,7 +210,7 @@ func TestSendMirrorMessages_DedupSameDay(t *testing.T) {
 
 	now := time.Now().UTC()
 	body, _ := json.Marshal(MirrorWebhookContent{
-		Pattern: "calibration_drift", Message: "Tu sur-estimes ton niveau.", OpenQuestion: "On affine ?",
+		Pattern: "calibration_drift", Message: "You overestimate your level.", OpenQuestion: "Should we calibrate?",
 	})
 	if _, err := store.EnqueueWebhookMessage(
 		learnerID, models.WebhookKindMirror, string(body), now, now.Add(2*time.Hour), 0,

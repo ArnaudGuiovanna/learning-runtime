@@ -94,15 +94,15 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 		isMastered := bktMastered && evidenceOK && uncertaintyOK && transferOK
 
 		if !isMastered {
-			message := fmt.Sprintf("Pas encore pret. Maitrise actuelle: %.0f%%, seuil: %.0f%%", cs.PMastery*100, algorithms.MasteryBKT()*100)
+			message := fmt.Sprintf("Not ready yet. Current mastery: %.0f%%, threshold: %.0f%%", cs.PMastery*100, algorithms.MasteryBKT()*100)
 			if bktMastered && !evidenceOK {
-				message = "BKT est au-dessus du seuil, mais les preuves sont encore trop peu variees pour une mastery challenge."
+				message = "BKT is above threshold, but the evidence is still not varied enough for a mastery challenge."
 			}
 			if bktMastered && evidenceOK && !uncertaintyOK {
-				message = "BKT est au-dessus du seuil, mais l'incertitude du modele reste trop elevee pour une mastery challenge."
+				message = "BKT is above threshold, but model uncertainty is still too high for a mastery challenge."
 			}
 			if bktMastered && evidenceOK && uncertaintyOK && !transferOK {
-				message = "BKT est au-dessus du seuil, mais un transfert recent est bloque: retravailler le concept dans un autre contexte avant la mastery challenge."
+				message = "BKT is above threshold, but recent transfer is blocked: revisit the concept in another context before the mastery challenge."
 			}
 			r, _ := jsonResult(map[string]interface{}{
 				"mastery_ready":       false,
@@ -135,10 +135,10 @@ func registerCheckMastery(server *mcp.Server, deps *Deps) {
 					concept,
 				),
 				"evaluation_criteria": []string{
-					"Application autonome sans aide",
-					"Gestion correcte des cas limites",
-					"Code propre et idiomatique",
-					"Explication claire du raisonnement",
+					"Autonomous application without help",
+					"Correct handling of edge cases",
+					"Clean, idiomatic code",
+					"Clear explanation of reasoning",
 				},
 			},
 		})

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +31,9 @@ var toolsDSNCounter int64
 // authorization rules. Mirrors the canonical setupCalibTest helper.
 func setupToolsTest(t *testing.T) (*db.Store, *Deps) {
 	t.Helper()
+	if os.Getenv("TUTOR_MCP_MEMORY_ROOT") == "" {
+		t.Setenv("TUTOR_MCP_MEMORY_ROOT", t.TempDir())
+	}
 	n := atomic.AddInt64(&toolsDSNCounter, 1)
 	dsn := fmt.Sprintf("file:toolsmem_%s_%d?mode=memory&cache=shared", t.Name(), n)
 	raw, err := sql.Open("sqlite", dsn)
@@ -126,4 +130,3 @@ func decodeResult(t *testing.T, res *mcp.CallToolResult) map[string]any {
 	_ = json.Unmarshal([]byte(txt), &out)
 	return out
 }
-

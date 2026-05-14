@@ -99,9 +99,18 @@ type PedagogicalContract struct {
 	AllowedVariants         []string                 `json:"allowed_variants"`
 	LLMDiscretion           PedagogicalLLMDiscretion `json:"llm_discretion"`
 	FadeGuidance            *PedagogicalFadeGuidance `json:"fade_guidance,omitempty"`
+	EpisodicContext         any                      `json:"episodic_context,omitempty"`
+	ReasoningRequest        *ReasoningRequest        `json:"reasoning_request,omitempty"`
 	LearnerExplanation      string                   `json:"learner_explanation"`
 	AuditRationale          string                   `json:"audit_rationale"`
 	LLMInstruction          string                   `json:"llm_instruction"`
+}
+
+type ReasoningRequest struct {
+	Task           string   `json:"task"`
+	Constraints    []string `json:"constraints"`
+	OutputRequired string   `json:"output_required"`
+	EnabledBecause []string `json:"enabled_because,omitempty"`
 }
 
 type PedagogicalConstraints struct {

@@ -208,6 +208,6 @@ func buildProgressNarrative(deps *Deps, learnerID string, learner *models.Learne
 		AutonomyTrend:      trend,
 		MilestonesThisWeek: milestones,
 		DormancyImminent:   dormancy,
-		Instruction:        "Raconte la trajectoire en 1-2 phrases, pas une liste. Si dormancy_imminent est vrai, formule une reprise accueillante sans reproche.",
+		Instruction:        "Describe the trajectory in 1-2 sentences, not a list. If dormancy_imminent is true, make the return welcoming and non-blaming.",
 	}
 }

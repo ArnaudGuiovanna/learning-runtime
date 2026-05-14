@@ -27,16 +27,17 @@ func TestPedagogicalSnapshots_CreateAndFilter(t *testing.T) {
 	}
 
 	snapshot := &models.PedagogicalSnapshot{
-		InteractionID:   interaction.ID,
-		LearnerID:       "L1",
-		DomainID:        "domain-1",
-		Concept:         "fractions",
-		ActivityType:    string(models.ActivityPractice),
-		BeforeJSON:      `{"p_mastery":0.4}`,
-		ObservationJSON: `{"success":true}`,
-		AfterJSON:       `{"p_mastery":0.6}`,
-		DecisionJSON:    `{"source":"test"}`,
-		CreatedAt:       now,
+		InteractionID:       interaction.ID,
+		LearnerID:           "L1",
+		DomainID:            "domain-1",
+		Concept:             "fractions",
+		ActivityType:        string(models.ActivityPractice),
+		BeforeJSON:          `{"p_mastery":0.4}`,
+		ObservationJSON:     `{"success":true}`,
+		AfterJSON:           `{"p_mastery":0.6}`,
+		DecisionJSON:        `{"source":"test"}`,
+		InterpretationBrief: "The learner likely confuses part-whole and ratio meanings.",
+		CreatedAt:           now,
 	}
 	if err := store.CreatePedagogicalSnapshot(snapshot); err != nil {
 		t.Fatalf("create snapshot: %v", err)
@@ -52,7 +53,7 @@ func TestPedagogicalSnapshots_CreateAndFilter(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d snapshots, want 1", len(got))
 	}
-	if got[0].InteractionID != interaction.ID || got[0].BeforeJSON != snapshot.BeforeJSON {
+	if got[0].InteractionID != interaction.ID || got[0].BeforeJSON != snapshot.BeforeJSON || got[0].InterpretationBrief != snapshot.InterpretationBrief {
 		t.Fatalf("unexpected snapshot: %+v", got[0])
 	}
 

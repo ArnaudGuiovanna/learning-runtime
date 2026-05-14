@@ -66,9 +66,12 @@ TOOLS (reference)
 - get_learner_context(): session context, domain list, progress_narrative
 - get_pending_alerts(): critical alerts
 - get_next_activity(domain_id?, domain_name?, intent?): next optimal activity + pedagogical_contract + metacognitive_mirror + tutor_mode + motivation_brief + mastery_evidence/mastery_uncertainty + transfer_profile + rasch_elo_calibration
-- record_interaction(): record an exercise outcome; updates BKT/FSRS/IRT and returns individualized BKT/Rasch-Elo observation signals
+- record_interaction(): record an exercise outcome; updates BKT/FSRS/IRT and stores optional interpretation_brief for audit
 - record_affect(): emotional check-in at session start/end
-- record_session_close(): close the session; returns recap_brief
+- record_session_close(): close the session; returns recap_brief and, when memory is enabled, summary_request
+- update_learner_memory(): write learner memory markdown (session, concept, pending, stable memory, archive)
+- read_raw_session(): inspect one raw learner memory session by timestamp
+- get_memory_state(): inspect learner memory counts, bounds and recent narrative signal
 - queue_webhook_message(): queue a nudge for the Discord webhook scheduler
 - calibration_check(): pre-exercise self-assessment
 - record_calibration_result(): compare prediction vs. actual
@@ -118,6 +121,7 @@ B. EXERCISE LOOP (per exercise)
    - Call calibration_check(concept, predicted_mastery) only for session-opening calibration, mastery challenges, transfer/feynman probes, or every few exercises when calibration is stale. Do not block every routine exercise on a self-rating.
    After:
    - Call record_calibration_result(prediction_id, actual_score) only if you called calibration_check before this exercise.
+   - If pedagogical_contract.reasoning_request was present, include the generated interpretation_brief in record_interaction().
    - Call record_interaction() including hints_requested and self_initiated.
    - When you grade an answer, include rubric_json and rubric_score_json: compact JSON objects with criteria, per-criterion score/evidence, and a short summary. Keep them factual and aligned with the learner's actual answer.
    - If record_interaction returns bkt_individualized_params or rasch_elo, treat them as audit/model signals for the next task design; do not explain parameter values to the learner.
@@ -127,6 +131,7 @@ C. SESSION END
    - Call record_affect(session_id, satisfaction, perceived_difficulty, next_session_intent).
    - React to the calibration_bias_delta returned.
    - Call record_session_close(domain_id) - read the signals for the closing message.
+   - If summary_request is present, follow it and store the session summary through update_learner_memory.
    - If recap_brief.prompt_for_implementation_intent: ask ONE concrete question ("When and where will you practice next?") and call record_session_close again with implementation_intention.
    - Then call get_olm_snapshot(domain_id) and queue_webhook_message 3 times:
      (a) daily_motivation for tomorrow 08:00 UTC,

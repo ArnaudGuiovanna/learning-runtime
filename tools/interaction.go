@@ -34,6 +34,7 @@ type RecordInteractionParams struct {
 	RubricJSON              string  `json:"rubric_json,omitempty" jsonschema:"optional rubric as a JSON object or array"`
 	RubricScoreJSON         string  `json:"rubric_score_json,omitempty" jsonschema:"optional rubric scoring result as a JSON object or array"`
 	SemanticObservationJSON string  `json:"semantic_observation_json,omitempty" jsonschema:"optional semantic observation as a JSON object"`
+	InterpretationBrief     string  `json:"interpretation_brief,omitempty" jsonschema:"optional brief hypothesis produced before the activity, stored for pedagogical audit"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {
@@ -69,6 +70,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			{"misconception_type", params.MisconceptionType, maxShortLabelLen},
 			{"misconception_detail", params.MisconceptionDetail, maxNoteLen},
 			{"notes", params.Notes, maxNoteLen},
+			{"interpretation_brief", params.InterpretationBrief, maxNoteLen},
 		}
 		for _, f := range stringFields {
 			if err := validateString(f.name, f.value, f.max); err != nil {
@@ -134,6 +136,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult(err.Error())
 			return r, nil, nil
 		}
+		interpretationBrief := normalizeInterpretationBrief(params.InterpretationBrief, params.Notes)
 
 		// Resolve the active domain (honoring the optional domain_id) and
 		// validate the concept against its concept list. Without this guard
@@ -176,6 +179,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			RubricWarnings:      rubricWarnings,
 			RubricScoreWarnings: rubricScoreWarnings,
 			SemanticObservation: semanticObservation,
+			InterpretationBrief: interpretationBrief,
 		}, time.Now().UTC())
 		if err != nil {
 			deps.Logger.Error("record_interaction: applyInteraction failed", "err", err, "learner", learnerID)
@@ -228,6 +232,33 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 		r, _ := jsonResult(payload)
 		return r, nil, nil
 	})
+}
+
+func normalizeInterpretationBrief(explicit, notes string) string {
+	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
+		return trimmed
+	}
+	return extractInterpretationBrief(notes)
+}
+
+func extractInterpretationBrief(raw string) string {
+	lines := strings.Split(raw, "\n")
+	start := -1
+	end := len(lines)
+	for i, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(line), "## Interpretation brief") {
+			start = i + 1
+			continue
+		}
+		if start != -1 && strings.HasPrefix(strings.TrimSpace(line), "## ") {
+			end = i
+			break
+		}
+	}
+	if start == -1 || start >= len(lines) {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 }
 
 func normalizeSemanticObservationJSON(raw string) (map[string]any, error) {

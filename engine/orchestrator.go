@@ -189,7 +189,7 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 	return models.Activity{
 		Type:         models.ActivityRest,
 		Rationale:    "pipeline_exhausted: NoFringe persists after retry",
-		PromptForLLM: "Aucune activite eligible apres retry. Demande a l'apprenant ce qu'il souhaite faire.",
+		PromptForLLM: "No eligible activity remains after retry. Ask the learner what they want to work on next.",
 	}, currentPhase, nil
 }
 

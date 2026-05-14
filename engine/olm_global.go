@@ -27,7 +27,7 @@ const (
 
 // TimePoint is a daily aggregate sample (for sparklines).
 type TimePoint struct {
-	Day   string  `json:"day"`   // YYYY-MM-DD UTC
+	Day   string  `json:"day"` // YYYY-MM-DD UTC
 	Value float64 `json:"value"`
 }
 
@@ -43,7 +43,7 @@ type DomainSummary struct {
 	KSTProgress  float64 `json:"kst_progress"`
 }
 
-// GoalProgress is one row of the Objectifs column.
+// GoalProgress is one row of the objectives column.
 type GoalProgress struct {
 	DomainID     string  `json:"domain_id"`
 	PersonalGoal string  `json:"personal_goal"`

@@ -101,11 +101,11 @@ func TestMigrate_Idempotent(t *testing.T) {
 		t.Fatalf("read interaction id: %v", err)
 	}
 	if _, err := db.Exec(
-		`INSERT INTO pedagogical_snapshots (interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json)
-		 VALUES (?, 'm1', 'd1', 'C', 'RECALL_EXERCISE', '{}', '{}', '{}', '{}')`,
+		`INSERT INTO pedagogical_snapshots (interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, interpretation_brief)
+		 VALUES (?, 'm1', 'd1', 'C', 'RECALL_EXERCISE', '{}', '{}', '{}', '{}', 'brief')`,
 		interactionID,
 	); err != nil {
-		t.Fatalf("insert pedagogical snapshot: %v", err)
+		t.Fatalf("insert pedagogical snapshot with interpretation_brief: %v", err)
 	}
 	if _, err := db.Exec(
 		`INSERT INTO domains (id, learner_id, name, graph_json, personal_goal, archived, value_framings_json, last_value_axis) VALUES ('d1','m1','dn','{}','goal',0,'','')`,

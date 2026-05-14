@@ -190,8 +190,8 @@ func TestBuildOLMSnapshot_FocusFallsBackToFrontier(t *testing.T) {
 	if snap.FocusUrgency != models.UrgencyInfo {
 		t.Errorf("FocusUrgency=%q, want info (frontier fallback)", snap.FocusUrgency)
 	}
-	if snap.FocusReason != "prochain palier" {
-		t.Errorf("FocusReason=%q, want 'prochain palier'", snap.FocusReason)
+	if snap.FocusReason != "next frontier" {
+		t.Errorf("FocusReason=%q, want 'next frontier'", snap.FocusReason)
 	}
 }
 
@@ -289,7 +289,7 @@ func TestFormatOLMEmbed_FocusWarning(t *testing.T) {
 		InProgress:    2,
 		Fragile:       1,
 		NotStarted:    2,
-		FocusConcept:  "boucles",
+		FocusConcept:  "loops",
 		FocusReason:   "retention 50%",
 		FocusUrgency:  models.UrgencyWarning,
 		KSTProgress:   0.50,
@@ -302,7 +302,7 @@ func TestFormatOLMEmbed_FocusWarning(t *testing.T) {
 	if !strings.Contains(embed.Description, "Python for bio-info") {
 		t.Errorf("Description missing domain name: %q", embed.Description)
 	}
-	if !strings.Contains(embed.Description, "boucles") {
+	if !strings.Contains(embed.Description, "loops") {
 		t.Errorf("Description missing focus concept: %q", embed.Description)
 	}
 	if !strings.Contains(embed.Description, "Current focus") {

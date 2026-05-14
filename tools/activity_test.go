@@ -18,6 +18,7 @@ import (
 
 	"tutor-mcp/auth"
 	"tutor-mcp/db"
+	"tutor-mcp/memory"
 	"tutor-mcp/models"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -117,6 +118,196 @@ func TestGetNextActivity_HappyPath(t *testing.T) {
 	}
 	if got := contract["learner_explanation"]; got == "" {
 		t.Fatalf("expected contract learner_explanation, got %v", contract)
+	}
+}
+
+func TestGetNextActivity_IncludesEpisodicContextAndReasoningRequest(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.5
+	_ = store.InsertConceptStateIfNotExists(cs)
+	_ = store.UpsertConceptState(cs)
+	ts := time.Date(2026, 5, 14, 9, 30, 0, 0, time.UTC)
+	if err := memory.Write(memory.WriteRequest{
+		LearnerID: "L_owner",
+		Scope:     memory.ScopeSession,
+		Timestamp: ts,
+		Operation: memory.OpReplaceFile,
+		Content:   "---\ntimestamp: 2026-05-14T09:30:00Z\nnovelty_flag: true\n---\n\n## Summary\nThe learner relied on a brittle cue.",
+	}); err != nil {
+		t.Fatalf("write memory session: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{
+		"domain_id": d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	ec, ok := out["episodic_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected episodic_context, got %v", out)
+	}
+	if sessions, _ := ec["recent_sessions"].([]any); len(sessions) != 1 {
+		t.Fatalf("recent_sessions = %v", ec["recent_sessions"])
+	}
+	contract, _ := out["pedagogical_contract"].(map[string]any)
+	if !strings.Contains(contract["llm_instruction"].(string), "Perform pattern completion") {
+		t.Fatalf("llm_instruction missing memory guidance: %q", contract["llm_instruction"])
+	}
+	req, ok := contract["reasoning_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reasoning_request, got %v", contract)
+	}
+	reasons, _ := req["enabled_because"].([]any)
+	if len(reasons) == 0 || reasons[0] != "episodic_context_available" {
+		t.Fatalf("unexpected reasoning reasons: %v", reasons)
+	}
+}
+
+func TestGetNextActivity_AttachesClientInitiatedConsolidationRequest(t *testing.T) {
+	t.Setenv("TUTOR_MCP_MEMORY_ROOT", t.TempDir())
+	t.Setenv("TUTOR_MCP_MEMORY_ENABLED", "true")
+	t.Setenv("TUTOR_MCP_CONSOLIDATION_SEED", "7")
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.5
+	if err := store.UpsertConceptState(cs); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	if err := memory.Write(memory.WriteRequest{LearnerID: "L_owner", Scope: memory.ScopeMemory, Operation: memory.OpReplaceFile, Content: "# Stable memory\n"}); err != nil {
+		t.Fatalf("write memory: %v", err)
+	}
+	if err := memory.Write(memory.WriteRequest{LearnerID: "L_owner", Scope: memory.ScopeMemoryPending, Operation: memory.OpReplaceFile, Content: "- pending observation\n"}); err != nil {
+		t.Fatalf("write pending: %v", err)
+	}
+	if err := memory.Write(memory.WriteRequest{LearnerID: "L_owner", Scope: memory.ScopeConcept, ConceptSlug: "a", Operation: memory.OpReplaceFile, Content: "## Current state\nEarly understanding."}); err != nil {
+		t.Fatalf("write concept: %v", err)
+	}
+	for _, ts := range []time.Time{
+		time.Date(2026, time.April, 10, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.April, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.April, 12, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.April, 13, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, time.March, 1, 9, 0, 0, 0, time.UTC),
+	} {
+		if err := memory.Write(memory.WriteRequest{
+			LearnerID: "L_owner",
+			Scope:     memory.ScopeSession,
+			Timestamp: ts,
+			Operation: memory.OpReplaceFile,
+			Content:   "---\ntimestamp: " + ts.Format(time.RFC3339) + "\nconcepts_touched: [\"a\"]\nnovelty_flag: false\n---\n\n## Summary\nWorked on a.",
+		}); err != nil {
+			t.Fatalf("write session: %v", err)
+		}
+	}
+	if err := store.UpsertPendingConsolidation("L_owner", "monthly", "2026-04", time.Date(2026, time.May, 3, 13, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("UpsertPendingConsolidation: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{"domain_id": d.ID})
+	if res.IsError {
+		t.Fatalf("get_next_activity failed: %s", resultText(res))
+	}
+	out := decodeResult(t, res)
+	req, ok := out["consolidation_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected consolidation_request, got %v", out)
+	}
+	if !strings.Contains(req["instruction"].(string), "pending consolidation jobs") {
+		t.Fatalf("unexpected instruction: %q", req["instruction"])
+	}
+	jobs, _ := req["pending_jobs"].([]any)
+	if len(jobs) != 1 {
+		t.Fatalf("pending_jobs = %v", req["pending_jobs"])
+	}
+	job := jobs[0].(map[string]any)
+	if job["period_type"] != "monthly" || job["period_key"] != "2026-04" {
+		t.Fatalf("unexpected job payload: %v", job)
+	}
+	if sessions, _ := job["sessions_in_period"].([]any); len(sessions) != 4 {
+		t.Fatalf("sessions_in_period = %v", job["sessions_in_period"])
+	}
+	if replay, _ := job["interleaved_replay_sessions"].([]any); len(replay) != 1 {
+		t.Fatalf("interleaved_replay_sessions = %v", job["interleaved_replay_sessions"])
+	}
+	if concepts, _ := job["touched_concepts"].([]any); len(concepts) != 1 {
+		t.Fatalf("touched_concepts = %v", job["touched_concepts"])
+	}
+	item, err := store.GetConsolidation("L_owner", "monthly", "2026-04")
+	if err != nil {
+		t.Fatalf("GetConsolidation delivered: %v", err)
+	}
+	if item.Status != "delivered" {
+		t.Fatalf("status after delivery = %q, want delivered", item.Status)
+	}
+
+	archive := callTool(t, deps, registerUpdateLearnerMemory, "L_owner", "update_learner_memory", map[string]any{
+		"scope":       "archive",
+		"period_type": "monthly",
+		"period_key":  "2026-04",
+		"content":     "# Consolidation 2026-04\n\n## Period trajectory\nThe learner practiced a.",
+	})
+	if archive.IsError {
+		t.Fatalf("archive write failed: %s", resultText(archive))
+	}
+	item, _ = store.GetConsolidation("L_owner", "monthly", "2026-04")
+	if item.Status != "completed" {
+		t.Fatalf("status after archive = %q, want completed", item.Status)
+	}
+	second := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{"domain_id": d.ID})
+	if second.IsError {
+		t.Fatalf("second get_next_activity failed: %s", resultText(second))
+	}
+	secondOut := decodeResult(t, second)
+	if _, ok := secondOut["consolidation_request"]; ok {
+		t.Fatalf("completed consolidation should not be requested again: %v", secondOut["consolidation_request"])
+	}
+}
+
+func TestGetNextActivity_OLMInconsistencyActivatesReasoningRequest(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.90
+	cs.CardState = "review"
+	cs.ElapsedDays = 200
+	cs.Stability = 1
+	_ = store.InsertConceptStateIfNotExists(cs)
+	_ = store.UpsertConceptState(cs)
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{
+		"domain_id": d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	ec, ok := out["episodic_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected episodic_context, got %v", out)
+	}
+	inconsistencies, _ := ec["olm_inconsistencies"].([]any)
+	if len(inconsistencies) == 0 {
+		t.Fatalf("expected OLM inconsistency, got %v", ec)
+	}
+	contract, _ := out["pedagogical_contract"].(map[string]any)
+	req, ok := contract["reasoning_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reasoning_request, got %v", contract)
+	}
+	reasons, _ := req["enabled_because"].([]any)
+	found := false
+	for _, reason := range reasons {
+		if reason == "olm_inconsistencies_to_compensate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing OLM inconsistency reason: %v", reasons)
 	}
 }
 

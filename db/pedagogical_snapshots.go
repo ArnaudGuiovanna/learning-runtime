@@ -13,7 +13,7 @@ import (
 	"tutor-mcp/models"
 )
 
-const pedagogicalSnapshotCols = `id, interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, created_at`
+const pedagogicalSnapshotCols = `id, interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, interpretation_brief, created_at`
 
 func (s *Store) CreatePedagogicalSnapshot(snapshot *models.PedagogicalSnapshot) error {
 	if snapshot.CreatedAt.IsZero() {
@@ -23,11 +23,11 @@ func (s *Store) CreatePedagogicalSnapshot(snapshot *models.PedagogicalSnapshot) 
 	}
 	result, err := s.db.Exec(
 		`INSERT INTO pedagogical_snapshots
-		    (interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    (interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, interpretation_brief, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		snapshot.InteractionID, snapshot.LearnerID, snapshot.DomainID, snapshot.Concept,
 		snapshot.ActivityType, snapshot.BeforeJSON, snapshot.ObservationJSON,
-		snapshot.AfterJSON, snapshot.DecisionJSON, snapshot.CreatedAt,
+		snapshot.AfterJSON, snapshot.DecisionJSON, snapshot.InterpretationBrief, snapshot.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create pedagogical snapshot: %w", err)
@@ -87,7 +87,7 @@ func scanPedagogicalSnapshots(rows *sql.Rows) ([]*models.PedagogicalSnapshot, er
 			&snapshot.ID, &snapshot.InteractionID, &snapshot.LearnerID,
 			&snapshot.DomainID, &snapshot.Concept, &snapshot.ActivityType,
 			&snapshot.BeforeJSON, &snapshot.ObservationJSON, &snapshot.AfterJSON,
-			&snapshot.DecisionJSON, &snapshot.CreatedAt,
+			&snapshot.DecisionJSON, &snapshot.InterpretationBrief, &snapshot.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pedagogical snapshot: %w", err)
 		}
