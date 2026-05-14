@@ -52,6 +52,5 @@ Source-of-truth tracker for the five MVP categories defined in the agent routine
 ## Decision gates
 
 - The MVP is **NOT** reached this cycle. Remaining blockers:
-  - Issue #90 remains open for mixed-language/actionability cleanup.
   - The sampling/LLM latency gate and a fresh quickstart sanity-check are still pending.
 - When all rows in this checklist are ✅ AND a documented quickstart sanity-check passes against `staging`, the MVP gate is open. The version bump and tag are humain-only steps after `staging` → `main`.
