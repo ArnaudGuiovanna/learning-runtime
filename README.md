@@ -6,7 +6,7 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/go-1.25+-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.25+" /></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-server-7c3aed.svg" alt="MCP server" /></a>
-  <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/releases"><img src="https://img.shields.io/badge/release-v0.3.0--alpha.1-orange.svg" alt="Release v0.3.0-alpha.1" /></a>
+  <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/releases"><img src="https://img.shields.io/badge/release-v0.3.1-orange.svg" alt="Release v0.3.1" /></a>
   <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/issues"><img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Status: alpha" /></a>
 </p>
 
@@ -18,7 +18,7 @@
 
 Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, regulation-pipeline orchestration, misconception diagnosis, structured rubrics, transfer profiling, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
-> Current release: **v0.3** — the regulation pipeline is the single runtime engine, and the learner model now includes structured evidence gates, pedagogical snapshots, transfer profiles, individualized BKT parameters, and Rasch/Elo exercise calibration signals.
+> Current release: **v0.3.1** — the regulation pipeline is the single runtime engine, and the learner model now includes structured evidence gates, pedagogical snapshots, client-initiated learner memory, consolidation requests, transfer profiles, individualized BKT parameters, and Rasch/Elo exercise calibration signals.
 
 ## Table of Contents
 
@@ -375,13 +375,13 @@ The setup has two phases: **deploy the server**, then **connect a client**.
 Install the latest Linux release binary:
 
 ```bash
-curl -fsSL https://github.com/ArnaudGuiovanna/tutor-mcp/releases/latest/download/install.sh | sh
+curl -fsSL https://tutor-mcp.dev/install.sh | sh
 ```
 
 To install without `sudo`, choose a writable directory:
 
 ```bash
-curl -fsSL https://github.com/ArnaudGuiovanna/tutor-mcp/releases/latest/download/install.sh | TUTOR_MCP_INSTALL_DIR="$HOME/.local/bin" sh
+curl -fsSL https://tutor-mcp.dev/install.sh | TUTOR_MCP_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 Or build from source:
