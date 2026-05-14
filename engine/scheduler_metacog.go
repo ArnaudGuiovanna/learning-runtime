@@ -11,10 +11,9 @@ import (
 )
 
 // metacogKindToWebhookKind maps an AlertType to the webhook_message_queue
-// `kind` slot under which the dispatch enqueues a nudge. Each kind is
-// dispatched independently — a learner with both AFFECT_NEGATIVE and
-// CALIBRATION_DIVERGING firing on the same tick will get two webhook
-// rows, deduped per-day via scheduled_alerts (WasAlertSentToday).
+// `kind` slot under which the dispatch enqueues a nudge. The planner now
+// chooses the highest-value candidate per learner/tick; the kind remains the
+// daily dedup tag for the selected signal.
 func metacogKindToWebhookKind(t models.AlertType) string {
 	switch t {
 	case models.AlertDependencyIncreasing:
@@ -29,47 +28,19 @@ func metacogKindToWebhookKind(t models.AlertType) string {
 	return ""
 }
 
-// metacogFallbackContent returns the sober Go-side fallback nudge body for
-// each metacognitive alert kind. The content is intentionally short and
-// non-prescriptive — it tells the learner *what surfaced* and points to
-// the corresponding tool, leaving the conversational handling to Claude
-// when the learner returns.
-func metacogFallbackContent(a models.Alert) string {
-	switch a.Type {
-	case models.AlertDependencyIncreasing:
-		return "Your autonomy score has dropped over the last 3 sessions. " +
-			"When you come back, we can talk about it - call get_metacognitive_mirror."
-	case models.AlertCalibrationDiverging:
-		return "Your calibration has drifted from reality (" + a.RecommendedAction + "). " +
-			"A short calibration session can help - calibration_check."
-	case models.AlertAffectNegative:
-		return "The last two sessions have been hard. " +
-			"We can adjust tutor_mode when you return."
-	case models.AlertTransferBlocked:
-		concept := a.Concept
-		if concept == "" {
-			concept = "a mastered concept"
-		}
-		return "Transfer on \"" + concept + "\" remains weak despite mastery. " +
-			"A Feynman challenge would likely unblock the situation."
-	}
-	return "A new metacognitive observation is available."
-}
-
 // dispatchMetacognitiveAlerts iterates over every active learner, computes
 // metacognitive alerts (DEPENDENCY / CALIBRATION / AFFECT / TRANSFER) from
-// their current state, and pushes a webhook for each newly-firing alert
-// kind. Per-learner per-day dedup is enforced by dispatchQueued via
-// scheduled_alerts (WasAlertSentToday + CreateScheduledAlert) — the cron
-// cadence only affects detection latency, not delivery frequency.
+// their current state, turns them into structured learner-facing candidates,
+// and pushes at most the best candidate for the learner on this tick.
+// Per-kind daily dedup is enforced by dispatchQueued via scheduled_alerts
+// (WasAlertSentToday + CreateScheduledAlert) — the cron cadence only affects
+// detection latency, not delivery frequency.
 //
 // Two-stage flow on each tick:
 //
-//  1. Compute alerts → enqueue one webhook_message_queue row per *kind*
-//     that just went hot (kind = metacog_dependency / metacog_calibration
-//     / metacog_affect / metacog_transfer). Skip kinds already fired today
-//     (WasAlertSentToday) so we don't enqueue stale duplicates.
-//  2. Drain each enqueued kind via dispatchQueued, which posts the embed
+//  1. Compute alerts → build ranked structured candidates.
+//  2. Enqueue the first candidate whose kind has not fired today.
+//  3. Drain each enqueued kind via dispatchQueued, which posts the embed
 //     and stamps scheduled_alerts so the next tick deduplicates.
 //
 // TRANSFER_BLOCKED is per-concept in the alert payload but is collapsed to
@@ -120,36 +91,33 @@ func (s *Scheduler) dispatchMetacognitiveAlerts() {
 			WithTransferData(states, transfers),
 		)
 
-		// Collapse per-concept alerts down to one row per kind. Keep the
-		// first alert seen for each kind (deterministic enough — alerts
-		// from ComputeMetacognitiveAlerts are produced in a fixed order).
-		seenKind := make(map[string]bool)
-		for _, a := range alerts {
-			kind := metacogKindToWebhookKind(a.Type)
-			if kind == "" || seenKind[kind] {
-				continue
-			}
-			seenKind[kind] = true
-
-			// kind is the dedup tag too — dispatchQueued stamps
-			// scheduled_alerts(alert_type=kind) on success, so a re-tick
-			// today will WasAlertSentToday-skip before re-enqueueing.
-			alreadySent, _ := s.store.WasAlertSentToday(learner.ID, kind)
+		domains, _ := s.store.GetDomainsByLearner(learner.ID, false)
+		candidates := BuildMetacognitiveNudgeCandidates(learner, domains, alerts)
+		for _, candidate := range candidates {
+			// One metacognitive push per tick is intentional: Discord should
+			// surface the highest-learning-value next action, not a bundle of
+			// weak observations.
+			alreadySent, _ := s.store.WasAlertSentToday(learner.ID, candidate.AlertTag)
 			if alreadySent {
 				continue
 			}
-
-			content := metacogFallbackContent(a)
-			if _, err := s.store.EnqueueWebhookMessage(
-				learner.ID, kind, content, now, now.Add(2*time.Hour), 5,
-			); err != nil {
-				s.logger.Error("scheduler: metacog enqueue",
-					"err", err, "learner", learner.ID, "kind", kind)
+			content, err := models.EncodeWebhookBrief(candidate.Brief)
+			if err != nil {
+				s.logger.Error("scheduler: metacog brief encode",
+					"err", err, "learner", learner.ID, "kind", candidate.Kind)
 				continue
 			}
-			enqueuedKinds[kind] = true
+			if _, err := s.store.EnqueueWebhookMessage(
+				learner.ID, candidate.Kind, content, now, now.Add(2*time.Hour), candidate.Priority,
+			); err != nil {
+				s.logger.Error("scheduler: metacog enqueue",
+					"err", err, "learner", learner.ID, "kind", candidate.Kind)
+				continue
+			}
+			enqueuedKinds[candidate.Kind] = true
 			s.logger.Info("scheduler: metacog enqueued",
-				"learner", learner.ID, "kind", kind, "type", a.Type)
+				"learner", learner.ID, "kind", candidate.Kind, "priority", candidate.Priority)
+			break
 		}
 	}
 
@@ -160,4 +128,3 @@ func (s *Scheduler) dispatchMetacognitiveAlerts() {
 		s.dispatchQueued(kind, kind, nil)
 	}
 }
-

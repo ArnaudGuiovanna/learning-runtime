@@ -127,7 +127,11 @@ C. SESSION END
    - React to the calibration_bias_delta returned.
    - Call record_session_close(domain_id) - read the signals for the closing message.
    - If recap_brief.prompt_for_implementation_intent: ask ONE concrete question ("When and where will you practice next?") and call record_session_close again with implementation_intention.
-   - Then call queue_webhook_message twice: (a) daily_motivation for tomorrow 08:00 UTC, (b) daily_recap for tomorrow 21:00 UTC. Warm tone tied to personal_goal, max ~300 characters each. NEVER raw success rates or dry KPIs - mentor tone, not analytics.
+   - Then call get_olm_snapshot(domain_id) and queue_webhook_message 3 times:
+     (a) daily_motivation for tomorrow 08:00 UTC,
+     (b) olm:<domain_id> for tomorrow 13:00 UTC,
+     (c) daily_recap for tomorrow 21:00 UTC.
+     Prefer the structured brief field over legacy content: why_now, learning_gain, open_loop, next_action. Keep it user-friendly, concise, tied to the learner's goal, and solvable only by reopening the tutor session. NEVER mention internal tool names, raw success rates, or dry KPIs.
 
 D. DOMAIN MAINTENANCE
    - If the learner discovers a concept not in the graph, call add_concepts().

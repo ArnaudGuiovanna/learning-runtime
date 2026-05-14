@@ -51,7 +51,7 @@ func TestQueueWebhookMessage_MissingContent(t *testing.T) {
 		"scheduled_for": "2026-05-02T08:00:00Z",
 		"content":       "",
 	})
-	if !res.IsError || !strings.Contains(resultText(res), "content is required") {
+	if !res.IsError || !strings.Contains(resultText(res), "content or brief is required") {
 		t.Fatalf("got %q", resultText(res))
 	}
 }
@@ -130,6 +130,55 @@ func TestQueueWebhookMessage_HappyPath(t *testing.T) {
 	}
 }
 
+func TestQueueWebhookMessage_StructuredBrief(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerQueueWebhookMessage, "L_owner", "queue_webhook_message", map[string]any{
+		"kind":          "olm:d1",
+		"scheduled_for": "2026-05-03T13:00:00Z",
+		"brief": map[string]any{
+			"domain_id":         "d1",
+			"domain_name":       "Python",
+			"concept":           "boucles",
+			"why_now":           "La retention baisse sur les boucles, donc une reprise courte est plus rentable maintenant.",
+			"learning_gain":     "Stabiliser le concept avant de passer a des exercices plus longs.",
+			"open_loop":         "J'ai garde un mini-bug de boucle pour la prochaine session.",
+			"next_action":       "Ouvre Claude et commence par le mini-bug sur les boucles.",
+			"estimated_minutes": 8,
+			"language":          "fr",
+		},
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	pending, err := store.GetPendingWebhookMessages("L_owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending message, got %d", len(pending))
+	}
+	if !strings.Contains(pending[0].Content, `"why_now"`) || !strings.Contains(pending[0].Content, "boucles") {
+		t.Fatalf("structured brief was not persisted as JSON: %q", pending[0].Content)
+	}
+}
+
+func TestQueueWebhookMessage_StructuredBriefRejectsInternalToolNames(t *testing.T) {
+	_, deps := setupToolsTest(t)
+	res := callTool(t, deps, registerQueueWebhookMessage, "L_owner", "queue_webhook_message", map[string]any{
+		"kind":          "daily_motivation",
+		"scheduled_for": "2026-05-03T08:00:00Z",
+		"brief": map[string]any{
+			"why_now":       "On va appeler calibration_check demain.",
+			"learning_gain": "Mieux calibrer ton niveau.",
+			"open_loop":     "J'ai garde un mini-test.",
+			"next_action":   "Ouvre Claude.",
+		},
+	})
+	if !res.IsError || !strings.Contains(resultText(res), "internal tool names") {
+		t.Fatalf("got %q", resultText(res))
+	}
+}
+
 func TestValidWebhookKind(t *testing.T) {
 	cases := map[string]bool{
 		"daily_motivation": true,
@@ -137,6 +186,7 @@ func TestValidWebhookKind(t *testing.T) {
 		"reactivation":     true,
 		"reminder":         true,
 		"mirror_message":   true,
+		"olm:d1":           true,
 		"":                 false,
 		"spam":             false,
 	}

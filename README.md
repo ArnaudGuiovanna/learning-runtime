@@ -214,7 +214,7 @@ Tutor MCP is **chat-only**. The LLM drives the learning loop in conversation: it
 | Tool | Description |
 |------|-------------|
 | `record_session_close` | Closes session: persists optional implementation intention (Gollwitzer if-then) and returns a recap brief (concepts practiced, wins, struggles, next review, intent prompt) |
-| `queue_webhook_message` | Queues an LLM-authored Discord message (daily_motivation, daily_recap, reactivation, reminder) for the scheduler to dispatch in a future window |
+| `queue_webhook_message` | Queues a Discord nudge. Prefer the structured `brief` payload (`why_now`, `learning_gain`, `open_loop`, `next_action`) so the scheduler can render a concise learner-facing embed and track the push. |
 
 All tools accept an optional `domain_id` for multi-domain support. Without it, the most recently active (non-archived) domain is used.
 
@@ -235,7 +235,7 @@ The scheduler runs background jobs that detect nine alert types:
 - **AFFECT_NEGATIVE** — Low satisfaction or excessive difficulty on 2 consecutive sessions.
 - **TRANSFER_BLOCKED** — BKT shows mastery but transfer scores remain low across contexts.
 
-Critical alerts are delivered via Discord webhook; dedup prevents the same alert firing twice in one day. Alert computation, the dashboard, and `priority_concept` filter out concept history that no longer belongs to an active (non-archived) domain, so `delete_domain` keeps progression on disk (re-`init_domain` brings it back) without leaking into reads or webhooks.
+Discord nudges are selected for learning value, not volume. Metacognitive signals are ranked into a single structured nudge per learner/tick, and daily dedup prevents the same kind of alert from firing twice in one day. Alert computation, the dashboard, and `priority_concept` filter out concept history that no longer belongs to an active (non-archived) domain, so `delete_domain` keeps progression on disk (re-`init_domain` brings it back) without leaking into reads or webhooks.
 
 ## Motivation Engine
 
@@ -254,7 +254,7 @@ Each brief also carries a Hidi-Renninger **interest phase** (triggered → emerg
 
 ## Webhook Queue (LLM-Authored Nudges)
 
-Daily motivation (8h UTC) and daily recap (21h UTC) are **no longer composed by Go templates**. During sessions, the LLM calls `queue_webhook_message` to schedule a warm, personal message tied to the learner's goal; the scheduler dispatches from the queue within a ±30-minute window. A sober Go fallback fires only when the queue is empty. Failed sends are marked for retry; past-due messages are expired hourly.
+Daily motivation (8h UTC), OLM focus (13h UTC), and daily recap (21h UTC) are **no longer limited to plain text**. During sessions, the LLM calls `queue_webhook_message` with a structured `brief` whenever possible. The scheduler renders it as a Discord embed with a short open loop, "why now", expected learning gain, useful evidence, and the next action. Sent structured pushes are recorded in `webhook_push_log`; `get_next_activity` surfaces unresolved pushes so the next tutor session can reconnect to the Discord nudge. Failed sends are marked for retry; past-due messages are expired hourly.
 
 ## Autonomy Score
 

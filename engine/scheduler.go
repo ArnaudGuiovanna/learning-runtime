@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"tutor-mcp/db"
@@ -191,12 +192,11 @@ func (s *Scheduler) dispatchQueued(kind, alertTag string, fallback func(*models.
 
 		var payload discordPayload
 		var source string
+		var briefForLog *models.WebhookBrief
 		if item != nil && item.Content != "" {
-			payload = discordPayload{Embeds: []discordEmbed{{
-				Title:       queueKindTitle(kind),
-				Description: item.Content,
-				Color:       queueKindColor(kind),
-			}}}
+			embed, brief := embedFromWebhookContent(kind, item.Content, models.UrgencyInfo)
+			payload = discordPayload{Embeds: []discordEmbed{embed}}
+			briefForLog = brief
 			source = "queue"
 		} else if fallback != nil {
 			payload = fallback(learner)
@@ -214,6 +214,15 @@ func (s *Scheduler) dispatchQueued(kind, alertTag string, fallback func(*models.
 		}
 		if item != nil {
 			_ = s.store.MarkWebhookSent(item.ID, learner.ID, now)
+		}
+		if briefForLog != nil {
+			queueID := int64(0)
+			if item != nil {
+				queueID = item.ID
+			}
+			if _, err := s.store.CreateWebhookPushLog(learner.ID, queueID, briefForLog, now); err != nil {
+				s.logger.Warn("scheduler: push log", "err", err, "learner", learner.ID, "kind", kind)
+			}
 		}
 		s.store.CreateScheduledAlert(learner.ID, alertTag, "", time.Now())
 		s.logger.Info("scheduler: dispatched", "learner", learner.ID, "kind", kind, "source", source)
@@ -245,6 +254,166 @@ func queueKindColor(kind string) int {
 		return 0xFEE75C
 	}
 	return 0x99AAB5
+}
+
+func embedFromWebhookContent(kind, content string, urgency models.AlertUrgency) (discordEmbed, *models.WebhookBrief) {
+	if brief, ok := models.DecodeWebhookBrief(content, kind); ok {
+		return discordEmbedFromBrief(*brief, urgency), brief
+	}
+	return discordEmbed{
+		Title:       queueKindTitle(kind),
+		Description: trimDiscord(content, 1400),
+		Color:       queueKindColor(kind),
+	}, nil
+}
+
+func discordEmbedFromBrief(brief models.WebhookBrief, urgency models.AlertUrgency) discordEmbed {
+	brief.Normalize(brief.Kind)
+	title := briefTitle(brief, urgency)
+	labels := briefLabels(brief.Language)
+	description := brief.OpenLoop
+	if description == "" {
+		description = brief.WhyNow
+	}
+	if description == "" {
+		description = brief.LearningGain
+	}
+	if description == "" {
+		description = "Un signal utile est pret pour ta prochaine session."
+	}
+
+	fields := []discordField{}
+	addField := func(name, value string, inline bool) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		fields = append(fields, discordField{
+			Name:   name,
+			Value:  trimDiscord(value, 900),
+			Inline: inline,
+		})
+	}
+	addField(labels.WhyNow, brief.WhyNow, false)
+	addField(labels.LearningGain, brief.LearningGain, false)
+	addField(labels.Evidence, formatEvidence(brief.Evidence), false)
+	addField(labels.GoalLink, brief.GoalLink, false)
+	addField(labels.NextAction, actionWithMinutes(brief.NextAction, brief.EstimatedMinutes), false)
+
+	footer := &discordFooter{Text: labels.Footer}
+	return discordEmbed{
+		Title:       title,
+		Description: trimDiscord(description, 900),
+		Color:       colorForUrgencyOrKind(urgency, brief.Kind),
+		Fields:      fields,
+		Footer:      footer,
+	}
+}
+
+type webhookBriefLabels struct {
+	WhyNow       string
+	LearningGain string
+	Evidence     string
+	GoalLink     string
+	NextAction   string
+	Footer       string
+}
+
+func briefLabels(language string) webhookBriefLabels {
+	if strings.HasPrefix(strings.ToLower(language), "fr") || language == "" {
+		return webhookBriefLabels{
+			WhyNow:       "Pourquoi maintenant",
+			LearningGain: "Gain d'apprentissage",
+			Evidence:     "Indices utiles",
+			GoalLink:     "Lien avec ton objectif",
+			NextAction:   "Prochaine action",
+			Footer:       "Message concis: le defi se resout dans la session, pas dans Discord.",
+		}
+	}
+	return webhookBriefLabels{
+		WhyNow:       "Why now",
+		LearningGain: "Learning gain",
+		Evidence:     "Useful signals",
+		GoalLink:     "Goal link",
+		NextAction:   "Next action",
+		Footer:       "Short nudge: solve the challenge in the tutor session, not in Discord.",
+	}
+}
+
+func briefTitle(brief models.WebhookBrief, urgency models.AlertUrgency) string {
+	subject := brief.Concept
+	if subject == "" {
+		subject = brief.DomainName
+	}
+	if subject == "" {
+		subject = brief.Trigger
+	}
+	if subject == "" {
+		subject = "prochaine session"
+	}
+	switch urgency {
+	case models.UrgencyCritical:
+		return "A reprendre vite - " + subject
+	case models.UrgencyWarning:
+		return "Focus utile - " + subject
+	default:
+		if brief.Trigger != "" {
+			return brief.Trigger + " - " + subject
+		}
+		return "Nudge d'apprentissage - " + subject
+	}
+}
+
+func colorForUrgencyOrKind(urgency models.AlertUrgency, kind string) int {
+	switch urgency {
+	case models.UrgencyCritical:
+		return colorCritical
+	case models.UrgencyWarning:
+		return colorWarning
+	}
+	if strings.HasPrefix(kind, "olm") {
+		return colorInfo
+	}
+	return queueKindColor(kind)
+}
+
+func formatEvidence(evidence []string) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	if len(evidence) > 3 {
+		evidence = evidence[:3]
+	}
+	lines := make([]string, 0, len(evidence))
+	for _, e := range evidence {
+		e = strings.TrimSpace(e)
+		if e != "" {
+			lines = append(lines, "- "+e)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func actionWithMinutes(action string, minutes int) string {
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return ""
+	}
+	if minutes <= 0 {
+		return action
+	}
+	return fmt.Sprintf("%s (~%d min)", action, minutes)
+}
+
+func trimDiscord(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:max]
+	}
+	return strings.TrimSpace(s[:max-1]) + "…"
 }
 
 // ─── Sober fallback templates (no KPI, no analytics) ─────────────────────────
@@ -293,9 +462,21 @@ func (s *Scheduler) cleanupExpiredData() {
 // ─── Message Formatting ─────────────────────────────────────────────────────
 
 type discordEmbed struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Color       int    `json:"color"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Color       int            `json:"color"`
+	Fields      []discordField `json:"fields,omitempty"`
+	Footer      *discordFooter `json:"footer,omitempty"`
+}
+
+type discordField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type discordFooter struct {
+	Text string `json:"text"`
 }
 
 type discordPayload struct {
@@ -406,9 +587,9 @@ func (s *Scheduler) sendOLM() {
 			continue
 		}
 
-		var embeds []discordEmbed
+		var prepared []preparedWebhookEmbed
 		for _, d := range domains {
-			if len(embeds) >= 3 {
+			if len(prepared) >= 3 {
 				break
 			}
 			snap, err := BuildOLMSnapshot(s.store, learner.ID, d.ID)
@@ -423,44 +604,58 @@ func (s *Scheduler) sendOLM() {
 			kind := "olm:" + d.ID
 			item, _ := s.store.DequeueNextPending(learner.ID, kind, now, 30*time.Minute)
 			if item != nil && item.Content != "" {
-				embeds = append(embeds, embedFromQueueItem(item, snap.FocusUrgency))
-				_ = s.store.MarkWebhookSent(item.ID, learner.ID, now)
+				embed, brief := embedFromWebhookContent(kind, item.Content, snap.FocusUrgency)
+				prepared = append(prepared, preparedWebhookEmbed{Embed: embed, Item: item, Brief: brief})
 			} else {
-				embeds = append(embeds, fromExportedEmbed(FormatOLMEmbed(snap)))
+				brief := BuildOLMNudgeBrief(snap)
+				prepared = append(prepared, preparedWebhookEmbed{Embed: discordEmbedFromBrief(brief, snap.FocusUrgency), Brief: &brief})
 			}
 		}
 
-		if len(embeds) == 0 {
+		if len(prepared) == 0 {
 			continue
+		}
+		embeds := make([]discordEmbed, 0, len(prepared))
+		for _, p := range prepared {
+			embeds = append(embeds, p.Embed)
 		}
 
 		if err := s.sendDiscordEmbed(learner.WebhookURL, discordPayload{Embeds: embeds}); err != nil {
 			s.logger.Error("scheduler: olm webhook", "err", err, "learner", learner.ID)
 			continue
 		}
+		for _, p := range prepared {
+			queueID := int64(0)
+			if p.Item != nil {
+				queueID = p.Item.ID
+				_ = s.store.MarkWebhookSent(p.Item.ID, learner.ID, now)
+			}
+			if p.Brief != nil {
+				if _, err := s.store.CreateWebhookPushLog(learner.ID, queueID, p.Brief, now); err != nil {
+					s.logger.Warn("scheduler: olm push log", "err", err, "learner", learner.ID)
+				}
+			}
+		}
 		_ = s.store.CreateScheduledAlert(learner.ID, alertKindOLM, "", now)
 		s.logger.Info("scheduler: olm dispatched", "learner", learner.ID, "embeds", len(embeds))
 	}
 }
 
-// embedFromQueueItem renders a queued LLM-authored OLM message. The content
-// is used as-is for Description; the title/color come from FocusUrgency for
-// visual consistency with the Go fallback.
+type preparedWebhookEmbed struct {
+	Embed discordEmbed
+	Item  *models.WebhookQueueItem
+	Brief *models.WebhookBrief
+}
+
+// embedFromQueueItem renders a queued LLM-authored OLM message. Structured
+// WebhookBrief content gets a pedagogical Discord layout; legacy text is used
+// as-is for backwards compatibility.
 func embedFromQueueItem(item *models.WebhookQueueItem, urgency models.AlertUrgency) discordEmbed {
-	title := "🧭 Current state"
-	color := colorInfo
-	switch urgency {
-	case models.UrgencyCritical:
-		title = "🚨 State — one concept needs attention now"
-		color = colorCritical
-	case models.UrgencyWarning:
-		color = colorWarning
+	if item == nil {
+		return discordEmbed{}
 	}
-	return discordEmbed{
-		Title:       title,
-		Description: item.Content,
-		Color:       color,
-	}
+	embed, _ := embedFromWebhookContent(item.Kind, item.Content, urgency)
+	return embed
 }
 
 // alertKindOLM is the alert tag used by sendOLM for daily-dedup checks

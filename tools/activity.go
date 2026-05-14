@@ -123,6 +123,7 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			}
 		}
 		prefetchMs := time.Since(prefetchStart).Milliseconds()
+		extra := map[string]any{}
 
 		// Route to next activity through the regulation pipeline, or through
 		// the explicit review override when the learner asks to revise.
@@ -157,6 +158,19 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 			deps.Logger.Error("orchestrator failed", "err", orchErr, "learner", learnerID, "domain", domain.ID)
 			r, _ := errorResult("could not compute next activity")
 			return r, nil, nil
+		}
+		pushSince := now.Add(-7 * 24 * time.Hour)
+		activeWebhookNudge, _ := deps.Store.GetLatestOpenWebhookPush(learnerID, domain.ID, pushSince)
+		_ = deps.Store.MarkWebhookPushSessionOpened(learnerID, now, pushSince)
+		if activeWebhookNudge != nil {
+			extra["active_webhook_nudge"] = activeWebhookNudge
+			if activeWebhookNudge.OpenLoop != "" || activeWebhookNudge.NextAction != "" {
+				activity.PromptForLLM += fmt.Sprintf(
+					"\nThe learner may be returning from a Discord nudge. Start by reconnecting to this learner-facing open loop without naming internal tools: %s %s",
+					activeWebhookNudge.OpenLoop,
+					activeWebhookNudge.NextAction,
+				)
+			}
 		}
 		overrideResult := LearningNegotiationOverrideConsumeResult{Status: LearningNegotiationOverrideConsumeNone}
 		if overrideActivity, consumed, err := ConsumeLearningNegotiationOverride(deps.Store, learnerID, domain, activity, alerts, now); err != nil {
@@ -322,7 +336,6 @@ func registerGetNextActivity(server *mcp.Server, deps *Deps) {
 		// the pre-fade behaviour: no fade_params key, no mutation
 		// of motivation_brief. See
 		// docs/regulation-design/06-fade-controller.md.
-		extra := map[string]any{}
 		if regulationFadeEnabled() {
 			autonomyMetrics := engine.ComputeAutonomyMetrics(engine.AutonomyInput{
 				Interactions:    allInteractions,

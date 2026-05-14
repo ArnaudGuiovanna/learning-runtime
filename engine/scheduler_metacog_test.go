@@ -114,12 +114,10 @@ func TestDispatchMetacognitiveAlerts_NoOpWithoutTriggerState(t *testing.T) {
 	s.dispatchMetacognitiveAlerts()
 }
 
-// TestDispatchMetacognitiveAlerts_HandlesMultipleKinds ensures that when
-// several kinds fire on the same tick we enqueue + drain each
-// independently. AFFECT_NEGATIVE (from satisfaction) plus
-// CALIBRATION_DIVERGING (from a high-bias calibration record) is the
-// minimal non-trivial multi-kind setup.
-func TestDispatchMetacognitiveAlerts_HandlesMultipleKinds(t *testing.T) {
+// TestDispatchMetacognitiveAlerts_SelectsHighestValueKind ensures that when
+// several metacognitive signals fire on the same tick, the planner emits one
+// strong learner-facing nudge instead of a bundle of weak Discord messages.
+func TestDispatchMetacognitiveAlerts_SelectsHighestValueKind(t *testing.T) {
 	allowAnyURL(t)
 	withoutBackoff(t)
 
@@ -166,21 +164,24 @@ func TestDispatchMetacognitiveAlerts_HandlesMultipleKinds(t *testing.T) {
 	s := schedulerForTest(store)
 	s.dispatchMetacognitiveAlerts()
 
-	// Both kinds should have queue rows (independent per kind).
-	for _, kind := range []string{"metacog_affect", "metacog_calibration"} {
-		var c int
-		if err := rawDB.QueryRow(
-			`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = ? AND kind = ?`,
-			learnerID, kind,
-		).Scan(&c); err != nil {
-			t.Fatalf("count %s: %v", kind, err)
-		}
-		if c != 1 {
-			t.Errorf("queue rows for %s = %d, want 1", kind, c)
-		}
+	var calibrationRows, affectRows int
+	if err := rawDB.QueryRow(
+		`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = ? AND kind = ?`,
+		learnerID, "metacog_calibration",
+	).Scan(&calibrationRows); err != nil {
+		t.Fatalf("count calibration: %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
-		t.Errorf("webhook hits = %d, want 2 (one per kind)", got)
+	if err := rawDB.QueryRow(
+		`SELECT COUNT(*) FROM webhook_message_queue WHERE learner_id = ? AND kind = ?`,
+		learnerID, "metacog_affect",
+	).Scan(&affectRows); err != nil {
+		t.Fatalf("count affect: %v", err)
+	}
+	if calibrationRows != 1 || affectRows != 0 {
+		t.Errorf("queue rows calibration=%d affect=%d, want calibration=1 affect=0", calibrationRows, affectRows)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("webhook hits = %d, want 1", got)
 	}
 }
 

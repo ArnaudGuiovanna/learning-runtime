@@ -43,6 +43,119 @@ func (s *Store) EnqueueWebhookMessage(learnerID, kind, content string, scheduled
 	return id, nil
 }
 
+// CreateWebhookPushLog records a learner-facing push after the webhook send
+// succeeds. queueID can be zero for Go fallback messages that did not originate
+// from webhook_message_queue.
+func (s *Store) CreateWebhookPushLog(learnerID string, queueID int64, brief *models.WebhookBrief, pushedAt time.Time) (int64, error) {
+	if learnerID == "" {
+		return 0, fmt.Errorf("learner_id is required")
+	}
+	if brief == nil {
+		return 0, fmt.Errorf("webhook brief is required")
+	}
+	brief.Normalize(brief.Kind)
+	if brief.Kind == "" {
+		return 0, fmt.Errorf("kind is required")
+	}
+	if pushedAt.IsZero() {
+		pushedAt = time.Now().UTC()
+	}
+	result, err := s.db.Exec(
+		`INSERT INTO webhook_push_log
+		 (learner_id, queue_id, kind, domain_id, domain_name, concept, trigger_text,
+		  pedagogical_intent, learning_gain, open_loop, next_action, pushed_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		learnerID, queueID, brief.Kind, brief.DomainID, brief.DomainName, brief.Concept,
+		brief.Trigger, brief.PedagogicalIntent, brief.LearningGain, brief.OpenLoop,
+		brief.NextAction, pushedAt.UTC(), time.Now().UTC(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("create webhook push log: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("get webhook push log id: %w", err)
+	}
+	return id, nil
+}
+
+// GetLatestOpenWebhookPush returns the newest unresolved pedagogical push for
+// a learner. If domainID is provided, global pushes with an empty domain_id
+// and matching domain pushes are both eligible.
+func (s *Store) GetLatestOpenWebhookPush(learnerID, domainID string, since time.Time) (*models.WebhookPushLog, error) {
+	query := `SELECT id, learner_id, queue_id, kind, domain_id, domain_name, concept,
+		         trigger_text, pedagogical_intent, learning_gain, open_loop, next_action,
+		         pushed_at, opened_session_at, concept_addressed, created_at
+		  FROM webhook_push_log
+		  WHERE learner_id = ?
+		    AND concept_addressed = 0
+		    AND pushed_at >= ?`
+	args := []any{learnerID, since.UTC()}
+	if domainID != "" {
+		query += ` AND (domain_id = '' OR domain_id = ?)`
+		args = append(args, domainID)
+	}
+	query += ` ORDER BY pushed_at DESC LIMIT 1`
+	row := s.db.QueryRow(query, args...)
+	push, err := scanWebhookPushLog(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get latest webhook push: %w", err)
+	}
+	return push, nil
+}
+
+// MarkWebhookPushSessionOpened notes that a learner returned after a push.
+// It intentionally does not mark concept_addressed; that happens only when an
+// interaction touches the pushed concept.
+func (s *Store) MarkWebhookPushSessionOpened(learnerID string, openedAt, since time.Time) error {
+	if openedAt.IsZero() {
+		openedAt = time.Now().UTC()
+	}
+	_, err := s.db.Exec(
+		`UPDATE webhook_push_log
+		    SET opened_session_at = COALESCE(opened_session_at, ?),
+		        concept_addressed = CASE WHEN concept = '' THEN 1 ELSE concept_addressed END
+		  WHERE learner_id = ?
+		    AND opened_session_at IS NULL
+		    AND pushed_at >= ?`,
+		openedAt.UTC(), learnerID, since.UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("mark webhook push session opened: %w", err)
+	}
+	return nil
+}
+
+// MarkWebhookPushConceptAddressed closes open-loop pushes whose concept was
+// actually worked on in a later session.
+func (s *Store) MarkWebhookPushConceptAddressed(learnerID, domainID, concept string, addressedAt, since time.Time) error {
+	if concept == "" {
+		return nil
+	}
+	if addressedAt.IsZero() {
+		addressedAt = time.Now().UTC()
+	}
+	query := `UPDATE webhook_push_log
+		     SET opened_session_at = COALESCE(opened_session_at, ?),
+		         concept_addressed = 1
+		   WHERE learner_id = ?
+		     AND concept = ?
+		     AND concept_addressed = 0
+		     AND pushed_at >= ?`
+	args := []any{addressedAt.UTC(), learnerID, concept, since.UTC()}
+	if domainID != "" {
+		query += ` AND (domain_id = '' OR domain_id = ?)`
+		args = append(args, domainID)
+	}
+	if _, err := s.db.Exec(query, args...); err != nil {
+		return fmt.Errorf("mark webhook push concept addressed: %w", err)
+	}
+	return nil
+}
+
 // DequeueNextPending returns the highest-priority pending message for a learner/kind
 // whose scheduled_for is within [now-window, now+window] and not expired.
 // Returns (nil, nil) if nothing is pending.
@@ -177,4 +290,25 @@ func scanWebhookQueueItemRows(rows *sql.Rows) (*models.WebhookQueueItem, error) 
 		item.SentAt = &t
 	}
 	return item, nil
+}
+
+func scanWebhookPushLog(row *sql.Row) (*models.WebhookPushLog, error) {
+	push := &models.WebhookPushLog{}
+	var openedAt sql.NullTime
+	var conceptAddressed int
+	err := row.Scan(
+		&push.ID, &push.LearnerID, &push.QueueID, &push.Kind, &push.DomainID,
+		&push.DomainName, &push.Concept, &push.Trigger, &push.PedagogicalIntent,
+		&push.LearningGain, &push.OpenLoop, &push.NextAction, &push.PushedAt,
+		&openedAt, &conceptAddressed, &push.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if openedAt.Valid {
+		t := openedAt.Time
+		push.OpenedSessionAt = &t
+	}
+	push.ConceptAddressed = conceptAddressed != 0
+	return push, nil
 }

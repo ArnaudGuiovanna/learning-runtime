@@ -40,9 +40,9 @@ func TestSendOLM_DispatchesFallbackWhenQueueEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		got := string(body)
-		if !strings.Contains(got, "Current focus") &&
-			!strings.Contains(got, "Next milestone") &&
-			!strings.Contains(got, "needs attention now") {
+		if !strings.Contains(got, "Pourquoi maintenant") &&
+			!strings.Contains(got, "Prochaine action") &&
+			!strings.Contains(got, "Focus utile") {
 			t.Errorf("expected an OLM body, got: %s", got)
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -73,6 +73,13 @@ func TestSendOLM_DispatchesFallbackWhenQueueEmpty(t *testing.T) {
 	sent, _ := store.WasAlertSentToday("L1", alertKindOLM)
 	if !sent {
 		t.Errorf("OLM dispatch should mark sent today")
+	}
+	push, err := store.GetLatestOpenWebhookPush("L1", "", time.Now().UTC().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("GetLatestOpenWebhookPush: %v", err)
+	}
+	if push == nil {
+		t.Fatalf("OLM dispatch should record a push log")
 	}
 }
 

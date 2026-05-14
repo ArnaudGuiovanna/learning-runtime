@@ -44,6 +44,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"transfer_records",
 		"implementation_intentions",
 		"webhook_message_queue",
+		"webhook_push_log",
 		"pedagogical_snapshots",
 	}
 	for _, table := range expectedTables {
@@ -70,6 +71,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"idx_interactions_misconception",
 		"idx_impl_intent_learner",
 		"idx_wmq_dispatch",
+		"idx_webhook_push_log_open",
 		"idx_pedagogical_snapshots_learner_created",
 		"idx_pedagogical_snapshots_domain_concept",
 	}

@@ -142,6 +142,49 @@ func TestGetActiveLearners(t *testing.T) {
 	}
 }
 
+func TestWebhookPushLogLifecycle(t *testing.T) {
+	store := setupTestDB(t)
+	now := time.Now().UTC()
+	brief := &models.WebhookBrief{
+		Kind:              "olm:d1",
+		DomainID:          "d1",
+		DomainName:        "Python",
+		Concept:           "boucles",
+		Trigger:           "Focus utile",
+		PedagogicalIntent: "reprendre le bon concept",
+		LearningGain:      "Stabiliser une connaissance fragile.",
+		OpenLoop:          "J'ai garde un mini-bug de boucle.",
+		NextAction:        "Ouvre Claude et reprends les boucles.",
+	}
+	if _, err := store.CreateWebhookPushLog("L1", 42, brief, now); err != nil {
+		t.Fatalf("CreateWebhookPushLog: %v", err)
+	}
+	push, err := store.GetLatestOpenWebhookPush("L1", "d1", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("GetLatestOpenWebhookPush: %v", err)
+	}
+	if push == nil || push.Concept != "boucles" || push.QueueID != 42 {
+		t.Fatalf("unexpected push: %+v", push)
+	}
+	if err := store.MarkWebhookPushSessionOpened("L1", now.Add(time.Minute), now.Add(-time.Hour)); err != nil {
+		t.Fatalf("MarkWebhookPushSessionOpened: %v", err)
+	}
+	push, _ = store.GetLatestOpenWebhookPush("L1", "d1", now.Add(-time.Hour))
+	if push == nil || push.OpenedSessionAt == nil {
+		t.Fatalf("expected opened session marker, got %+v", push)
+	}
+	if err := store.MarkWebhookPushConceptAddressed("L1", "d1", "boucles", now.Add(2*time.Minute), now.Add(-time.Hour)); err != nil {
+		t.Fatalf("MarkWebhookPushConceptAddressed: %v", err)
+	}
+	push, err = store.GetLatestOpenWebhookPush("L1", "d1", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("GetLatestOpenWebhookPush after address: %v", err)
+	}
+	if push != nil {
+		t.Fatalf("addressed push should no longer be open: %+v", push)
+	}
+}
+
 // ─── Refresh tokens ─────────────────────────────────────────────────────────
 
 func TestRefreshTokenLifecycle(t *testing.T) {

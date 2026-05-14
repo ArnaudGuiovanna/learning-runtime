@@ -16,11 +16,12 @@ import (
 )
 
 type QueueWebhookMessageParams struct {
-	Kind         string `json:"kind" jsonschema:"nudge type: daily_motivation | daily_recap | reactivation | reminder | mirror_message | olm:<domain_id> (per-domain OLM snapshot)"`
-	ScheduledFor string `json:"scheduled_for" jsonschema:"ISO 8601 UTC timestamp for the delivery window (e.g. 2026-04-13T08:00:00Z)"`
-	ExpiresAt    string `json:"expires_at,omitempty" jsonschema:"ISO 8601 UTC timestamp after which the message must not be sent"`
-	Content      string `json:"content" jsonschema:"markdown content ready to post to the Discord webhook (max ~300 characters recommended)"`
-	Priority     int    `json:"priority,omitempty" jsonschema:"priority (higher = more important, default 0)"`
+	Kind         string               `json:"kind" jsonschema:"nudge type: daily_motivation | daily_recap | reactivation | reminder | mirror_message | olm:<domain_id> (per-domain OLM snapshot)"`
+	ScheduledFor string               `json:"scheduled_for" jsonschema:"ISO 8601 UTC timestamp for the delivery window (e.g. 2026-04-13T08:00:00Z)"`
+	ExpiresAt    string               `json:"expires_at,omitempty" jsonschema:"ISO 8601 UTC timestamp after which the message must not be sent"`
+	Content      string               `json:"content,omitempty" jsonschema:"legacy markdown content ready to post to the Discord webhook; prefer brief for pedagogical nudges"`
+	Brief        *models.WebhookBrief `json:"brief,omitempty" jsonschema:"structured learner-facing nudge: why_now, learning_gain, open_loop, next_action; concise, user-friendly, no internal tool names"`
+	Priority     int                  `json:"priority,omitempty" jsonschema:"priority (higher = more important, default 0)"`
 }
 
 const maxWebhookContentLen = 1500
@@ -45,12 +46,27 @@ func registerQueueWebhookMessage(server *mcp.Server, deps *Deps) {
 			r, _ := errorResult("scheduled_for is required")
 			return r, nil, nil
 		}
-		if params.Content == "" {
-			r, _ := errorResult("content is required")
+		content := strings.TrimSpace(params.Content)
+		if params.Brief != nil {
+			brief := *params.Brief
+			brief.Normalize(params.Kind)
+			if err := validateWebhookBrief(brief); err != nil {
+				r, _ := errorResult(err.Error())
+				return r, nil, nil
+			}
+			encoded, err := models.EncodeWebhookBrief(brief)
+			if err != nil {
+				r, _ := errorResult(fmt.Sprintf("invalid brief: %v", err))
+				return r, nil, nil
+			}
+			content = encoded
+		}
+		if content == "" {
+			r, _ := errorResult("content or brief is required")
 			return r, nil, nil
 		}
-		if len(params.Content) > maxWebhookContentLen {
-			r, _ := errorResult(fmt.Sprintf("content too long (%d chars, max %d)", len(params.Content), maxWebhookContentLen))
+		if len(content) > maxWebhookContentLen {
+			r, _ := errorResult(fmt.Sprintf("content too long (%d chars, max %d)", len(content), maxWebhookContentLen))
 			return r, nil, nil
 		}
 
@@ -70,7 +86,7 @@ func registerQueueWebhookMessage(server *mcp.Server, deps *Deps) {
 			expiresAt = parsed
 		}
 
-		id, err := deps.Store.EnqueueWebhookMessage(learnerID, params.Kind, params.Content, scheduledFor, expiresAt, params.Priority)
+		id, err := deps.Store.EnqueueWebhookMessage(learnerID, params.Kind, content, scheduledFor, expiresAt, params.Priority)
 		if err != nil {
 			deps.Logger.Error("queue_webhook_message: enqueue failed", "err", err, "learner", learnerID)
 			r, _ := errorResult(fmt.Sprintf("failed to enqueue: %v", err))
@@ -100,6 +116,85 @@ func validWebhookKind(k string) bool {
 	// each with its own state snapshot.
 	if strings.HasPrefix(k, "olm:") && len(k) > len("olm:") {
 		return true
+	}
+	return false
+}
+
+func validateWebhookBrief(brief models.WebhookBrief) error {
+	required := []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{"brief.why_now", brief.WhyNow, 320},
+		{"brief.learning_gain", brief.LearningGain, 260},
+		{"brief.open_loop", brief.OpenLoop, 260},
+		{"brief.next_action", brief.NextAction, 220},
+	}
+	for _, f := range required {
+		if strings.TrimSpace(f.value) == "" {
+			return fmt.Errorf("%s is required", f.name)
+		}
+		if err := validateString(f.name, f.value, f.max); err != nil {
+			return err
+		}
+		if containsInternalToolName(f.value) {
+			return fmt.Errorf("%s must be learner-facing and must not mention internal tool names", f.name)
+		}
+	}
+	optional := []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{"brief.domain_id", brief.DomainID, maxShortLabelLen},
+		{"brief.domain_name", brief.DomainName, maxShortLabelLen},
+		{"brief.concept", brief.Concept, maxShortLabelLen},
+		{"brief.trigger", brief.Trigger, 120},
+		{"brief.pedagogical_intent", brief.PedagogicalIntent, 240},
+		{"brief.goal_link", brief.GoalLink, 280},
+		{"brief.language", brief.Language, maxShortLabelLen},
+		{"brief.tone", brief.Tone, 120},
+	}
+	for _, f := range optional {
+		if err := validateString(f.name, f.value, f.max); err != nil {
+			return err
+		}
+		if containsInternalToolName(f.value) {
+			return fmt.Errorf("%s must be learner-facing and must not mention internal tool names", f.name)
+		}
+	}
+	if len(brief.Evidence) > 3 {
+		return fmt.Errorf("brief.evidence must contain at most 3 concise items")
+	}
+	for i, e := range brief.Evidence {
+		name := fmt.Sprintf("brief.evidence[%d]", i)
+		if err := validateString(name, e, 180); err != nil {
+			return err
+		}
+		if containsInternalToolName(e) {
+			return fmt.Errorf("%s must be learner-facing and must not mention internal tool names", name)
+		}
+	}
+	if brief.EstimatedMinutes < 0 || brief.EstimatedMinutes > 90 {
+		return fmt.Errorf("brief.estimated_minutes must be between 0 and 90")
+	}
+	return nil
+}
+
+func containsInternalToolName(s string) bool {
+	s = strings.ToLower(s)
+	for _, marker := range []string{
+		"get_",
+		"record_",
+		"queue_webhook_message",
+		"calibration_check",
+		"feynman_challenge",
+		"transfer_challenge",
+	} {
+		if strings.Contains(s, marker) {
+			return true
+		}
 	}
 	return false
 }

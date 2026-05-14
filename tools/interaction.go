@@ -185,6 +185,8 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 
 		// Update last active
 		_ = deps.Store.UpdateLastActive(learnerID)
+		pushNow := time.Now().UTC()
+		_ = deps.Store.MarkWebhookPushConceptAddressed(learnerID, domain.ID, params.Concept, pushNow, pushNow.Add(-7*24*time.Hour))
 
 		deps.Logger.Info("interaction recorded",
 			"learner", learnerID,

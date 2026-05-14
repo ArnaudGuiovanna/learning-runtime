@@ -204,6 +204,25 @@ var idempotentMigrations = []string{
 )`,
 	`CREATE INDEX IF NOT EXISTS idx_pedagogical_snapshots_learner_created ON pedagogical_snapshots(learner_id, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_pedagogical_snapshots_domain_concept ON pedagogical_snapshots(learner_id, domain_id, concept, created_at)`,
+	`CREATE TABLE IF NOT EXISTS webhook_push_log (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    learner_id           TEXT    NOT NULL REFERENCES learners(id),
+    queue_id             INTEGER DEFAULT 0,
+    kind                 TEXT    NOT NULL,
+    domain_id            TEXT    DEFAULT '',
+    domain_name          TEXT    DEFAULT '',
+    concept              TEXT    DEFAULT '',
+    trigger_text         TEXT    DEFAULT '',
+    pedagogical_intent   TEXT    DEFAULT '',
+    learning_gain        TEXT    DEFAULT '',
+    open_loop            TEXT    DEFAULT '',
+    next_action          TEXT    DEFAULT '',
+    pushed_at            DATETIME NOT NULL,
+    opened_session_at    DATETIME,
+    concept_addressed    INTEGER DEFAULT 0,
+    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_webhook_push_log_open ON webhook_push_log(learner_id, domain_id, concept_addressed, pushed_at)`,
 }
 
 // Migrate brings the database schema up to the version expected by this build.
