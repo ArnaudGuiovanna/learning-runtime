@@ -72,8 +72,8 @@ func TestGetDashboardState_ColorEnumIsEnglish(t *testing.T) {
 	if _, ok := out["global_progress_percent"].(float64); !ok {
 		t.Fatalf("expected global_progress_percent key, got %v", out)
 	}
-	if out["global_progress_percent"] != out["global_progress"] {
-		t.Fatalf("expected global_progress alias to match global_progress_percent, got %v vs %v", out["global_progress"], out["global_progress_percent"])
+	if _, ok := out["global_progress"]; ok {
+		t.Fatalf("did not expect legacy global_progress alias in result: %v", out)
 	}
 	domains, ok := out["domains"].([]any)
 	if !ok || len(domains) == 0 {

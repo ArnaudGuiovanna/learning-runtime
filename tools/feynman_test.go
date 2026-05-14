@@ -66,11 +66,11 @@ func TestFeynmanChallenge_EligibleHappyPath(t *testing.T) {
 	if out["eligible"] != true {
 		t.Fatalf("expected eligible=true, got %v", out)
 	}
-	if out["concept_id"] != "calc" {
-		t.Fatalf("concept_id mismatch: %v", out["concept_id"])
-	}
 	if out["concept"] != "calc" {
 		t.Fatalf("concept mismatch: %v", out["concept"])
+	}
+	if _, ok := out["concept_id"]; ok {
+		t.Fatalf("did not expect legacy concept_id alias in result: %v", out)
 	}
 }
 
@@ -86,7 +86,10 @@ func TestFeynmanChallenge_AcceptsLegacyConceptID(t *testing.T) {
 		t.Fatalf("expected success, got %q", resultText(res))
 	}
 	out := decodeResult(t, res)
-	if out["concept"] != "legacy_calc" || out["concept_id"] != "legacy_calc" {
-		t.Fatalf("expected canonical and legacy concept keys, got %v", out)
+	if out["concept"] != "legacy_calc" {
+		t.Fatalf("expected canonical concept key, got %v", out)
+	}
+	if _, ok := out["concept_id"]; ok {
+		t.Fatalf("did not expect legacy concept_id alias in result: %v", out)
 	}
 }

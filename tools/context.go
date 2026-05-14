@@ -24,7 +24,7 @@ type GetLearnerContextParams struct {
 func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_learner_context",
-		Description: "Retrieve the full learner context for session start.",
+		Description: "Retrieve the full learner context for session start. When priority_concept is set, priority_concept_domain_id identifies the domain clients should pass when following it.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params GetLearnerContextParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -46,12 +46,22 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 
 		states, _ := deps.Store.GetConceptStatesByLearner(learnerID)
 		interactions, _ := deps.Store.GetRecentInteractionsByLearner(learnerID, 10)
+		allDomains, _ := deps.Store.GetDomainsByLearner(learnerID, false)
 
 		// Filter out orphan states/interactions left over from deleted or
 		// archived domains — only surface concepts that still belong to an
 		// active domain. Without this, priority_concept and opening_message
 		// can reference ghost concepts (see bug report from cosmos client).
-		activeConcepts, _ := deps.Store.ActiveDomainConceptSet(learnerID)
+		activeConcepts := make(map[string]bool)
+		conceptDomainIDs := make(map[string]string)
+		for _, d := range allDomains {
+			for _, c := range d.Graph.Concepts {
+				activeConcepts[c] = true
+				if _, ok := conceptDomainIDs[c]; !ok {
+					conceptDomainIDs[c] = d.ID
+				}
+			}
+		}
 		states = filterStatesByConcepts(states, activeConcepts)
 		interactions = filterInteractionsByConcepts(interactions, activeConcepts)
 
@@ -71,6 +81,7 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 
 		// Today's priority: concept with lowest retention
 		var priorityConcept string
+		var priorityConceptDomainID string
 		var priorityRetention float64 = 1.0
 		for _, cs := range states {
 			if cs.CardState == "new" {
@@ -84,6 +95,7 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 			if ret < priorityRetention {
 				priorityRetention = ret
 				priorityConcept = cs.Concept
+				priorityConceptDomainID = conceptDomainIDs[cs.Concept]
 			}
 		}
 
@@ -98,13 +110,17 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 		}
 
 		// List active domains for multi-domain awareness
-		allDomains, _ := deps.Store.GetDomainsByLearner(learnerID, false)
 		var domainList []map[string]interface{}
 		for _, d := range allDomains {
+			var priorityRank interface{}
+			if d.PriorityRank != nil {
+				priorityRank = *d.PriorityRank
+			}
 			domainList = append(domainList, map[string]interface{}{
 				"domain_id":     d.ID,
 				"name":          d.Name,
 				"concept_count": len(d.Graph.Concepts),
+				"priority_rank": priorityRank,
 			})
 		}
 		if domainList == nil {
@@ -132,7 +148,7 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 			narrative = buildProgressNarrative(deps, learnerID, learner, domain)
 		}
 
-		r, _ := jsonResult(map[string]interface{}{
+		payload := map[string]interface{}{
 			"learner_id":         learnerID,
 			"objective":          learner.Objective,
 			"day_number":         dayNumber,
@@ -146,7 +162,12 @@ func registerGetLearnerContext(server *mcp.Server, deps *Deps) {
 			"domains":            domainList,
 			"archived_domains":   archivedList,
 			"progress_narrative": narrative,
-		})
+		}
+		if priorityConcept != "" {
+			payload["priority_concept_domain_id"] = priorityConceptDomainID
+		}
+
+		r, _ := jsonResult(payload)
 		return r, nil, nil
 	})
 }

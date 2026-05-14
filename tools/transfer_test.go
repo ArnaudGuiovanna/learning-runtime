@@ -66,8 +66,8 @@ func TestTransferChallenge_DefaultContextType(t *testing.T) {
 	if out["concept"] != "calc" {
 		t.Fatalf("expected concept=calc, got %v", out["concept"])
 	}
-	if out["concept_id"] != "calc" {
-		t.Fatalf("expected concept_id alias=calc, got %v", out["concept_id"])
+	if _, ok := out["concept_id"]; ok {
+		t.Fatalf("did not expect legacy concept_id alias in result: %v", out)
 	}
 	if out["context_type"] != "near" {
 		t.Fatalf("expected default context_type=near, got %v", out["context_type"])
@@ -112,8 +112,11 @@ func TestTransferChallenge_AcceptsLegacyConceptID(t *testing.T) {
 		t.Fatalf("got %q", resultText(res))
 	}
 	out := decodeResult(t, res)
-	if out["concept"] != "legacy_calc" || out["concept_id"] != "legacy_calc" {
-		t.Fatalf("expected canonical and legacy concept keys, got %v", out)
+	if out["concept"] != "legacy_calc" {
+		t.Fatalf("expected canonical concept key, got %v", out)
+	}
+	if _, ok := out["concept_id"]; ok {
+		t.Fatalf("did not expect legacy concept_id alias in result: %v", out)
 	}
 }
 

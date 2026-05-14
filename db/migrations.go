@@ -102,6 +102,9 @@ var alterMigrations = []string{
 	// scoring evidence instead of only the boolean success flag.
 	`ALTER TABLE interactions ADD COLUMN rubric_json TEXT`,
 	`ALTER TABLE interactions ADD COLUMN rubric_score_json TEXT`,
+	// Issue #158: explicit learner-controlled domain priority. Nullable so
+	// existing domains keep the historical created_at DESC routing fallback.
+	`ALTER TABLE domains ADD COLUMN priority_rank INTEGER`,
 }
 
 // idempotentMigrations are CREATE TABLE/INDEX IF NOT EXISTS statements that

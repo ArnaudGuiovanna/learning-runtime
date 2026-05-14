@@ -89,6 +89,7 @@ TOOLS (reference)
 - update_learner_profile(): persistent learner metadata (device, objective, language, calibration_bias, affect_baseline, autonomy_score)
 - get_misconceptions(): list detected misconceptions per concept
 - get_olm_snapshot(): transparent snapshot of the learning state
+- set_domain_priority(domain_id, rank): set domain routing priority; rank 1 is highest, lower ranks win, unranked domains fall back to newest created_at
 - archive_domain(): archive a domain; preserves progress
 - unarchive_domain(): restore an archived domain
 - delete_domain(): permanently delete a domain (concept_states and interactions preserved)

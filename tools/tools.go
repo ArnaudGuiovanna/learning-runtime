@@ -164,6 +164,7 @@ func RegisterTools(server *mcp.Server, deps *Deps) {
 	registerTransferChallenge(server, deps)
 	registerRecordTransferResult(server, deps)
 	registerLearningNegotiation(server, deps)
+	registerSetDomainPriority(server, deps)
 	registerArchiveDomain(server, deps)
 	registerUnarchiveDomain(server, deps)
 	registerDeleteDomain(server, deps)

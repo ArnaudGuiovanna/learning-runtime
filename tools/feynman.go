@@ -80,7 +80,6 @@ func registerFeynmanChallenge(server *mcp.Server, deps *Deps) {
 			"eligible":    true,
 			"prompt_text": promptText,
 			"concept":     concept,
-			"concept_id":  concept,
 			"instructions_for_llm": "After the learner's explanation, identify the specific conceptual gaps. " +
 				"For each gap, generate a short label and a description. " +
 				"Ask the learner for confirmation before injecting the gaps into the graph via add_concepts(). " +

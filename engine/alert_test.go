@@ -1,13 +1,66 @@
 package engine
 
 import (
+	"math"
 	"testing"
 	"time"
 
+	"tutor-mcp/algorithms"
 	"tutor-mcp/models"
 )
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func alertStateAtRetention(t *testing.T, concept string, retention float64) *models.ConceptState {
+	t.Helper()
+	return &models.ConceptState{
+		Concept:     concept,
+		Stability:   stabilityForRetention(t, retention),
+		ElapsedDays: 1,
+		PMastery:    0.50,
+		CardState:   "review",
+	}
+}
+
+func alertNonForgettingState(concept string, mastery float64) *models.ConceptState {
+	return &models.ConceptState{
+		Concept:     concept,
+		PMastery:    mastery,
+		Stability:   30,
+		ElapsedDays: 1,
+		CardState:   "review",
+	}
+}
+
+func stabilityForRetention(t *testing.T, retention float64) float64 {
+	t.Helper()
+	if retention <= 0 || retention >= 1 || math.IsNaN(retention) {
+		t.Fatalf("invalid retention target %v", retention)
+	}
+
+	low, high := 1e-9, 1.0
+	for algorithms.Retrievability(1, high) < retention {
+		high *= 2
+	}
+	for i := 0; i < 80; i++ {
+		mid := (low + high) / 2
+		if algorithms.Retrievability(1, mid) < retention {
+			low = mid
+		} else {
+			high = mid
+		}
+	}
+	return high
+}
+
+func findAlert(alerts []models.Alert, typ models.AlertType, concept string) (models.Alert, bool) {
+	for _, a := range alerts {
+		if a.Type == typ && a.Concept == concept {
+			return a, true
+		}
+	}
+	return models.Alert{}, false
+}
 
 func TestComputeAlertsForgetting(t *testing.T) {
 	states := []*models.ConceptState{
@@ -29,10 +82,58 @@ func TestComputeAlertsForgetting(t *testing.T) {
 	}
 }
 
+func TestComputeAlertsForgettingRetentionBoundaries(t *testing.T) {
+	cases := []struct {
+		name        string
+		retention   float64
+		wantAlert   bool
+		wantUrgency models.AlertUrgency
+	}{
+		{
+			name:      "just above warning threshold",
+			retention: algorithms.RetentionAlertWarningThreshold + 0.0001,
+			wantAlert: false,
+		},
+		{
+			name:        "just below warning threshold",
+			retention:   algorithms.RetentionAlertWarningThreshold - 0.0001,
+			wantAlert:   true,
+			wantUrgency: models.UrgencyWarning,
+		},
+		{
+			name:        "just above critical threshold remains warning",
+			retention:   algorithms.RetentionAlertCriticalThreshold + 0.0001,
+			wantAlert:   true,
+			wantUrgency: models.UrgencyWarning,
+		},
+		{
+			name:        "just below critical threshold",
+			retention:   algorithms.RetentionAlertCriticalThreshold - 0.0001,
+			wantAlert:   true,
+			wantUrgency: models.UrgencyCritical,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			states := []*models.ConceptState{alertStateAtRetention(t, "boundary", tc.retention)}
+			alerts := ComputeAlerts(states, nil, time.Time{})
+
+			a, found := findAlert(alerts, models.AlertForgetting, "boundary")
+			if found != tc.wantAlert {
+				t.Fatalf("FORGETTING presence: got %v, want %v (retention target %.4f)", found, tc.wantAlert, tc.retention)
+			}
+			if tc.wantAlert && a.Urgency != tc.wantUrgency {
+				t.Fatalf("FORGETTING urgency: got %s, want %s", a.Urgency, tc.wantUrgency)
+			}
+		})
+	}
+}
+
 func TestComputeAlertsMasteryReady(t *testing.T) {
-	// Stability=1.0, ElapsedDays=1 → retention ≈ 0.90 (well above 0.40), so the
-	// FORGETTING/MASTERY_READY arbitration introduced for sub-issue #54 does not
-	// suppress MASTERY_READY here.
+	// Stability=1.0, ElapsedDays=1 yields retention well above the named
+	// FORGETTING warning threshold, so FORGETTING/MASTERY_READY arbitration does
+	// not suppress MASTERY_READY here.
 	states := []*models.ConceptState{{Concept: "basics", PMastery: 0.90, Stability: 1.0, ElapsedDays: 1, CardState: "review"}}
 	alerts := ComputeAlerts(states, nil, time.Time{})
 	found := false
@@ -48,31 +149,29 @@ func TestComputeAlertsMasteryReady(t *testing.T) {
 
 // TestComputeAlertsMasteryForgettingArbitration covers the four corners of the
 // (PMastery × retention) matrix to verify the alert-level arbitration rule:
-// FORGETTING at UrgencyCritical (retention < 0.30) suppresses MASTERY_READY for
-// the same concept. FORGETTING at UrgencyWarning (0.30 ≤ retention < 0.40) does
-// NOT suppress — the learner is in a nuanced "almost mastered, slightly stale"
-// state that warrants both nudges.
+// FORGETTING at UrgencyCritical suppresses MASTERY_READY for the same concept.
+// FORGETTING at UrgencyWarning does NOT suppress — the learner is in a nuanced
+// "almost mastered, slightly stale" state that warrants both nudges.
 //
-// Threshold rationale: retention < 0.30 corresponds to the existing
-// UrgencyCritical band defined in ComputeAlerts (engine/alert.go). Retuning the
-// suppression cutoff means changing both that constant and the comment in
-// ComputeAlerts together.
+// Threshold rationale: suppression is tied to
+// algorithms.RetentionAlertCriticalThreshold; retuning the critical band retunes
+// this arbitration with it.
 func TestComputeAlertsMasteryForgettingArbitration(t *testing.T) {
 	// Retention closed-form: (1 + (19/81)*elapsed/stability)^(-0.5)
-	//   elapsed=1,  stability=1.0  → retention ≈ 0.900 (>= 0.40)
-	//   elapsed=5,  stability=0.2  → retention ≈ 0.382 (in [0.30, 0.40))
-	//   elapsed=5,  stability=0.1  → retention ≈ 0.280 (< 0.30)
+	//   elapsed=1,  stability=1.0  -> retention above warning threshold
+	//   elapsed=5,  stability=0.2  -> retention in warning band
+	//   elapsed=5,  stability=0.1  -> retention in critical band
 	masteryHigh := 0.90 // >= MasteryBKT() (0.85)
 	masteryLow := 0.50  // <  MasteryBKT()
 
 	cases := []struct {
-		name             string
-		pMastery         float64
-		stability        float64
-		elapsedDays      int
-		wantForgetting   bool
+		name                  string
+		pMastery              float64
+		stability             float64
+		elapsedDays           int
+		wantForgetting        bool
 		wantForgettingUrgency models.AlertUrgency
-		wantMasteryReady bool
+		wantMasteryReady      bool
 	}{
 		{
 			name:             "high mastery + high retention → only MASTERY_READY",
@@ -159,7 +258,7 @@ func TestComputeAlertsZPDDrift(t *testing.T) {
 		{Concept: "pointers", Success: false},
 		{Concept: "pointers", Success: false},
 	}
-	states := []*models.ConceptState{{Concept: "pointers", PMastery: 0.3, CardState: "learning"}}
+	states := []*models.ConceptState{alertNonForgettingState("pointers", 0.3)}
 	alerts := ComputeAlerts(states, interactions, time.Time{})
 	found := false
 	for _, a := range alerts {
@@ -172,13 +271,55 @@ func TestComputeAlertsZPDDrift(t *testing.T) {
 	}
 }
 
+func TestComputeAlertsForgettingCriticalSuppressesFailureZPDDrift(t *testing.T) {
+	interactions := []*models.Interaction{
+		{Concept: "pointers", Success: false},
+		{Concept: "pointers", Success: false},
+		{Concept: "pointers", Success: false},
+	}
+	cases := []struct {
+		name      string
+		retention float64
+		wantZPD   bool
+	}{
+		{
+			name:      "critical forgetting suppresses failure ZPD",
+			retention: algorithms.RetentionAlertCriticalThreshold - 0.0001,
+			wantZPD:   false,
+		},
+		{
+			name:      "warning forgetting keeps failure ZPD",
+			retention: algorithms.RetentionAlertWarningThreshold - 0.0001,
+			wantZPD:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			states := []*models.ConceptState{alertStateAtRetention(t, "pointers", tc.retention)}
+			alerts := ComputeAlerts(states, interactions, time.Time{})
+
+			if _, found := findAlert(alerts, models.AlertForgetting, "pointers"); !found {
+				t.Fatal("expected FORGETTING alert in collision scenario")
+			}
+			_, gotZPD := findAlert(alerts, models.AlertZPDDrift, "pointers")
+			if gotZPD != tc.wantZPD {
+				t.Fatalf("ZPD_DRIFT presence: got %v, want %v", gotZPD, tc.wantZPD)
+			}
+		})
+	}
+}
+
 func TestComputeAlertsIRTPredictiveZPDDrift(t *testing.T) {
 	// Concept with low theta and high difficulty → IRT pCorrect < 0.55
 	// Theta = -1.0, FSRS difficulty = 8.0 → IRT difficulty ≈ 1.67
 	// pCorrect = 1/(1+exp(-1*(-1.0-1.67))) ≈ 0.065 — well below 0.55
 	states := []*models.ConceptState{
-		{Concept: "channels", Theta: -1.0, Difficulty: 8.0, Reps: 3, CardState: "review"},
+		alertNonForgettingState("channels", 0.3),
 	}
+	states[0].Theta = -1.0
+	states[0].Difficulty = 8.0
+	states[0].Reps = 3
 	alerts := ComputeAlerts(states, nil, time.Time{})
 
 	found := false
@@ -192,12 +333,30 @@ func TestComputeAlertsIRTPredictiveZPDDrift(t *testing.T) {
 	}
 }
 
+func TestComputeAlertsForgettingCriticalSuppressesPredictiveZPDDrift(t *testing.T) {
+	cs := alertStateAtRetention(t, "channels", algorithms.RetentionAlertCriticalThreshold-0.0001)
+	cs.Theta = -1.0
+	cs.Difficulty = 8.0
+	cs.Reps = 3
+
+	alerts := ComputeAlerts([]*models.ConceptState{cs}, nil, time.Time{})
+	if a, found := findAlert(alerts, models.AlertForgetting, "channels"); !found || a.Urgency != models.UrgencyCritical {
+		t.Fatalf("expected critical FORGETTING alert, got found=%v alert=%+v", found, a)
+	}
+	if _, found := findAlert(alerts, models.AlertZPDDrift, "channels"); found {
+		t.Fatal("FORGETTING critical must suppress same-concept predictive ZPD_DRIFT")
+	}
+}
+
 func TestComputeAlertsIRTPredictiveSkipsWhenFailureBased(t *testing.T) {
 	// Concept already has 3 failures → failure-based ZPD_DRIFT (warning) exists.
 	// IRT-predictive should NOT add a duplicate.
 	states := []*models.ConceptState{
-		{Concept: "pointers", Theta: -1.0, Difficulty: 8.0, Reps: 5, CardState: "review", PMastery: 0.3},
+		alertNonForgettingState("pointers", 0.3),
 	}
+	states[0].Theta = -1.0
+	states[0].Difficulty = 8.0
+	states[0].Reps = 5
 	interactions := []*models.Interaction{
 		{Concept: "pointers", Success: false},
 		{Concept: "pointers", Success: false},

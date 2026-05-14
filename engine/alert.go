@@ -16,13 +16,11 @@ import (
 func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.Interaction, sessionStart time.Time) []models.Alert {
 	var alerts []models.Alert
 
-	// criticalForgetting tracks concepts where FORGETTING fired at UrgencyCritical
-	// (retention < 0.30). These concepts skip MASTERY_READY emission below — the
-	// two alerts would otherwise be contradictory in the same get_pending_alerts
-	// response (sub-issue #54). FORGETTING at UrgencyWarning (0.30 ≤ retention <
-	// 0.40) is NOT a contradiction and both alerts are kept. Threshold rationale:
-	// the cutoff matches the existing UrgencyCritical band defined a few lines
-	// below, so retuning means changing both together.
+	// criticalForgetting tracks concepts where FORGETTING fired at UrgencyCritical.
+	// These concepts suppress same-concept MASTERY_READY, ZPD_DRIFT and PLATEAU
+	// below: retrieval recovery is the dominant action while retention is below
+	// algorithms.RetentionAlertCriticalThreshold. FORGETTING at warning urgency
+	// is less severe, so non-retrieval nudges can still be surfaced.
 	criticalForgetting := make(map[string]bool)
 
 	for _, cs := range states {
@@ -30,21 +28,21 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 			continue
 		}
 
-		// FORGETTING: FSRS retention < 40%
+		// FORGETTING: FSRS retention below the named alert warning threshold.
 		elapsed := cs.ElapsedDays
 		if cs.LastReview != nil {
 			elapsed = int(time.Since(*cs.LastReview).Hours() / 24)
 		}
 		retention := algorithms.Retrievability(elapsed, cs.Stability)
-		if retention < 0.40 {
+		if retention < algorithms.RetentionAlertWarningThreshold {
 			urgency := models.UrgencyWarning
-			if retention < 0.30 {
+			if retention < algorithms.RetentionAlertCriticalThreshold {
 				urgency = models.UrgencyCritical
 				criticalForgetting[cs.Concept] = true
 			}
 			hoursLeft := 0.0
-			if retention > 0.30 {
-				hoursLeft = (retention - 0.30) / 0.01 * 2
+			if retention > algorithms.RetentionAlertCriticalThreshold {
+				hoursLeft = (retention - algorithms.RetentionAlertCriticalThreshold) / 0.01 * 2
 			}
 			alerts = append(alerts, models.Alert{
 				Type:               models.AlertForgetting,
@@ -57,12 +55,9 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 		}
 
 		// MASTERY_READY: BKT >= 0.85
-		// Arbitration (sub-issue #54): if FORGETTING already fired at
-		// UrgencyCritical for this concept, suppress MASTERY_READY to avoid
-		// emitting contradictory nudges on the same tick. The action selector
-		// already prioritizes FORGETTING over mastery brackets in
-		// engine/action_selector.go; this mirrors that precedence at the alert
-		// layer so get_pending_alerts callers see a coherent recommendation.
+		// Arbitration: if FORGETTING already fired at UrgencyCritical for this
+		// concept, suppress MASTERY_READY to avoid emitting contradictory nudges
+		// on the same tick.
 		if cs.PMastery >= algorithms.MasteryBKT() && !criticalForgetting[cs.Concept] {
 			alerts = append(alerts, models.Alert{
 				Type:              models.AlertMasteryReady,
@@ -87,6 +82,9 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 		}
 	}
 	for concept, streak := range conceptFailStreaks {
+		if criticalForgetting[concept] {
+			continue
+		}
 		if streak >= 3 {
 			errorRate := float64(streak) / float64(streak+1)
 
@@ -125,7 +123,7 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 		}
 	}
 	for _, cs := range states {
-		if cs.CardState == "new" || cs.Reps == 0 || zpdConcepts[cs.Concept] {
+		if cs.CardState == "new" || cs.Reps == 0 || zpdConcepts[cs.Concept] || criticalForgetting[cs.Concept] {
 			continue
 		}
 		irtDiff := algorithms.FSRSDifficultyToIRT(cs.Difficulty)
@@ -147,6 +145,9 @@ func ComputeAlerts(states []*models.ConceptState, recentInteractions []*models.I
 	// examines scores[len-minCount:] which must be the *most recent* states.
 	conceptInteractions := groupByConcept(recentInteractions)
 	for concept, interactions := range conceptInteractions {
+		if criticalForgetting[concept] {
+			continue
+		}
 		if len(interactions) >= 4 {
 			var scores []float64
 			state := algorithms.PFAState{}

@@ -146,6 +146,7 @@ type Domain struct {
 	ValueFramingsJSON    string
 	LastValueAxis        string
 	Archived             bool
+	PriorityRank         *int
 	GraphVersion         int
 	GoalRelevanceJSON    string
 	GoalRelevanceVersion int

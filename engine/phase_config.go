@@ -1,8 +1,10 @@
 // Copyright (c) 2026 Arnaud Guiovanna <https://www.aguiovanna.fr>
-// GitHub: https://github.com/ArnaudGuiovanna/ArnaudGuiovanna
+// GitHub: https://github.com/ArnaudGuiovanna
 // SPDX-License-Identifier: MIT
 
 package engine
+
+import "tutor-mcp/algorithms"
 
 // PhaseConfig captures the tunable parameters of [2] PhaseController.
 // Per OQ-2.6 (validated): exposed as a struct rather than as private
@@ -33,8 +35,8 @@ type PhaseConfig struct {
 
 	// RetentionRecallThreshold is the FSRS Retrievability below which
 	// a goal-relevant concept triggers MAINTENANCE → INSTRUCTION
-	// (recall is required again). Aligned with the FORGETTING alert
-	// (engine/alert.go) for cross-system consistency.
+	// (recall is required again). It follows the recall-routing threshold,
+	// which is intentionally earlier than user-facing FORGETTING alerts.
 	RetentionRecallThreshold float64
 
 	// GoalRelevantCutoff defines which concepts count as
@@ -59,13 +61,13 @@ type PhaseConfig struct {
 // Calibration history:
 //   - DeltaHThreshold=0.2 : initial guess; revisit with E2E artifact data
 //   - NDiagnosticMax=8    : cadrage utilisateur
-//   - RetentionRecallThreshold=0.5 : FORGETTING alert threshold
+//   - RetentionRecallThreshold=RetentionRecallRoutingThreshold : early recall routing
 //   - GoalRelevantCutoff=0.0 : strict positive (OQ-2.7 = A)
 func NewDefaultPhaseConfig() PhaseConfig {
 	return PhaseConfig{
 		DeltaHThreshold:          0.2,
 		NDiagnosticMax:           8,
-		RetentionRecallThreshold: 0.5,
+		RetentionRecallThreshold: algorithms.RetentionRecallRoutingThreshold,
 		GoalRelevantCutoff:       0.0,
 		AntiRepeatWindow:         DefaultAntiRepeatWindow,
 	}

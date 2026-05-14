@@ -60,6 +60,7 @@ func TestRegisterTools_Smoke(t *testing.T) {
 		"transfer_challenge",
 		"record_transfer_result",
 		"learning_negotiation",
+		"set_domain_priority",
 		"archive_domain",
 		"unarchive_domain",
 		"delete_domain",

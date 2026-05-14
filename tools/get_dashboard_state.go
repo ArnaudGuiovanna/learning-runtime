@@ -252,7 +252,6 @@ func registerGetDashboardState(server *mcp.Server, deps *Deps) {
 			"total_concepts":          totalConcepts,
 			"total_mastered":          totalMastered,
 			"global_progress_percent": globalProgress,
-			"global_progress":         globalProgress,
 			"alerts":                  alerts,
 			"signal":                  signal,
 			"autonomy_score":          autonomy.Score,

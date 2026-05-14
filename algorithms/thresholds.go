@@ -24,6 +24,23 @@ package algorithms
 
 import "os"
 
+const (
+	// RetentionAlertWarningThreshold is the FSRS retrievability cutoff
+	// below which ComputeAlerts emits a FORGETTING warning.
+	RetentionAlertWarningThreshold = 0.40
+
+	// RetentionAlertCriticalThreshold is the stricter FORGETTING band.
+	// Critical forgetting arbitrates away same-concept mastery/ZPD/plateau
+	// nudges because retrieval recovery must be handled first.
+	RetentionAlertCriticalThreshold = 0.30
+
+	// RetentionRecallRoutingThreshold is intentionally higher than the
+	// alert thresholds. It is used after a concept has already been selected
+	// for work, to route the activity toward recall before the user-facing
+	// FORGETTING alert bands (<0.40 warning, <0.30 critical) are reached.
+	RetentionRecallRoutingThreshold = 0.50
+)
+
 // MasteryBKT returns the threshold for "concept mastered per BKT P(L)".
 // Used by the MASTERY_READY alert, mastery_challenge eligibility,
 // transfer_challenge gating and the mastered-concept count in

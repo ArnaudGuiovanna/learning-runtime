@@ -53,8 +53,8 @@ func TestCheckMastery_NotReady(t *testing.T) {
 	if out["mastery"] != 0.4 {
 		t.Fatalf("expected mastery=0.4, got %v", out["mastery"])
 	}
-	if out["current_mastery"] != 0.4 {
-		t.Fatalf("expected current_mastery alias=0.4, got %v", out["current_mastery"])
+	if _, ok := out["current_mastery"]; ok {
+		t.Fatalf("did not expect legacy current_mastery alias in result: %v", out)
 	}
 }
 
@@ -95,8 +95,8 @@ func TestCheckMastery_Ready(t *testing.T) {
 	if out["mastery"] != 0.95 {
 		t.Fatalf("expected mastery=0.95, got %v", out["mastery"])
 	}
-	if out["current_mastery"] != 0.95 {
-		t.Fatalf("expected current_mastery alias=0.95, got %v", out["current_mastery"])
+	if _, ok := out["current_mastery"]; ok {
+		t.Fatalf("did not expect legacy current_mastery alias in result: %v", out)
 	}
 }
 
@@ -115,6 +115,9 @@ func TestCheckMastery_AcceptsLegacyConceptID(t *testing.T) {
 	out := decodeResult(t, res)
 	if out["mastery"] != 0.4 {
 		t.Fatalf("expected mastery=0.4, got %v", out["mastery"])
+	}
+	if _, ok := out["current_mastery"]; ok {
+		t.Fatalf("did not expect legacy current_mastery alias in result: %v", out)
 	}
 }
 

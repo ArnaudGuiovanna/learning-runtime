@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Arnaud Guiovanna <https://www.aguiovanna.fr>
-// GitHub: https://github.com/ArnaudGuiovanna/ArnaudGuiovanna
+// GitHub: https://github.com/ArnaudGuiovanna
 // SPDX-License-Identifier: MIT
 
 package db

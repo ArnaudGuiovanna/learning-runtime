@@ -116,7 +116,6 @@ func registerTransferChallenge(server *mcp.Server, deps *Deps) {
 		r, _ := jsonResult(map[string]interface{}{
 			"eligible":           true,
 			"concept":            concept,
-			"concept_id":         concept,
 			"context_type":       contextType,
 			"transfer_dimension": string(transferDimension),
 			"prompt_text":        promptText,

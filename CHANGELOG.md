@@ -90,10 +90,11 @@ can drive an adaptive learning loop without an editorial team.
 #### Highlights
 
 - **Cognitive engine** — BKT (mastery), FSRS (spaced repetition), IRT (ability),
-  PFA (plateau detection), KST (prerequisite gating). Five algorithms updating
-  the learner model on every interaction. The BKT → FSRS → IRT chain runs
-  against a single read-only snapshot so order-of-evaluation no longer leaks
-  cross-step state.
+  PFA (plateau detection), KST (prerequisite gating), plus a separate
+  Rasch/Elo calibration signal for learner ability vs. exercise difficulty.
+  The learner model updates on every interaction. The BKT → FSRS → IRT chain
+  runs against a single read-only snapshot so order-of-evaluation no longer
+  leaks cross-step state.
 - **Regulation pipeline (v0.3)** — seven-stage pipeline: Threshold Resolver,
   Goal Decomposer, Action Selector, Concept Selector, Gate Controller, Phase
   Controller (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE FSM), Fade Controller.

@@ -16,7 +16,7 @@
 
 **Tutor MCP is the adaptive brain behind a personalised tutor.** You tell an LLM (Claude, ChatGPT, …) what you want to learn — *Spanish for travel*, *Go for backend*, *options trading*, *medieval history* — and the runtime orchestrates the journey end-to-end: what to study next, when to review, how hard the next exercise should be, when you've mastered a concept, when you're losing motivation, when you're ready to be more autonomous. It works on **any subject the learner can describe in natural language** — no content catalog, no curation, no editorial backlog.
 
-Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, intelligent activity routing, misconception diagnosis, structured rubrics, transfer profiling, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
+Under the hood, it provides real-time cognitive state tracking, spaced-repetition scheduling, regulation-pipeline orchestration, misconception diagnosis, structured rubrics, transfer profiling, a motivation layer, and a metacognitive loop that helps learners become autonomous — all exposed as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that any MCP-compatible LLM can drive.
 
 > Current release: **v0.3** — the regulation pipeline is the single runtime engine, and the learner model now includes structured evidence gates, pedagogical snapshots, transfer profiles, individualized BKT parameters, and Rasch/Elo exercise calibration signals.
 
@@ -53,7 +53,7 @@ For 50 years, **Intelligent Tutoring Systems (ITS)** research — Anderson, VanL
 |------------|-------------|-----|
 | **Domain model** | Tutor MCP runtime | Concept graph with prerequisites, validated by **KST** (Knowledge Space Theory) |
 | **Learner model** | Tutor MCP runtime | Mastery, ability, recall and transfer predicted by **BKT** (Bayesian Knowledge Tracing), **IRT** (Item Response Theory), **Rasch/Elo**, **PFA** (Performance Factor Analysis) and structured transfer profiles |
-| **Pedagogical model** | Tutor MCP runtime | Spaced-repetition scheduling via **FSRS** (Free Spaced Repetition Scheduler), evidence-gated mastery, activity router, alert engine, motivation engine, metacognitive loop |
+| **Pedagogical model** | Tutor MCP runtime | Spaced-repetition scheduling via **FSRS** (Free Spaced Repetition Scheduler), evidence-gated mastery, regulation orchestrator, alert engine, motivation engine, metacognitive loop |
 | **Interface & content** | Any MCP-compatible LLM | Claude, ChatGPT, Le Chat, Gemini — generates exercises, hints, feedback and dialogue on demand |
 
 The cognitive science is rigid and measurable; the LLM is infinitely flexible. Together they make an ITS that works on day one for any topic — without an editorial team.
@@ -97,7 +97,7 @@ The server sits between a learner and an LLM. Three parallel loops run from the 
 
 ## Cognitive Science Engine
 
-Complementary learning-science algorithms run on every interaction and jointly inform the activity router. Together they form the learner-and-pedagogical model of the ITS.
+Complementary learning-science algorithms run on every interaction and jointly inform the regulation orchestrator (`engine/orchestrator.go`; design notes in [`docs/regulation-design/`](./docs/regulation-design/)). Together they form the learner-and-pedagogical model of the ITS.
 
 | Algorithm | Role |
 |-----------|------|
@@ -123,7 +123,7 @@ The project deliberately separates deterministic runtime decisions from LLM coac
 
 ## Regulation Pipeline (v0.3)
 
-The seven-stage **regulation pipeline** — pure functions composed by an impure orchestrator — drives activity selection through an explicit **phase FSM** (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE) with information-theoretic concept selection and a hygiene gate. It is the single runtime engine.
+The seven-stage **regulation pipeline** — pure functions composed by an impure orchestrator — drives activity selection through an explicit **phase FSM** (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE) with information-theoretic concept selection and a hygiene gate. It is the single runtime engine. The active entry point is `engine/orchestrator.go`; the design rationale and component docs live in [`docs/regulation-design/`](./docs/regulation-design/).
 
 | # | Stage | Status | What it does |
 |---|-------|--------|--------------|
@@ -301,7 +301,7 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   └── bkt_info_gain.go                               Binary entropy + info-gain helpers for [4] concept selector
 ├── engine/
 │   ├── alert.go                Learning + metacognitive alert computation
-│   ├── router.go               Legacy activity routing with priority-based alert handling
+│   ├── orchestrator.go         Active regulation-pipeline coordinator wiring [4]→[5]→[3] with FSM transitions
 │   ├── evidence.go             Mastery evidence diversity profile
 │   ├── uncertainty.go          Confidence/uncertainty estimates for mastery decisions
 │   ├── transfer_model.go       Structured transfer readiness over near/far/debugging/teaching/creative
@@ -315,8 +315,7 @@ main.go              HTTP server, MCP handler, OAuth, scheduler startup
 │   ├── concept_selector.go     [4] Pure phase-aware concept selection (info-gain, FSRS overdue, max-entropy)
 │   ├── gate.go                 [3] Pure hygiene gate (anti-repeat, session-budget, no-fringe escape)
 │   ├── phase_fsm.go            [2] Pure phase FSM (DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE)
-│   ├── phase_config.go         [2] Tunable thresholds (ΔH, N_diagnostic_max, anti-repeat window, …)
-│   └── orchestrator.go         [2] Impure coordinator wiring [4]→[5]→[3] with FSM transitions
+│   └── phase_config.go         [2] Tunable thresholds (ΔH, N_diagnostic_max, anti-repeat window, …)
 ├── models/
 │   ├── learner.go              Learner, ConceptState, Interaction, RefreshToken
 │   ├── domain.go               AlertType, Activity, KnowledgeSpace, Domain (+ phase fields, value framings)

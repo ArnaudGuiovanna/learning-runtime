@@ -8,6 +8,7 @@ import (
 	"math"
 	"testing"
 
+	"tutor-mcp/algorithms"
 	"tutor-mcp/db"
 	"tutor-mcp/models"
 )
@@ -47,10 +48,11 @@ func TestSelectAction_Misconception_OverridesAll(t *testing.T) {
 
 func TestSelectAction_MisconceptionBeatsLowRetention(t *testing.T) {
 	// OQ-5.4 = A: misconception > retention. Concept has both an active
-	// misconception AND retention < 0.5. Misconception must win.
+	// misconception AND retention below the recall-routing threshold.
+	// Misconception must win.
 	cs := reviewedConceptState("Channels", 0.5)
 	cs.Stability = 1.0
-	cs.ElapsedDays = 30 // pushes retention well below 0.5
+	cs.ElapsedDays = 30 // pushes retention well below the recall-routing threshold
 	mc := &db.MisconceptionGroup{
 		Concept:           "Channels",
 		MisconceptionType: "deadlock_unaware",
@@ -69,6 +71,38 @@ func TestSelectAction_RetentionLow_TriggersRecall(t *testing.T) {
 	a := SelectAction("Channels", cs, nil, ActionHistory{})
 	if a.Type != models.ActivityRecall {
 		t.Fatalf("expected RECALL_EXERCISE, got %s", a.Type)
+	}
+}
+
+func TestSelectAction_RetentionRecallRoutingBoundary(t *testing.T) {
+	cases := []struct {
+		name      string
+		retention float64
+		want      models.ActivityType
+	}{
+		{
+			name:      "just above routing threshold stays in mastery branch",
+			retention: algorithms.RetentionRecallRoutingThreshold + 0.0001,
+			want:      models.ActivityPractice,
+		},
+		{
+			name:      "just below routing threshold routes recall",
+			retention: algorithms.RetentionRecallRoutingThreshold - 0.0001,
+			want:      models.ActivityRecall,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := reviewedConceptState("Channels", 0.50)
+			cs.Stability = stabilityForRetention(t, tc.retention)
+			cs.ElapsedDays = 1
+
+			a := SelectAction("Channels", cs, nil, ActionHistory{})
+			if a.Type != tc.want {
+				t.Fatalf("action type: got %s, want %s", a.Type, tc.want)
+			}
+		})
 	}
 }
 

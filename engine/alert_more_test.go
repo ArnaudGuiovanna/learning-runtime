@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"tutor-mcp/algorithms"
 	"tutor-mcp/models"
 )
 
@@ -63,7 +64,7 @@ func TestComputeAlerts_ErrorTypeRecommendations(t *testing.T) {
 				{Concept: "X", Success: false, ErrorType: tc.errorType},
 				{Concept: "X", Success: false, ErrorType: tc.errorType},
 			}
-			states := []*models.ConceptState{{Concept: "X", PMastery: 0.3, CardState: "learning"}}
+			states := []*models.ConceptState{alertNonForgettingState("X", 0.3)}
 			alerts := ComputeAlerts(states, interactions, time.Time{})
 
 			found := false
@@ -128,6 +129,45 @@ func TestComputeAlerts_PlateauDetected(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected PLATEAU alert after sustained successes")
+	}
+}
+
+func TestComputeAlertsForgettingCriticalSuppressesPlateau(t *testing.T) {
+	var interactions []*models.Interaction
+	for i := 0; i < 30; i++ {
+		interactions = append(interactions, &models.Interaction{Concept: "P", Success: true})
+	}
+
+	cases := []struct {
+		name        string
+		retention   float64
+		wantPlateau bool
+	}{
+		{
+			name:        "critical forgetting suppresses plateau",
+			retention:   algorithms.RetentionAlertCriticalThreshold - 0.0001,
+			wantPlateau: false,
+		},
+		{
+			name:        "warning forgetting keeps plateau",
+			retention:   algorithms.RetentionAlertWarningThreshold - 0.0001,
+			wantPlateau: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			states := []*models.ConceptState{alertStateAtRetention(t, "P", tc.retention)}
+			alerts := ComputeAlerts(states, interactions, time.Time{})
+
+			if _, found := findAlert(alerts, models.AlertForgetting, "P"); !found {
+				t.Fatal("expected FORGETTING alert in plateau collision scenario")
+			}
+			_, gotPlateau := findAlert(alerts, models.AlertPlateau, "P")
+			if gotPlateau != tc.wantPlateau {
+				t.Fatalf("PLATEAU presence: got %v, want %v", gotPlateau, tc.wantPlateau)
+			}
+		})
 	}
 }
 

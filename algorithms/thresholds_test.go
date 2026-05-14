@@ -64,3 +64,24 @@ func TestMasteryThresholds_OptOutStrictness(t *testing.T) {
 		})
 	}
 }
+
+func TestRetentionThresholds_NamedForgettingBands(t *testing.T) {
+	if got := RetentionAlertWarningThreshold; got != 0.40 {
+		t.Errorf("RetentionAlertWarningThreshold: want 0.40, got %v", got)
+	}
+	if got := RetentionAlertCriticalThreshold; got != 0.30 {
+		t.Errorf("RetentionAlertCriticalThreshold: want 0.30, got %v", got)
+	}
+	if got := RetentionRecallRoutingThreshold; got != 0.50 {
+		t.Errorf("RetentionRecallRoutingThreshold: want 0.50, got %v", got)
+	}
+	if !(RetentionAlertCriticalThreshold < RetentionAlertWarningThreshold &&
+		RetentionAlertWarningThreshold < RetentionRecallRoutingThreshold) {
+		t.Fatalf(
+			"retention thresholds must be ordered critical < warning < routing, got critical=%v warning=%v routing=%v",
+			RetentionAlertCriticalThreshold,
+			RetentionAlertWarningThreshold,
+			RetentionRecallRoutingThreshold,
+		)
+	}
+}

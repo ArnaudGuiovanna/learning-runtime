@@ -305,7 +305,7 @@ func (s *Store) CreateDomainWithValueFramings(learnerID, name, personalGoal stri
 	}, nil
 }
 
-const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, graph_version, goal_relevance_json, goal_relevance_version, phase, phase_changed_at, phase_entry_entropy, created_at`
+const domainCols = `id, learner_id, name, personal_goal, graph_json, value_framings_json, last_value_axis, archived, priority_rank, graph_version, goal_relevance_json, goal_relevance_version, phase, phase_changed_at, phase_entry_entropy, created_at`
 
 // scanDomainFields is the shared row decoder for both *sql.Row and *sql.Rows
 // callers — Scan has the same signature on both so we factor through a small
@@ -321,11 +321,12 @@ func scanDomainFields(s domainScanner) (*models.Domain, error) {
 	var valueFramings, lastAxis, phase sql.NullString
 	var phaseChangedAt sql.NullTime
 	var phaseEntryEntropy sql.NullFloat64
+	var priorityRank sql.NullInt64
 	var archived int
 	err := s.Scan(
 		&d.ID, &d.LearnerID, &d.Name, &d.PersonalGoal, &graphJSON,
 		&valueFramings, &lastAxis, &archived,
-		&d.GraphVersion, &goalRelevanceJSON, &d.GoalRelevanceVersion,
+		&priorityRank, &d.GraphVersion, &goalRelevanceJSON, &d.GoalRelevanceVersion,
 		&phase, &phaseChangedAt, &phaseEntryEntropy,
 		&d.CreatedAt,
 	)
@@ -333,6 +334,10 @@ func scanDomainFields(s domainScanner) (*models.Domain, error) {
 		return nil, err
 	}
 	d.Archived = archived != 0
+	if priorityRank.Valid {
+		rank := int(priorityRank.Int64)
+		d.PriorityRank = &rank
+	}
 	if valueFramings.Valid {
 		d.ValueFramingsJSON = valueFramings.String
 	}
@@ -365,7 +370,8 @@ func scanDomainRows(rows *sql.Rows) (*models.Domain, error) {
 
 func (s *Store) GetDomainByLearner(learnerID string) (*models.Domain, error) {
 	row := s.db.QueryRow(
-		`SELECT `+domainCols+` FROM domains WHERE learner_id = ? AND archived = 0 ORDER BY created_at DESC LIMIT 1`,
+		`SELECT `+domainCols+` FROM domains WHERE learner_id = ? AND archived = 0
+		 ORDER BY CASE WHEN priority_rank IS NULL THEN 1 ELSE 0 END, priority_rank ASC, created_at DESC LIMIT 1`,
 		learnerID,
 	)
 	d, err := scanDomainRow(row)
@@ -405,6 +411,24 @@ func (s *Store) GetDomainsByLearner(learnerID string, includeArchived bool) ([]*
 		domains = append(domains, d)
 	}
 	return domains, rows.Err()
+}
+
+func (s *Store) SetDomainPriority(domainID, learnerID string, rank int) error {
+	if rank < 1 {
+		return fmt.Errorf("rank must be >= 1")
+	}
+	result, err := s.db.Exec(
+		`UPDATE domains SET priority_rank = ? WHERE id = ? AND learner_id = ? AND archived = 0`,
+		rank, domainID, learnerID,
+	)
+	if err != nil {
+		return fmt.Errorf("set domain priority: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("domain not found")
+	}
+	return nil
 }
 
 // UpdateDomainValueFramings stores the JSON-encoded value framings for a domain.

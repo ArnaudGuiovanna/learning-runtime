@@ -84,11 +84,6 @@ const (
 	// Practice → success → 0.86 → re-MasteryChallenge → ...) becomes
 	// pathological.
 	HighMasteryStabilityWindow = 3
-
-	// retentionForgettingThreshold mirrors the FORGETTING alert
-	// semantics in engine/alert.go: retention < 0.5 ≡ forgetting
-	// imminent. Kept private — not a tuneable knob today.
-	retentionForgettingThreshold = 0.5
 )
 
 // nanFallbackCount tracks how often SelectAction encountered a NaN
@@ -116,7 +111,11 @@ func NaNFallbackCount() int64 {
 //     OQ-5.4 = A: misconception beats retention because recalling a
 //     concept while a faulty belief is active just re-anchors the
 //     error; fix the misconception first.
-//  3. FSRS retention < 0.5 (and card not "new") → RECALL_EXERCISE.
+//  3. FSRS retention < algorithms.RetentionRecallRoutingThreshold (and card
+//     not "new") → RECALL_EXERCISE. This routing cutoff is intentionally
+//     higher than the user-facing FORGETTING alert bands: once a concept is
+//     already selected for work, recall is preferred before retention reaches
+//     warning/critical alert urgency.
 //  4. Mastery brackets:
 //     - p < 0.30                     → NEW_CONCEPT
 //     - p < 0.70                     → PRACTICE (standard, diff=0.55)
@@ -165,7 +164,7 @@ func SelectAction(concept string, cs *models.ConceptState, mc *db.MisconceptionG
 	// excludes new cards from FORGETTING).
 	if cs.CardState != "new" {
 		retention := algorithms.Retrievability(cs.ElapsedDays, cs.Stability)
-		if retention < retentionForgettingThreshold {
+		if retention < algorithms.RetentionRecallRoutingThreshold {
 			return Action{
 				Type:             models.ActivityRecall,
 				DifficultyTarget: 0.65,

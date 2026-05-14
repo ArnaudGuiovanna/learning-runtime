@@ -10,7 +10,7 @@ Source-of-truth tracker for the five MVP categories defined in the agent routine
 |------|--------|----------|
 | Tous les tools renvoient une réponse valide sur cas nominaux | ✅ | `go test ./tools/` green; one happy-path e2e in `tools/interaction_e2e_test.go` |
 | Entrées vides / malformées gérées proprement | 🟡 | `tools/length_validation_test.go`, jsonschema validation; PR #103 closes the unbounded-text gap (#82) |
-| Schémas I/O cohérents avec descriptions | 🟡 | PR #104 disambiguates the read-tool routing trio (#84). API-shape consistency (concept vs concept_id) tracked by issue #86 — not yet addressed |
+| Schémas I/O cohérents avec descriptions | ✅ | Canonical output-shape tests cover `mastery`, `global_progress_percent`, and `concept` without legacy output aliases (#86); `concept_id` remains input-only compatibility |
 
 ## 2. Pédagogique
 
@@ -27,7 +27,7 @@ Source-of-truth tracker for the five MVP categories defined in the agent routine
 |------|--------|----------|
 | Sorties JSON structurées (mastery, confidence, hints) | ✅ | `jsonResult` + `StructuredContent` in `tools/tools.go` |
 | Descriptions de tools sans ambiguïté pour le routing | 🟡 | PR #104 covers the alerts/activity/mirror trio (#84); other tools still rely on legacy descriptions |
-| Champs documentés et utilisés downstream | 🟡 | Issue #86 (output-shape inconsistency: concept vs concept_id, mastery 0..1 vs 0..100) — not yet addressed |
+| Champs documentés et utilisés downstream | ✅ | `get_learner_context` exposes `priority_concept_domain_id` for routable priority concepts (#154); dashboard units document 0..1 vs 0..100 fields |
 
 ## 4. Sécurité
 
@@ -45,13 +45,13 @@ Source-of-truth tracker for the five MVP categories defined in the agent routine
 | Item | Status | Evidence |
 |------|--------|----------|
 | Messages d'erreur explicites et actionnables | 🟡 | `errorResult(...)` everywhere; mixed-language gap tracked by issue #90 (not addressed) |
-| Latence p95 < 2 s (tools sans LLM) | ❌ | No measurement harness today; perf risk on `get_next_activity` (8+ DB calls per turn) tracked by issue #91 |
+| Latence p95 < 2 s (tools sans LLM) | ✅ | Opt-in CI/release gate in `tools/activity_pair_perf_test.go` covers `get_pending_alerts` + `get_next_activity`; observed p95 17.98 ms at 200 active learners with `MCP_PERF_BUDGET=1 MCP_PERF_ACTIVE_LEARNERS=200` |
 | Latence p95 < 8 s (tools avec sampling) | ❌ | No measurement harness today |
-| README à jour avec quickstart vérifié | 🟡 | `README.md` exists; not re-validated against current `main.go` and tool surface |
+| README à jour avec quickstart vérifié | 🟡 | `README.md` / `CHANGELOG.md` synced with the current `engine/orchestrator.go` regulation runtime and `docs/regulation-design/`; quickstart still needs a fresh sanity check |
 
 ## Decision gates
 
-- The MVP is **NOT** reached this cycle. Major blockers:
-  - Issues #86, #90, #91 are unaddressed (output-shape consistency, mixed-language errors, perf budget).
-  - 9 PRs still pending human merge.
+- The MVP is **NOT** reached this cycle. Remaining blockers:
+  - Issue #90 remains open for mixed-language/actionability cleanup.
+  - The sampling/LLM latency gate and a fresh quickstart sanity-check are still pending.
 - When all rows in this checklist are ✅ AND a documented quickstart sanity-check passes against `staging`, the MVP gate is open. The version bump and tag are humain-only steps after `staging` → `main`.

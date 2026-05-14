@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Arnaud Guiovanna <https://www.aguiovanna.fr>
-// GitHub: https://github.com/ArnaudGuiovanna/ArnaudGuiovanna
+// GitHub: https://github.com/ArnaudGuiovanna
 // SPDX-License-Identifier: MIT
 
 // Package engine — [2] PhaseController orchestrator (runtime).
@@ -559,7 +559,7 @@ func constrainReviewAction(action Action, cs *models.ConceptState) Action {
 		action.Rationale = "review intent constraint : " + action.Rationale
 		return action
 	}
-	if reviewRetention(cs) < retentionForgettingThreshold {
+	if reviewRetention(cs) < algorithms.RetentionRecallRoutingThreshold {
 		return Action{
 			Type:             models.ActivityRecall,
 			DifficultyTarget: 0.60,
