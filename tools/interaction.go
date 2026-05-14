@@ -6,7 +6,10 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"tutor-mcp/models"
@@ -15,27 +18,28 @@ import (
 )
 
 type RecordInteractionParams struct {
-	Concept             string  `json:"concept" jsonschema:"the concept being practiced"`
-	ActivityType        string  `json:"activity_type" jsonschema:"activity type - MUST be one of the canonical values: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
-	Success             bool    `json:"success" jsonschema:"whether the exercise was completed successfully"`
-	ResponseTimeSeconds float64 `json:"response_time_seconds" jsonschema:"response time in seconds"`
-	Confidence          float64 `json:"confidence" jsonschema:"estimated confidence as a 0..1 float"`
-	ErrorType           string  `json:"error_type,omitempty" jsonschema:"error type on failure - leave empty or use exactly: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
-	Notes               string  `json:"notes" jsonschema:"optional notes about the interaction"`
-	DomainID            string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
-	HintsRequested      int     `json:"hints_requested,omitempty" jsonschema:"number of hints requested during the exchange (optional, default 0)"`
-	SelfInitiated       bool    `json:"self_initiated,omitempty" jsonschema:"true if the session started without a webhook alert"`
-	CalibrationID       string  `json:"calibration_id,omitempty" jsonschema:"id of the associated calibration prediction (optional)"`
-	MisconceptionType   string  `json:"misconception_type,omitempty" jsonschema:"free-form label of the detected misconception (optional, ignored if success=true)"`
-	MisconceptionDetail string  `json:"misconception_detail,omitempty" jsonschema:"one-sentence description of the misconception (optional)"`
-	RubricJSON          string  `json:"rubric_json,omitempty" jsonschema:"optional rubric as a JSON object or array"`
-	RubricScoreJSON     string  `json:"rubric_score_json,omitempty" jsonschema:"optional rubric scoring result as a JSON object or array"`
+	Concept                 string  `json:"concept" jsonschema:"the concept being practiced"`
+	ActivityType            string  `json:"activity_type" jsonschema:"activity type - MUST be one of the canonical values: RECALL_EXERCISE, NEW_CONCEPT, MASTERY_CHALLENGE, DEBUGGING_CASE, REST, SETUP_DOMAIN, PRACTICE, DEBUG_MISCONCEPTION, FEYNMAN_PROMPT, TRANSFER_PROBE, CLOSE_SESSION"`
+	Success                 bool    `json:"success" jsonschema:"whether the exercise was completed successfully"`
+	ResponseTimeSeconds     float64 `json:"response_time_seconds" jsonschema:"response time in seconds"`
+	Confidence              float64 `json:"confidence" jsonschema:"estimated confidence as a 0..1 float"`
+	ErrorType               string  `json:"error_type,omitempty" jsonschema:"error type on failure - leave empty or use exactly: SYNTAX_ERROR, LOGIC_ERROR, KNOWLEDGE_GAP"`
+	Notes                   string  `json:"notes" jsonschema:"optional notes about the interaction"`
+	DomainID                string  `json:"domain_id,omitempty" jsonschema:"domain ID (optional)"`
+	HintsRequested          int     `json:"hints_requested,omitempty" jsonschema:"number of hints requested during the exchange (optional, default 0)"`
+	SelfInitiated           bool    `json:"self_initiated,omitempty" jsonschema:"true if the session started without a webhook alert"`
+	CalibrationID           string  `json:"calibration_id,omitempty" jsonschema:"id of the associated calibration prediction (optional)"`
+	MisconceptionType       string  `json:"misconception_type,omitempty" jsonschema:"free-form label of the detected misconception (optional, ignored if success=true)"`
+	MisconceptionDetail     string  `json:"misconception_detail,omitempty" jsonschema:"one-sentence description of the misconception (optional)"`
+	RubricJSON              string  `json:"rubric_json,omitempty" jsonschema:"optional rubric as a JSON object or array"`
+	RubricScoreJSON         string  `json:"rubric_score_json,omitempty" jsonschema:"optional rubric scoring result as a JSON object or array"`
+	SemanticObservationJSON string  `json:"semantic_observation_json,omitempty" jsonschema:"optional semantic observation as a JSON object"`
 }
 
 func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "record_interaction",
-		Description: "Record the result of an exercise and update the learner's cognitive state. Supports error_type to adjust the BKT model according to the error type, and optional rubric_json/rubric_score_json for structured grading evidence.",
+		Description: "Record the result of an exercise and update the learner's cognitive state. Supports error_type to adjust the BKT model according to the error type, optional rubric_json/rubric_score_json for structured grading evidence, and optional semantic_observation_json for richer qualitative observations.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params RecordInteractionParams) (*mcp.CallToolResult, any, error) {
 		learnerID, err := getLearnerID(ctx)
 		if err != nil {
@@ -125,6 +129,11 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 		if rubricScore != nil {
 			rubricScoreJSON = mustSnapshotJSON(rubricScore)
 		}
+		semanticObservation, err := normalizeSemanticObservationJSON(params.SemanticObservationJSON)
+		if err != nil {
+			r, _ := errorResult(err.Error())
+			return r, nil, nil
+		}
 
 		// Resolve the active domain (honoring the optional domain_id) and
 		// validate the concept against its concept list. Without this guard
@@ -166,6 +175,7 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 			RubricScore:         rubricScore,
 			RubricWarnings:      rubricWarnings,
 			RubricScoreWarnings: rubricScoreWarnings,
+			SemanticObservation: semanticObservation,
 		}, time.Now().UTC())
 		if err != nil {
 			deps.Logger.Error("record_interaction: applyInteraction failed", "err", err, "learner", learnerID)
@@ -216,6 +226,35 @@ func registerRecordInteraction(server *mcp.Server, deps *Deps) {
 		r, _ := jsonResult(payload)
 		return r, nil, nil
 	})
+}
+
+func normalizeSemanticObservationJSON(raw string) (map[string]any, error) {
+	if err := validateString("semantic_observation_json", raw, maxLongTextLen); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var parsed any
+	if err := dec.Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("semantic_observation_json must be valid JSON: %v", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("semantic_observation_json must be valid JSON: %v", err)
+		}
+		return nil, fmt.Errorf("semantic_observation_json must contain a single JSON value")
+	}
+
+	observation, ok := parsed.(map[string]any)
+	if !ok || observation == nil {
+		return nil, fmt.Errorf("semantic_observation_json must be a JSON object")
+	}
+	return observation, nil
 }
 
 // computeCognitiveSignals analyzes session interaction patterns for fatigue and frustration.

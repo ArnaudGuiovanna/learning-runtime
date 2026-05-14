@@ -13,15 +13,15 @@ import (
 type AlertType string
 
 const (
-	AlertForgetting   AlertType = "FORGETTING"
-	AlertPlateau      AlertType = "PLATEAU"
-	AlertZPDDrift     AlertType = "ZPD_DRIFT"
-	AlertOverload     AlertType = "OVERLOAD"
-	AlertMasteryReady            AlertType = "MASTERY_READY"
-	AlertDependencyIncreasing    AlertType = "DEPENDENCY_INCREASING"
-	AlertCalibrationDiverging    AlertType = "CALIBRATION_DIVERGING"
-	AlertAffectNegative          AlertType = "AFFECT_NEGATIVE"
-	AlertTransferBlocked         AlertType = "TRANSFER_BLOCKED"
+	AlertForgetting           AlertType = "FORGETTING"
+	AlertPlateau              AlertType = "PLATEAU"
+	AlertZPDDrift             AlertType = "ZPD_DRIFT"
+	AlertOverload             AlertType = "OVERLOAD"
+	AlertMasteryReady         AlertType = "MASTERY_READY"
+	AlertDependencyIncreasing AlertType = "DEPENDENCY_INCREASING"
+	AlertCalibrationDiverging AlertType = "CALIBRATION_DIVERGING"
+	AlertAffectNegative       AlertType = "AFFECT_NEGATIVE"
+	AlertTransferBlocked      AlertType = "TRANSFER_BLOCKED"
 )
 
 type AlertUrgency string
@@ -89,6 +89,47 @@ type Activity struct {
 	EstimatedMinutes int          `json:"estimated_minutes"`
 	Rationale        string       `json:"rationale"`
 	PromptForLLM     string       `json:"prompt_for_llm"`
+}
+
+type PedagogicalContract struct {
+	Intent                  string                   `json:"intent"`
+	TargetConcept           string                   `json:"target_concept,omitempty"`
+	RecommendedActivityType ActivityType             `json:"recommended_activity_type"`
+	Constraints             PedagogicalConstraints   `json:"constraints"`
+	AllowedVariants         []string                 `json:"allowed_variants"`
+	LLMDiscretion           PedagogicalLLMDiscretion `json:"llm_discretion"`
+	FadeGuidance            *PedagogicalFadeGuidance `json:"fade_guidance,omitempty"`
+	LearnerExplanation      string                   `json:"learner_explanation"`
+	AuditRationale          string                   `json:"audit_rationale"`
+	LLMInstruction          string                   `json:"llm_instruction"`
+}
+
+type PedagogicalConstraints struct {
+	MustCollect []string `json:"must_collect,omitempty"`
+	Avoid       []string `json:"avoid,omitempty"`
+}
+
+type PedagogicalLLMDiscretion struct {
+	CanChangeFormat                  bool `json:"can_change_format"`
+	CanRequestClarification          bool `json:"can_request_clarification"`
+	CanProposeNegotiation            bool `json:"can_propose_negotiation"`
+	CannotMarkMasteryWithoutEvidence bool `json:"cannot_mark_mastery_without_evidence"`
+}
+
+type PedagogicalFadeGuidance struct {
+	HintLevel              string `json:"hint_level"`
+	WebhookFrequency       string `json:"webhook_frequency"`
+	ZPDAggressiveness      string `json:"zpd_aggressiveness"`
+	ProactiveReviewEnabled bool   `json:"proactive_review_enabled"`
+	Instruction            string `json:"instruction"`
+}
+
+type GoalRelevanceStatus struct {
+	Status          string   `json:"status"`
+	Message         string   `json:"message"`
+	RecommendedTool string   `json:"recommended_tool,omitempty"`
+	MissingConcepts []string `json:"missing_concepts,omitempty"`
+	Stale           bool     `json:"stale,omitempty"`
 }
 
 type KnowledgeSpace struct {

@@ -6,6 +6,7 @@ package tools
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"tutor-mcp/models"
 )
@@ -110,5 +111,201 @@ func TestLearningNegotiation_LearnerProposalAccepted(t *testing.T) {
 	}
 	if _, ok := out["counts_as_self_initiated"]; !ok {
 		t.Fatalf("expected counts_as_self_initiated key, got %v", out)
+	}
+	if _, ok := out["override_persistence"]; !ok {
+		t.Fatalf("expected persisted override receipt, got %v", out)
+	}
+}
+
+func TestLearningNegotiation_StructuredOverrideAcceptedAndConsumedOnce(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.5
+	cs.Difficulty = 5.0
+	if err := store.UpsertConceptState(cs); err != nil {
+		t.Fatal(err)
+	}
+
+	res := callTool(t, deps, registerLearningNegotiation, "L_owner", "learning_negotiation", map[string]any{
+		"session_id":        "s1",
+		"concept":           "a",
+		"format":            "worked_example",
+		"activity_type":     string(models.ActivityPractice),
+		"scaffold":          true,
+		"micro_diagnostic":  true,
+		"learner_rationale": "need a smaller first step",
+		"domain_id":         d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if got, _ := out["accepted"].(bool); !got {
+		t.Fatalf("expected accepted structured override, got %v", out)
+	}
+	if _, ok := out["override"].(map[string]any); !ok {
+		t.Fatalf("expected structured override in response, got %v", out["override"])
+	}
+
+	systemActivity := models.Activity{
+		Type:             models.ActivityRecall,
+		Concept:          "a",
+		DifficultyTarget: 0.6,
+		Format:           "mixed",
+		EstimatedMinutes: 10,
+	}
+	gotActivity, consume, err := ConsumeLearningNegotiationOverride(
+		store, "L_owner", d, systemActivity, nil, time.Now().UTC(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consume.Status != LearningNegotiationOverrideConsumeConsumed {
+		t.Fatalf("expected consumed override, got %+v", consume)
+	}
+	if gotActivity.Type != models.ActivityPractice {
+		t.Fatalf("expected PRACTICE, got %s", gotActivity.Type)
+	}
+	if gotActivity.Concept != "a" || gotActivity.Format != "worked_example" {
+		t.Fatalf("unexpected consumed activity: %+v", gotActivity)
+	}
+	if gotActivity.EstimatedMinutes != 5 {
+		t.Fatalf("expected micro diagnostic to cap duration at 5 minutes, got %d", gotActivity.EstimatedMinutes)
+	}
+
+	secondActivity, second, err := ConsumeLearningNegotiationOverride(
+		store, "L_owner", d, systemActivity, nil, time.Now().UTC(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Status != LearningNegotiationOverrideConsumeNone {
+		t.Fatalf("expected one-shot override to be gone, got %+v", second)
+	}
+	if secondActivity != systemActivity {
+		t.Fatalf("expected original system activity after one-shot consume, got %+v", secondActivity)
+	}
+}
+
+func TestLearningNegotiation_InvalidActivityTypeRejected(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerLearningNegotiation, "L_owner", "learning_negotiation", map[string]any{
+		"session_id":    "s1",
+		"concept":       "a",
+		"activity_type": "QUIZ",
+		"domain_id":     d.ID,
+	})
+	if !res.IsError {
+		t.Fatalf("expected invalid activity_type error, got %q", resultText(res))
+	}
+	if !strings.Contains(resultText(res), "activity_type") {
+		t.Fatalf("expected activity_type in error, got %q", resultText(res))
+	}
+}
+
+func TestLearningNegotiation_RejectedProposalDoesNotPersistOverride(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math") // b requires a
+
+	res := callTool(t, deps, registerLearningNegotiation, "L_owner", "learning_negotiation", map[string]any{
+		"session_id":        "s1",
+		"concept":           "b",
+		"learner_rationale": "want to skip ahead",
+		"domain_id":         d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+	out := decodeResult(t, res)
+	if got, _ := out["accepted"].(bool); got {
+		t.Fatalf("expected rejected proposal, got %v", out)
+	}
+	if _, ok := out["override_persistence"]; ok {
+		t.Fatalf("rejected proposal should not persist override, got %v", out["override_persistence"])
+	}
+	tradeoffs, _ := out["tradeoffs"].([]any)
+	if len(tradeoffs) == 0 {
+		t.Fatalf("expected rejection tradeoffs, got %v", out)
+	}
+
+	systemActivity := models.Activity{Type: models.ActivityRecall, Concept: "a", Format: "mixed", EstimatedMinutes: 10}
+	_, consume, err := ConsumeLearningNegotiationOverride(store, "L_owner", d, systemActivity, nil, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consume.Status != LearningNegotiationOverrideConsumeNone {
+		t.Fatalf("expected no persisted override after rejection, got %+v", consume)
+	}
+}
+
+func TestConsumeLearningNegotiationOverride_ExpiredOverride(t *testing.T) {
+	store, _ := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	now := time.Now().UTC()
+	override := &LearningNegotiationOverride{
+		DomainID:  d.ID,
+		Concept:   "a",
+		ExpiresAt: now.Add(-time.Minute),
+		Activity: models.Activity{
+			Type:             models.ActivityPractice,
+			Concept:          "a",
+			DifficultyTarget: 0.55,
+			Format:           "practice_standard",
+			EstimatedMinutes: 10,
+		},
+	}
+	if _, err := PersistLearningNegotiationOverride(store, "L_owner", override, now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	systemActivity := models.Activity{Type: models.ActivityRecall, Concept: "a", Format: "mixed", EstimatedMinutes: 10}
+	gotActivity, consume, err := ConsumeLearningNegotiationOverride(store, "L_owner", d, systemActivity, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consume.Status != LearningNegotiationOverrideConsumeExpired {
+		t.Fatalf("expected expired override, got %+v", consume)
+	}
+	if gotActivity != systemActivity {
+		t.Fatalf("expired override should return system activity, got %+v", gotActivity)
+	}
+}
+
+func TestConsumeLearningNegotiationOverride_RejectsHardPrerequisiteBypass(t *testing.T) {
+	store, _ := setupToolsTest(t)
+	d := makeOwnerDomain(t, store, "L_owner", "math") // b requires a
+	now := time.Now().UTC()
+	override := &LearningNegotiationOverride{
+		DomainID:  d.ID,
+		Concept:   "b",
+		ExpiresAt: now.Add(time.Hour),
+		Activity: models.Activity{
+			Type:             models.ActivityPractice,
+			Concept:          "b",
+			DifficultyTarget: 0.55,
+			Format:           "practice_standard",
+			EstimatedMinutes: 10,
+		},
+	}
+	if _, err := PersistLearningNegotiationOverride(store, "L_owner", override, now); err != nil {
+		t.Fatal(err)
+	}
+
+	systemActivity := models.Activity{Type: models.ActivityRecall, Concept: "a", Format: "mixed", EstimatedMinutes: 10}
+	gotActivity, consume, err := ConsumeLearningNegotiationOverride(store, "L_owner", d, systemActivity, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consume.Status != LearningNegotiationOverrideConsumeRejectedHardConstraint {
+		t.Fatalf("expected hard-constraint rejection, got %+v", consume)
+	}
+	if !strings.Contains(consume.Reason, "prerequisites") {
+		t.Fatalf("expected prerequisite reason, got %q", consume.Reason)
+	}
+	if gotActivity != systemActivity {
+		t.Fatalf("hard-constraint rejection should return system activity, got %+v", gotActivity)
 	}
 }

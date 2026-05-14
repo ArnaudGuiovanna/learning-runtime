@@ -732,11 +732,11 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 	for rows.Next() {
 		i := &models.Interaction{}
 		var successInt, selfInitInt, proactiveInt int
-		var errorType, calibrationID, misconceptionType, misconceptionDetail, domainID, rubricJSON, rubricScoreJSON sql.NullString
+		var errorType, notes, calibrationID, misconceptionType, misconceptionDetail, domainID, rubricJSON, rubricScoreJSON sql.NullString
 		var bktSlip, bktGuess sql.NullFloat64
 		if err := rows.Scan(
 			&i.ID, &i.LearnerID, &i.Concept, &i.ActivityType,
-			&successInt, &i.ResponseTime, &i.Confidence, &errorType, &i.Notes,
+			&successInt, &i.ResponseTime, &i.Confidence, &errorType, &notes,
 			&i.HintsRequested, &selfInitInt, &calibrationID, &proactiveInt,
 			&misconceptionType, &misconceptionDetail, &domainID,
 			&bktSlip, &bktGuess,
@@ -750,6 +750,9 @@ func scanInteractions(rows *sql.Rows) ([]*models.Interaction, error) {
 		i.IsProactiveReview = proactiveInt != 0
 		if errorType.Valid {
 			i.ErrorType = errorType.String
+		}
+		if notes.Valid {
+			i.Notes = notes.String
 		}
 		if calibrationID.Valid {
 			i.CalibrationID = calibrationID.String
@@ -796,7 +799,7 @@ func (s *Store) GetInteractionsSince(learnerID string, since time.Time) ([]*mode
 
 func (s *Store) GetSessionStart(learnerID string) (time.Time, error) {
 	cutoff := time.Now().UTC().Add(-2 * time.Hour)
-	var sessionStart sql.NullTime
+	var sessionStart sql.NullString
 	err := s.db.QueryRow(
 		`SELECT MIN(created_at) FROM interactions WHERE learner_id = ? AND created_at > ?`,
 		learnerID, cutoff,
@@ -807,7 +810,12 @@ func (s *Store) GetSessionStart(learnerID string) (time.Time, error) {
 	if !sessionStart.Valid {
 		return time.Now().UTC(), nil
 	}
-	return sessionStart.Time, nil
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST"} {
+		if parsed, err := time.Parse(layout, sessionStart.String); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("parse session start %q", sessionStart.String)
 }
 
 // ─── Availability ─────────────────────────────────────────────────────────────

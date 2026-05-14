@@ -37,6 +37,7 @@ type interactionInput struct {
 	RubricScore         any
 	RubricWarnings      []string
 	RubricScoreWarnings []string
+	SemanticObservation map[string]any
 }
 
 // applyInteraction persists the interaction and updates the learner's
@@ -69,7 +70,7 @@ func applyInteraction(
 	if err != nil {
 		cs = models.NewConceptState(learnerID, input.Concept)
 	}
-	observation := rubricObservation(input)
+	observation := structuredObservation(input)
 
 	// ── Snapshot read-only prior state ──────────────────────────────
 	// All downstream algorithm steps read from this snapshot, never
@@ -233,7 +234,7 @@ func applyInteraction(
 	return cs, observation, nil
 }
 
-func rubricObservation(input interactionInput) map[string]any {
+func structuredObservation(input interactionInput) map[string]any {
 	observation := map[string]any{}
 	if input.Rubric != nil {
 		observation["rubric"] = input.Rubric
@@ -246,6 +247,9 @@ func rubricObservation(input interactionInput) map[string]any {
 	}
 	if len(input.RubricScoreWarnings) > 0 {
 		observation["rubric_score_schema_warnings"] = input.RubricScoreWarnings
+	}
+	if input.SemanticObservation != nil {
+		observation["semantic_observation"] = input.SemanticObservation
 	}
 	if len(observation) == 0 {
 		return nil

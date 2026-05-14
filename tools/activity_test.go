@@ -98,6 +98,98 @@ func TestGetNextActivity_HappyPath(t *testing.T) {
 	if _, ok := out["mastery_uncertainty"]; !ok {
 		t.Fatalf("expected mastery_uncertainty key, got %v", out)
 	}
+	if _, ok := out["pedagogical_contract"]; !ok {
+		t.Fatalf("expected pedagogical_contract key, got %v", out)
+	}
+	if _, ok := out["goal_relevance_status"]; !ok {
+		t.Fatalf("expected goal_relevance_status key, got %v", out)
+	}
+	activity, _ := out["activity"].(map[string]any)
+	if prompt, _ := activity["prompt_for_llm"].(string); strings.Contains(prompt, "Target difficulty:") {
+		t.Fatalf("prompt embeds stale numeric difficulty: %q", prompt)
+	}
+	contract, _ := out["pedagogical_contract"].(map[string]any)
+	if got := contract["audit_rationale"]; got == "" {
+		t.Fatalf("expected contract audit_rationale, got %v", contract)
+	}
+	if got := contract["llm_instruction"]; got == "" {
+		t.Fatalf("expected contract llm_instruction, got %v", contract)
+	}
+	if got := contract["learner_explanation"]; got == "" {
+		t.Fatalf("expected contract learner_explanation, got %v", contract)
+	}
+}
+
+func TestGetNextActivity_OverloadUsesRealSessionStart(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	var logs bytes.Buffer
+	deps.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	d := makeOwnerDomain(t, store, "L_owner", "math")
+	cs := models.NewConceptState("L_owner", "a")
+	cs.PMastery = 0.5
+	if err := store.UpsertConceptState(cs); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	oldStart := time.Now().UTC().Add(-1 * time.Hour)
+	if _, err := store.RawDB().Exec(
+		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, created_at, domain_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"L_owner", "a", string(models.ActivityPractice), 1, 1000, 0.8, oldStart, d.ID,
+	); err != nil {
+		t.Fatalf("seed old interaction: %v", err)
+	}
+
+	res := callTool(t, deps, registerGetNextActivity, "L_owner", "get_next_activity", map[string]any{
+		"domain_id": d.ID,
+	})
+	if res.IsError {
+		t.Fatalf("got %q logs=%s", resultText(res), logs.String())
+	}
+	out := decodeResult(t, res)
+	activity, ok := out["activity"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected activity object, got %v", out["activity"])
+	}
+	if got := activity["type"]; got != string(models.ActivityCloseSession) {
+		t.Fatalf("expected CLOSE_SESSION from overloaded session, got %v", activity)
+	}
+}
+
+func TestBuildGoalRelevanceStatus(t *testing.T) {
+	base := func() *models.Domain {
+		return &models.Domain{
+			GraphVersion: 1,
+			Graph: models.KnowledgeSpace{
+				Concepts: []string{"a", "b"},
+			},
+		}
+	}
+
+	t.Run("missing", func(t *testing.T) {
+		got := buildGoalRelevanceStatus(base())
+		if got.Status != "missing" || got.RecommendedTool != "set_goal_relevance" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("partial", func(t *testing.T) {
+		d := base()
+		d.GoalRelevanceJSON = `{"for_graph_version":1,"relevance":{"a":1},"set_at":"2026-01-01T00:00:00Z"}`
+		got := buildGoalRelevanceStatus(d)
+		if got.Status != "partial" || len(got.MissingConcepts) != 1 || got.MissingConcepts[0] != "b" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		d := base()
+		d.GoalRelevanceJSON = `{"for_graph_version":1,"relevance":{"a":1,"b":0.5},"set_at":"2026-01-01T00:00:00Z"}`
+		got := buildGoalRelevanceStatus(d)
+		if got.Status != "valid" || got.RecommendedTool != "" {
+			t.Fatalf("got %+v", got)
+		}
+	})
 }
 
 func TestGetNextActivity_ForeignDomainFallsBackToSetup(t *testing.T) {
@@ -336,6 +428,17 @@ func TestGetNextActivity_FadeFlagOn_VerbosityDecreasesAsAutonomyRises(t *testing
 		if hintRank[gotHint] > st.wantHintAtMost {
 			t.Errorf("step %s: hint_level=%q (rank %d), want at most rank %d",
 				st.name, gotHint, hintRank[gotHint], st.wantHintAtMost)
+		}
+		contract, ok := out["pedagogical_contract"].(map[string]any)
+		if !ok {
+			t.Fatalf("step %s: expected pedagogical_contract, got %v", st.name, out)
+		}
+		fadeGuidance, ok := contract["fade_guidance"].(map[string]any)
+		if !ok {
+			t.Fatalf("step %s: expected fade_guidance in contract, got %v", st.name, contract)
+		}
+		if got := fadeGuidance["hint_level"]; got != gotHint {
+			t.Errorf("step %s: contract hint_level=%v, want %q", st.name, got, gotHint)
 		}
 
 		var instrLen int

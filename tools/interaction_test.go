@@ -163,6 +163,56 @@ func TestRecordInteraction_ReturnsRubricObservation(t *testing.T) {
 	}
 }
 
+func TestRecordInteraction_ReturnsSemanticObservation(t *testing.T) {
+	store, deps := setupToolsTest(t)
+	makeOwnerDomain(t, store, "L_owner", "math")
+
+	res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+		"concept":                   "a",
+		"activity_type":             "RECALL_EXERCISE",
+		"success":                   true,
+		"response_time_seconds":     12.0,
+		"confidence":                0.9,
+		"notes":                     "semantic audit",
+		"semantic_observation_json": `{"reasoning_quality":"brittle","success_mode":"procedural_without_explanation","confidence_alignment":"overconfident"}`,
+	})
+	if res.IsError {
+		t.Fatalf("got %q", resultText(res))
+	}
+
+	out := decodeResult(t, res)
+	obs, ok := out["observation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected observation map, got %v", out["observation"])
+	}
+	semantic, ok := obs["semantic_observation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected parsed semantic_observation object, got %v", obs["semantic_observation"])
+	}
+	if got := semantic["reasoning_quality"]; got != "brittle" {
+		t.Fatalf("reasoning_quality = %v, want brittle", got)
+	}
+
+	recents, err := store.GetRecentInteractionsByLearner("L_owner", 1)
+	if err != nil {
+		t.Fatalf("get interactions: %v", err)
+	}
+	if len(recents) != 1 {
+		t.Fatalf("got %d interactions, want 1", len(recents))
+	}
+	snapshots, err := store.GetPedagogicalSnapshots("L_owner", recents[0].DomainID, "a", 5)
+	if err != nil {
+		t.Fatalf("get snapshots: %v", err)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("got %d snapshots, want 1", len(snapshots))
+	}
+	if !strings.Contains(snapshots[0].ObservationJSON, `"semantic_observation"`) ||
+		!strings.Contains(snapshots[0].ObservationJSON, `"reasoning_quality":"brittle"`) {
+		t.Fatalf("snapshot observation should include semantic_observation, got %s", snapshots[0].ObservationJSON)
+	}
+}
+
 func TestRecordInteraction_ReturnsPedagogicalModelObservation(t *testing.T) {
 	store, deps := setupToolsTest(t)
 	makeOwnerDomain(t, store, "L_owner", "math")
@@ -201,6 +251,9 @@ func TestRecordInteraction_ReturnsPedagogicalModelObservation(t *testing.T) {
 	if _, ok := rasch["success_probability_before"].(float64); !ok {
 		t.Fatalf("expected success_probability_before in rasch_elo, got %v", rasch)
 	}
+	if _, ok := obs["semantic_observation"]; ok {
+		t.Fatalf("semantic_observation should be absent when semantic_observation_json is omitted: %v", obs)
+	}
 
 	recents, err := store.GetRecentInteractionsByLearner("L_owner", 1)
 	if err != nil || len(recents) != 1 {
@@ -216,6 +269,9 @@ func TestRecordInteraction_ReturnsPedagogicalModelObservation(t *testing.T) {
 	if !strings.Contains(snapshots[0].ObservationJSON, `"rasch_elo"`) ||
 		!strings.Contains(snapshots[0].ObservationJSON, `"bkt_learn"`) {
 		t.Fatalf("snapshot observation should include model signals, got %s", snapshots[0].ObservationJSON)
+	}
+	if strings.Contains(snapshots[0].ObservationJSON, `"semantic_observation"`) {
+		t.Fatalf("snapshot observation should omit semantic_observation when absent, got %s", snapshots[0].ObservationJSON)
 	}
 }
 
@@ -265,6 +321,44 @@ func TestRecordInteraction_RejectsNegativeScalarRubricScoreJSON(t *testing.T) {
 	msg := resultText(res)
 	if !strings.Contains(msg, "rubric_score_json") || !strings.Contains(msg, "non-negative") {
 		t.Fatalf("expected structured rubric_score_json error, got %q", msg)
+	}
+}
+
+func TestRecordInteraction_RejectsInvalidSemanticObservationJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "malformed", raw: `{"reasoning_quality":`, want: "valid JSON"},
+		{name: "non_object", raw: `["brittle"]`, want: "JSON object"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, deps := setupToolsTest(t)
+			makeOwnerDomain(t, store, "L_owner", "math")
+
+			res := callTool(t, deps, registerRecordInteraction, "L_owner", "record_interaction", map[string]any{
+				"concept":                   "a",
+				"activity_type":             "RECALL_EXERCISE",
+				"success":                   true,
+				"response_time_seconds":     5.0,
+				"confidence":                0.8,
+				"notes":                     "",
+				"semantic_observation_json": tc.raw,
+			})
+			if !res.IsError {
+				t.Fatalf("expected semantic_observation_json validation error, got %q", resultText(res))
+			}
+			msg := resultText(res)
+			if !strings.Contains(msg, "semantic_observation_json") || !strings.Contains(msg, tc.want) {
+				t.Fatalf("expected semantic_observation_json %q error, got %q", tc.want, msg)
+			}
+
+			recents, _ := store.GetRecentInteractionsByLearner("L_owner", 5)
+			if len(recents) != 0 {
+				t.Fatalf("expected no interactions persisted on bad semantic_observation_json, got %d", len(recents))
+			}
+		})
 	}
 }
 

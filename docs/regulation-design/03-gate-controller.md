@@ -42,18 +42,18 @@ figés.
 
 ### Comment `[3]` arrive dans le router
 
-Plan d'intégration (PR `[2]`) :
+État courant :
 
-1. `[2] PhaseController` choisit la phase courante.
-2. `[2]` appelle `ApplyGate(input)` :
+1. `get_next_activity` appelle l'orchestrateur de phase.
+2. L'orchestrateur appelle `ApplyGate(input)` :
    - Si `gate.EscapeAction != nil` → emit l'escape directement, fin du
      pipeline.
-   - Si `gate.NoCandidate` → `[2]` bascule de phase ou émet REST.
-   - Sinon → `[2]` passe `gate.AllowedConcepts` à `[4] SelectConcept`,
+   - Si `gate.NoCandidate` → il bascule de phase ou émet REST.
+   - Sinon → il passe `gate.AllowedConcepts` à `[4] SelectConcept`,
      et `gate.PerConceptActionRestriction` à `[5] SelectAction`.
 
-Cette PR `[3]` ajoute la fonction et son flag (`REGULATION_GATE=on`),
-accompagnée de tests. Le câblage effectif arrive en PR `[2]`.
+`REGULATION_GATE` ne contrôle pas ce câblage runtime. Le flag ne fait
+qu'inclure ou retirer l'appendix explicatif dans `tools/prompt.go`.
 
 ---
 
@@ -253,8 +253,8 @@ TestApplyGate_AntiRepeatWindowExceedsRecent
 
 ### 6.5 Régression
 
-`ApplyGate` n'est pas câblée par cette PR → aucun test existant ne
-casse, par construction (cohérent avec `[4]` et `[5]`).
+`ApplyGate` reste une fonction pure et testable isolément, même
+lorsqu'elle est appelée par l'orchestrateur.
 
 ---
 
@@ -262,7 +262,7 @@ casse, par construction (cohérent avec `[4]` et `[5]`).
 
 ### Amont
 
-- **`[2] PhaseController`** (PR `[2]`) : seul caller. Pré-derive les
+- **`[2] PhaseController`** : caller runtime. Pré-derive les
   inputs (alerts via `engine/alert.go`, misconceptions via
   `db.GetActiveMisconceptions`, recent concepts via
   `db.GetRecentInteractionsByLearner`).
@@ -276,8 +276,6 @@ casse, par construction (cohérent avec `[4]` et `[5]`).
   honore déjà la priorité misconception via son override interne — le
   Gate ne fait que rendre la contrainte explicite. Pas de modification
   de `[5]` requise dans cette PR.
-- **Router legacy** : pas câblé directement. La migration passe par
-  `[2]`.
 
 ### Avec `[5]` — alignement de la priorité misconception
 
@@ -443,7 +441,7 @@ anti-rep reste pertinent (varier les diagnostics).
 | **Création** | `engine/gate_test.go` | ~400 lignes (règles individuelles + composition + phase-spécifique + dégénérés) |
 | **Modif** | `models/domain.go` | ajouter constante `ActivityCloseSession` (OQ-3.2 = A) |
 | **Modif** | `tools/prompt.go` | `regulationGateEnabled()` + `gateAppendix` documentant le contrat des vetos |
-| **Pas modifié** | `engine/router.go`, `tools/activity.go`, `engine/concept_selector.go`, `engine/action_selector.go` | aucun câblage runtime |
+| **Câblage courant** | `engine/orchestrator.go` | l'orchestrateur appelle `ApplyGate`; `REGULATION_GATE` reste limité à l'appendix prompt |
 
 ### 9.2 Critères de merge
 
@@ -481,7 +479,7 @@ anti-rep reste pertinent (varier les diagnostics).
 | **AntiRepeatWindow défaut** | OQ-3.4 = A (N=3, paramétrable via `GateInput`) |
 | **Composition** | OQ-3.5 = OVERLOAD > misconception (restrict) > prereq > anti-rep ; misconception bypasse anti-rep mais PAS prereq |
 | **Phase DIAGNOSTIC** | OQ-3.6 = A (seul prereq bypassé) |
-| **Flag** | `REGULATION_GATE=on` (gate doc prompt et câblage futur ; fonction inconditionnelle) |
+| **Flag** | `REGULATION_GATE=off` retire seulement l'appendix prompt ; `ApplyGate` reste exécuté par l'orchestrateur |
 | **Findings résolus** | F-2.X, F-3.X (placeholder ; le Gate matérialise les protections audit) |
 
 ---

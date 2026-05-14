@@ -50,6 +50,13 @@ type OrchestratorInput struct {
 	// Now is the wall-clock used for phase_changed_at and any time
 	// arithmetic. Tests pass deterministic timestamps.
 	Now time.Time
+	// SessionStart is the start timestamp of the active learning
+	// session. It is distinct from Now: OVERLOAD alerts compare the
+	// current clock to the session start.
+	SessionStart time.Time
+	// ReviewOnly biases the pipeline toward previously studied material
+	// while preserving Gate and ActionSelector constraints.
+	ReviewOnly bool
 	// Config is injected — typically NewDefaultPhaseConfig() in
 	// production. Tests can pass narrower configs to drive specific
 	// scenarios.
@@ -105,26 +112,33 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 		return models.Activity{}, "", err
 	}
 
-	// 3. Build PhaseObservables and evaluate the FSM.
-	obs := buildObservables(domain, pf, input.Config)
-	eval := EvaluatePhase(currentPhase, obs, input.Config)
-	fsmTransitioned := eval.Transitioned
-	if fsmTransitioned {
-		entryEntropy := 0.0
-		if eval.To == models.PhaseDiagnostic {
-			entryEntropy = obs.MeanEntropy
+	// 3. Build PhaseObservables and evaluate the FSM. Review requests
+	// stay inside the pipeline but deliberately bias phase selection
+	// toward maintenance instead of advancing the domain FSM.
+	fsmTransitioned := false
+	if input.ReviewOnly {
+		currentPhase = models.PhaseMaintenance
+	} else {
+		obs := buildObservables(domain, pf, input.Config)
+		eval := EvaluatePhase(currentPhase, obs, input.Config)
+		fsmTransitioned = eval.Transitioned
+		if fsmTransitioned {
+			entryEntropy := 0.0
+			if eval.To == models.PhaseDiagnostic {
+				entryEntropy = obs.MeanEntropy
+			}
+			logger.Info("phase transition (FSM)",
+				"domain", domain.ID, "from", eval.From, "to", eval.To,
+				"entry_entropy", entryEntropy, "rationale", eval.Rationale)
+			if persistErr := store.UpdateDomainPhase(domain.ID, eval.To, entryEntropy, input.Now); persistErr != nil {
+				logger.Error("orchestrator: failed to persist phase transition",
+					"domain", domain.ID, "from", eval.From, "to", eval.To, "err", persistErr)
+				// The transition is informative — failing to persist
+				// must not block the live activity. Continue with the
+				// new in-memory phase.
+			}
+			currentPhase = eval.To
 		}
-		logger.Info("phase transition (FSM)",
-			"domain", domain.ID, "from", eval.From, "to", eval.To,
-			"entry_entropy", entryEntropy, "rationale", eval.Rationale)
-		if persistErr := store.UpdateDomainPhase(domain.ID, eval.To, entryEntropy, input.Now); persistErr != nil {
-			logger.Error("orchestrator: failed to persist phase transition",
-				"domain", domain.ID, "from", eval.From, "to", eval.To, "err", persistErr)
-			// The transition is informative — failing to persist
-			// must not block the live activity. Continue with the
-			// new in-memory phase.
-		}
-		currentPhase = eval.To
 	}
 
 	// 4. Run pipeline with one-shot retry on NoFringe.
@@ -143,6 +157,9 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 		if !sig.IsNoFringe {
 			return activity, currentPhase, nil
 		}
+		if input.ReviewOnly {
+			break
+		}
 		if fsmTransitioned || retry >= orchestratorMaxRetries {
 			break
 		}
@@ -159,6 +176,14 @@ func OrchestrateWithPhase(store *db.Store, input OrchestratorInput) (models.Acti
 				"domain", domain.ID, "from", currentPhase, "to", next, "err", persistErr)
 		}
 		currentPhase = next
+	}
+
+	if input.ReviewOnly {
+		return models.Activity{
+			Type:         models.ActivityRest,
+			Rationale:    "[intent=review] no_reviewable_concept: no previously studied concept is available in this domain",
+			PromptForLLM: "No reviewed concept is available in this domain. Tell the learner there is nothing to revise yet in this domain and ask whether they want to start a new concept.",
+		}, currentPhase, nil
 	}
 
 	return models.Activity{
@@ -185,13 +210,14 @@ type pipelineSignal struct {
 // pipelineFixtures bundles the data fetched once per Orchestrate call
 // and reused across the FSM evaluation and the pipeline run.
 type pipelineFixtures struct {
-	StatesList      []*models.ConceptState
-	StatesByConcept map[string]*models.ConceptState
-	GoalRelevance   map[string]float64 // nil if vector absent/parse-failed
-	ActiveMisc      map[string]bool
-	RecentConcepts  []string
-	Alerts          []models.Alert
-	DiagnosticItems int // count since phase_changed_at
+	StatesList         []*models.ConceptState
+	StatesByConcept    map[string]*models.ConceptState
+	GoalRelevance      map[string]float64 // nil if vector absent/parse-failed
+	ActiveMisc         map[string]bool
+	RecentConcepts     []string
+	RecentInteractions []*models.Interaction
+	Alerts             []models.Alert
+	DiagnosticItems    int // count since phase_changed_at
 }
 
 func fetchPipelineFixtures(store *db.Store, domain *models.Domain, input OrchestratorInput) (*pipelineFixtures, error) {
@@ -199,8 +225,17 @@ func fetchPipelineFixtures(store *db.Store, domain *models.Domain, input Orchest
 	if err != nil {
 		return nil, fmt.Errorf("get states: %w", err)
 	}
+	domainConcepts := make(map[string]bool, len(domain.Graph.Concepts))
+	for _, c := range domain.Graph.Concepts {
+		domainConcepts[c] = true
+	}
+	domainStates := make([]*models.ConceptState, 0, len(domain.Graph.Concepts))
 	stateMap := make(map[string]*models.ConceptState, len(states))
 	for _, cs := range states {
+		if !domainConcepts[cs.Concept] {
+			continue
+		}
+		domainStates = append(domainStates, cs)
 		stateMap[cs.Concept] = cs
 	}
 
@@ -236,16 +271,31 @@ func fetchPipelineFixtures(store *db.Store, domain *models.Domain, input Orchest
 	if err != nil {
 		return nil, fmt.Errorf("get recent interactions: %w", err)
 	}
-	alerts := ComputeAlerts(states, recentInteractions, input.Now)
+	domainInteractions := make([]*models.Interaction, 0, len(recentInteractions))
+	for _, interaction := range recentInteractions {
+		if domainConcepts[interaction.Concept] {
+			domainInteractions = append(domainInteractions, interaction)
+		}
+	}
+	sessionStart := input.SessionStart
+	if sessionStart.IsZero() {
+		var sessionErr error
+		sessionStart, sessionErr = store.GetSessionStart(input.LearnerID)
+		if sessionErr != nil {
+			return nil, fmt.Errorf("get session start: %w", sessionErr)
+		}
+	}
+	alerts := ComputeAlerts(domainStates, domainInteractions, sessionStart)
 
 	return &pipelineFixtures{
-		StatesList:      states,
-		StatesByConcept: stateMap,
-		GoalRelevance:   goalRelevance,
-		ActiveMisc:      activeMisc,
-		RecentConcepts:  recent,
-		Alerts:          alerts,
-		DiagnosticItems: diagItems,
+		StatesList:         domainStates,
+		StatesByConcept:    stateMap,
+		GoalRelevance:      goalRelevance,
+		ActiveMisc:         activeMisc,
+		RecentConcepts:     recent,
+		RecentInteractions: domainInteractions,
+		Alerts:             alerts,
+		DiagnosticItems:    diagItems,
 	}, nil
 }
 
@@ -369,9 +419,14 @@ func runPipeline(
 		Concepts:      gateResult.AllowedConcepts,
 		Prerequisites: filterPrerequisites(domain.Graph.Prerequisites, allowedSet),
 	}
-	selection, err := SelectConcept(phase, pf.StatesList, filteredGraph, pf.GoalRelevance)
-	if err != nil {
-		return models.Activity{}, pipelineSignal{}, fmt.Errorf("concept_selector: %w", err)
+	var selection Selection
+	if input.ReviewOnly {
+		selection = SelectReviewConcept(gateResult.AllowedConcepts, pf.StatesByConcept, pf.RecentInteractions, pf.ActiveMisc)
+	} else {
+		selection, err = SelectConcept(phase, pf.StatesList, filteredGraph, pf.GoalRelevance)
+		if err != nil {
+			return models.Activity{}, pipelineSignal{}, fmt.Errorf("concept_selector: %w", err)
+		}
 	}
 	if selection.NoFringe {
 		return models.Activity{}, pipelineSignal{IsNoFringe: true}, nil
@@ -402,6 +457,9 @@ func runPipeline(
 		FeynmanCount:          history.FeynmanCount,
 		TransferCount:         history.TransferCount,
 	})
+	if input.ReviewOnly {
+		action = constrainReviewAction(action, cs)
+	}
 
 	// Honor Gate's ActionRestriction (defensive — [5] already
 	// prioritises misconception, so this is belt + braces).
@@ -432,6 +490,93 @@ func containsActivityType(set []models.ActivityType, t models.ActivityType) bool
 	return slices.Contains(set, t)
 }
 
+func SelectReviewConcept(
+	allowed []string,
+	states map[string]*models.ConceptState,
+	interactions []*models.Interaction,
+	activeMisc map[string]bool,
+) Selection {
+	interactionCounts := make(map[string]int)
+	for _, interaction := range interactions {
+		if interaction == nil {
+			continue
+		}
+		interactionCounts[interaction.Concept]++
+	}
+
+	best := Selection{NoFringe: true, Phase: models.PhaseMaintenance}
+	bestScore := -1.0
+	for _, concept := range allowed {
+		cs := states[concept]
+		if !reviewableConcept(cs, interactionCounts[concept]) {
+			continue
+		}
+		retention := reviewRetention(cs)
+		score := 1 - retention
+		if activeMisc[concept] {
+			score += 2
+		}
+		if cs != nil && cs.PMastery < algorithms.MasteryBKT() {
+			score += 0.15
+		}
+		if interactionCounts[concept] > 0 {
+			score += 0.05
+		}
+		if score > bestScore {
+			bestScore = score
+			best = Selection{
+				Concept:   concept,
+				Score:     score,
+				NoFringe:  false,
+				Phase:     models.PhaseMaintenance,
+				Rationale: fmt.Sprintf("[intent=review] selected prior concept %q with retention %.2f", concept, retention),
+			}
+		}
+	}
+	return best
+}
+
+func reviewableConcept(cs *models.ConceptState, interactionCount int) bool {
+	if interactionCount > 0 {
+		return true
+	}
+	if cs == nil {
+		return false
+	}
+	return cs.Reps > 0 || cs.CardState != "new"
+}
+
+func reviewRetention(cs *models.ConceptState) float64 {
+	if cs == nil || cs.CardState == "new" {
+		return 0.70
+	}
+	return algorithms.Retrievability(cs.ElapsedDays, cs.Stability)
+}
+
+func constrainReviewAction(action Action, cs *models.ConceptState) Action {
+	switch action.Type {
+	case models.ActivityRecall, models.ActivityPractice, models.ActivityDebugMisconception:
+		action.Rationale = "review intent constraint : " + action.Rationale
+		return action
+	}
+	if reviewRetention(cs) < retentionForgettingThreshold {
+		return Action{
+			Type:             models.ActivityRecall,
+			DifficultyTarget: 0.60,
+			Format:           "review_retrieval",
+			EstimatedMinutes: 8,
+			Rationale:        "review intent constraint : retrieval before new or mastery activity",
+		}
+	}
+	return Action{
+		Type:             models.ActivityPractice,
+		DifficultyTarget: clampActionDifficulty(action.DifficultyTarget),
+		Format:           "review_practice",
+		EstimatedMinutes: 10,
+		Rationale:        "review intent constraint : practice on prior material",
+	}
+}
+
 func composeActivity(a Action, sel Selection, phase models.Phase) models.Activity {
 	return models.Activity{
 		Type:             a.Type,
@@ -440,7 +585,7 @@ func composeActivity(a Action, sel Selection, phase models.Phase) models.Activit
 		Format:           a.Format,
 		EstimatedMinutes: a.EstimatedMinutes,
 		Rationale:        fmt.Sprintf("[phase=%s] %s - %s", phase, sel.Rationale, a.Rationale),
-		PromptForLLM:     fmt.Sprintf("Generate a %s activity on %s. Format: %s. Target difficulty: %.2f.", a.Type, sel.Concept, a.Format, a.DifficultyTarget),
+		PromptForLLM:     BuildActivityPrompt(a.Type, sel.Concept, a.Format),
 	}
 }
 

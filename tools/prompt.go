@@ -11,22 +11,24 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// regulationActionEnabled gates the action-selector documentation
-// appendix. Default-on, opt-out only via the literal "off" - same
-// convention as REGULATION_THRESHOLD. The pipeline ships active; the
-// flag exists as a kill switch for emergency rollback.
+// regulationActionEnabled gates only the action-selector documentation
+// appendix. Default-on, opt-out only via the literal "off". This is
+// not a runtime kill switch: SelectAction still runs through the
+// orchestrator path.
 func regulationActionEnabled() bool {
 	return os.Getenv("REGULATION_ACTION") != "off"
 }
 
-// regulationConceptEnabled gates the concept-selector documentation
-// appendix. Default-on, opt-out via "off".
+// regulationConceptEnabled gates only the concept-selector documentation
+// appendix. Default-on, opt-out via "off"; SelectConcept itself keeps
+// running through the orchestrator path.
 func regulationConceptEnabled() bool {
 	return os.Getenv("REGULATION_CONCEPT") != "off"
 }
 
-// regulationGateEnabled gates the gate-controller documentation
-// appendix. Default-on, opt-out via "off".
+// regulationGateEnabled gates only the gate-controller documentation
+// appendix. Default-on, opt-out via "off"; ApplyGate itself keeps
+// running through the orchestrator path.
 func regulationGateEnabled() bool {
 	return os.Getenv("REGULATION_GATE") != "off"
 }
@@ -63,7 +65,7 @@ OPERATING PRINCIPLES
 TOOLS (reference)
 - get_learner_context(): session context, domain list, progress_narrative
 - get_pending_alerts(): critical alerts
-- get_next_activity(domain_id?, domain_name?, intent?): next optimal activity + metacognitive_mirror + tutor_mode + motivation_brief + mastery_evidence/mastery_uncertainty + transfer_profile + rasch_elo_calibration
+- get_next_activity(domain_id?, domain_name?, intent?): next optimal activity + pedagogical_contract + metacognitive_mirror + tutor_mode + motivation_brief + mastery_evidence/mastery_uncertainty + transfer_profile + rasch_elo_calibration
 - record_interaction(): record an exercise outcome; updates BKT/FSRS/IRT and returns individualized BKT/Rasch-Elo observation signals
 - record_affect(): emotional check-in at session start/end
 - record_session_close(): close the session; returns recap_brief
@@ -105,6 +107,7 @@ A. SESSION START
 B. EXERCISE LOOP (per exercise)
    Before:
    - Call get_next_activity(domain_id?, domain_name?, intent?) - contains alert-aware routing, metacognitive_mirror, tutor_mode and motivation_brief.
+   - Treat pedagogical_contract as the operational contract for the activity: follow llm_instruction, respect constraints/allowed_variants, keep audit_rationale internal, and use learner_explanation only as learner-safe wording.
    - If the learner names a subject/domain and you do not know its ID, use the domains from get_learner_context and pass the matching domain_id. If the ID is unknown, pass domain_name. Never let the default last-active domain override an explicitly named subject.
    - If the learner asks to revise/review/practice prior material, pass intent:"review". If intent_status=="no_reviewable_concept", say there is nothing previously studied to revise in that domain and ask whether they want to start a new concept.
    - Do not call get_pending_alerts in the same turn unless the learner explicitly asks for raw pending alerts.
@@ -173,15 +176,16 @@ When to call set_goal_relevance:
 - After add_concepts when you want to maintain goal-aware routing on the new concepts.
 - You may call partially (a subset of concepts) - it is INCREMENTAL.`
 
-// actionSelectorAppendix is appended to systemPrompt when REGULATION_ACTION=on.
-// It documents the four new ActivityType constants emitted by [5] ActionSelector
-// once it is wired into the runtime (router migration deferred to PR [2]).
-// Until that wiring lands, the appendix is a forward-looking documentation
-// surface so the LLM-side prompt is ready when the new types start flowing.
+// actionSelectorAppendix is appended to systemPrompt unless
+// REGULATION_ACTION=off. The flag is prompt-only: it controls whether
+// the LLM sees these routing semantics, not whether [5] ActionSelector
+// runs in the orchestrator.
 const actionSelectorAppendix = `
 
 ACTION-AWARE (REGULATION_ACTION=on):
-Four new activity types may be emitted by get_next_activity once the regulation orchestrator is wired:
+REGULATION_ACTION is a prompt-only flag. Setting it to "off" hides this explanatory appendix; the runtime action selector still runs through get_next_activity.
+
+Activity types emitted by the regulation orchestrator:
 - PRACTICE: standard practice exercise. Difficulty targets the ZPD via IRT (pCorrect ~ 0.70).
 - DEBUG_MISCONCEPTION: confront a detected false belief. Distinct from DEBUGGING_CASE which breaks a plateau via format variety; here the confrontation is targeted at the active misconception.
 - FEYNMAN_PROMPT: the learner explains the concept to consolidate mastery and reveal residual gaps.
@@ -191,15 +195,15 @@ Internal cascade (informational - [5] decides for you):
 - active misconception > low retention > mastery brackets (0.30 / 0.70 / 0.85 stable over N=3 interactions).
 - At the top of the scale, rotation MasteryChallenge -> Feynman -> Transfer -> cycle.`
 
-// conceptSelectorAppendix is appended to systemPrompt when REGULATION_CONCEPT=on.
-// It documents the goal-aware concept routing introduced by [4]
-// ConceptSelector, with explicit emphasis on the OQ-4.3 = B' contract:
-// concepts absent from set_goal_relevance are NOT selectable until
-// re-decomposed. The appendix is forward-looking - the function is
-// not yet wired into the runtime (deferred to PR [2]).
+// conceptSelectorAppendix is appended to systemPrompt unless
+// REGULATION_CONCEPT=off. The flag is prompt-only: it controls whether
+// the LLM sees the goal-aware concept-routing semantics, not whether
+// [4] ConceptSelector runs in the orchestrator.
 const conceptSelectorAppendix = `
 
 CONCEPT-AWARE (REGULATION_CONCEPT=on):
+REGULATION_CONCEPT is a prompt-only flag. Setting it to "off" hides this explanatory appendix; the runtime concept selector still runs through get_next_activity.
+
 Component [4] ConceptSelector picks the next concept based on the current phase and the goal_relevance vector.
 
 Internal cascade per phase (informational - [4] decides for you):
@@ -214,13 +218,14 @@ Concepts present in the graph but ABSENT from the goal_relevance vector are NOT 
 
 This is the rule after every add_concepts: new concepts only become eligible after decomposition. No silent default is applied - this is intentional to make the decomposer contract explicit.`
 
-// gateAppendix is appended to systemPrompt when REGULATION_GATE=on.
-// Documents the visible effects of [3] Gate Controller (the new
-// CLOSE_SESSION ActivityType, the misconception lock, and the silent
-// vetos that shape the candidate pool).
+// gateAppendix is appended to systemPrompt unless REGULATION_GATE=off.
+// The flag is prompt-only: it controls whether the LLM sees the gate
+// semantics, not whether [3] Gate Controller runs in the orchestrator.
 const gateAppendix = `
 
 GATE-AWARE (REGULATION_GATE=on):
+REGULATION_GATE is a prompt-only flag. Setting it to "off" hides this explanatory appendix; the runtime gate still runs through get_next_activity.
+
 Component [3] Gate Controller filters candidates before routing. Three LLM-visible changes:
 
 1. New activity type: CLOSE_SESSION
@@ -235,9 +240,9 @@ Component [3] Gate Controller filters candidates before routing. Three LLM-visib
 3. Misconception lock: if a concept is returned with ActivityType=DEBUG_MISCONCEPTION, the Gate has locked that concept to the debug format. Focus the exchange on confronting the error - no standard practice until the misconception is resolved (resolution = 3 consecutive interactions without that misconception).`
 
 // buildSystemPrompt assembles the prompt at request time so that flag-gated
-// sections (goal-aware tools, future regulation components) appear only
-// when their feature flag is on. Each gated section lives in its own const
-// to keep the diff localised when a future component lands.
+// sections appear only when their prompt/tool surface is enabled. Each
+// gated section lives in its own const to keep the diff localised when the
+// prompt contract changes.
 func buildSystemPrompt() string {
 	out := systemPrompt
 	if regulationGoalEnabled() {

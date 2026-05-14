@@ -1,8 +1,8 @@
 # [5] ActionSelector — Design (Phase 1)
 
 > Composant 3/7 du pipeline de régulation. Reçoit un `concept_id` déjà
-> choisi (par le router legacy en transition, par `[4] ConceptSelector`
-> ensuite) et décide *quoi* faire dessus : type d'activité +
+> choisi par `[4] ConceptSelector` dans l'orchestrateur courant et
+> décide *quoi* faire dessus : type d'activité +
 > `DifficultyTarget`. Phase-agnostique : ne consomme ni `phase` ni
 > `goal_relevance`.
 >
@@ -32,31 +32,20 @@ que :
 - `[5]` n'a pas besoin de `goal_relevance` (le signal de `[1]`).
 - `[5]` n'a pas besoin de `phase` (le signal de `[2]`).
 - `[5]` est strictement local au concept choisi.
-- Une fois `[5]` mergé, on peut migrer le router legacy à utiliser
-  `[5]` immédiatement après le choix de concept (réduit le code
-  hardcoded dans `engine/router.go`), sans attendre `[4]`.
+- L'orchestrateur courant appelle `[5]` après le choix de concept par
+  `[4]`, ce qui garde la décision d'action isolée du choix de concept.
 
-Cette intégration progressive du router est explicitement le bénéfice
-de l'ordre choisi.
+Cette séparation amont/aval est explicitement le bénéfice de l'ordre
+choisi.
 
-### Comment `[5]` arrive dans le router
+### Comment `[5]` est utilisé par le runtime
 
-Plan d'intégration (sera détaillé en PR `[2]` quand le wrapper est
-implémenté ; ici juste la cible) :
+État courant : `get_next_activity` appelle l'orchestrateur de phase,
+qui compose `[4] SelectConcept`, `[5] SelectAction` et `[3] ApplyGate`.
+Le router legacy n'est plus le chemin normal de sélection.
 
-1. **Phase MVP `[5]` only** : le router legacy continue à choisir le
-   concept comme aujourd'hui ; mais après le choix, on appelle
-   `SelectAction(concept, cs, mc)` pour obtenir `(ActivityType,
-   DifficultyTarget)` au lieu des branches hardcoded.
-2. **Phase MVP `[3]+[4]` actifs** : `[4] ConceptSelector` choisit le
-   concept (en utilisant `goal_relevance`), `[5]` choisit l'action.
-3. **Phase MVP complet (`[2]` orchestrateur)** : le pipeline tourne
-   en toute branche, le router legacy est entièrement désactivé via
-   `REGULATION_PHASE=on`.
-
-Cette PR `[5]` ne fait pas la migration du router. Elle ajoute la
-fonction et son flag (`REGULATION_ACTION=on`), accompagnée de tests.
-Le branchement effectif arrive en PR `[3]/[4]/[2]`.
+`REGULATION_ACTION` ne contrôle pas ce câblage runtime. Le flag ne fait
+qu'inclure ou retirer l'appendix explicatif dans `tools/prompt.go`.
 
 ---
 
@@ -330,11 +319,11 @@ Vérification numérique de la formule :
 - θ = 0 → DifficultyTarget = 0.30 (clamp bas atteint à b=-0.847)
 - θ = 4 → DifficultyTarget = 0.85 (clamp haut)
 
-### 7.3 Régression — fonction pure non câblée
+### 7.3 Régression — fonction pure câblée par l'orchestrateur
 
-`SelectAction` n'est pas appelée par le runtime dans cette PR. Donc
-aucun test existant ne casse, par construction. Les nouveaux tests
-vivent dans `engine/action_selector_test.go`.
+`SelectAction` reste une fonction pure et testable isolément, même
+lorsqu'elle est appelée par l'orchestrateur. Les tests dédiés vivent
+dans `engine/action_selector_test.go`.
 
 ### 7.4 Pas de fixture-shift sur les tests existants
 
@@ -344,14 +333,11 @@ Comme `[7]` et `[1]` : les fixtures existantes ne sont pas modifiées.
 
 ## 8. Interaction amont/aval
 
-### Amont (callers futurs)
+### Amont
 
-- **Router legacy** (`engine/router.go`, en transition) : pourra
-  appeler `SelectAction` après son propre choix de concept pour
-  remplacer les branches hardcoded sur ActivityType. Pas dans cette PR.
-- **`[4] ConceptSelector`** : choisira un `concept_id` puis appellera
-  `SelectAction` pour l'envelopper.
-- **`[2] PhaseController`** : en `INSTRUCTION`/`MAINTENANCE`, déléguera
+- **`[4] ConceptSelector`** : choisit un `concept_id`; l'orchestrateur
+  appelle ensuite `SelectAction` pour l'envelopper.
+- **`[2] PhaseController`** : en `INSTRUCTION`/`MAINTENANCE`, délègue
   à `SelectAction` après que `[4]` a choisi le concept. En
   `DIAGNOSTIC`, `[2]` émet directement `DIAGNOSTIC_PROBE` sans passer
   par `[5]`.
@@ -519,7 +505,7 @@ décision fausse. Note inline pointant vers F-1.3 dans la dette.
 | **Création** | `engine/action_selector_test.go` | ~250 lignes (cascade + ZPD + dégénérés) |
 | **Modif** | `models/domain.go` | ajouter constantes `ActivityPractice`, `ActivityDebugMisconception`, `ActivityFeynmanPrompt`, `ActivityTransferProbe` |
 | **Modif** | `tools/prompt.go` | ajouter un appendix `actionSelectorAppendix` documentant les 4 nouvelles activity types quand `REGULATION_ACTION=on` |
-| **Pas modifié** | `engine/router.go` | la fonction `SelectAction` est créée mais pas câblée dans le router legacy. Câblage ultérieur (PR `[2]`). |
+| **Câblage courant** | `engine/orchestrator.go` | l'orchestrateur appelle `SelectAction`; `REGULATION_ACTION` reste limité à l'appendix prompt. |
 | **Pas modifié** | tests existants | aucune fixture touchée |
 
 ### 10.2 Critères de merge
@@ -530,19 +516,13 @@ décision fausse. Note inline pointant vers F-1.3 dans la dette.
 - [ ] Aucune mention de `0.85` literal dans `engine/action_selector.go` (drift test du composant `[7]` doit toujours passer)
 - [ ] Tests OQ-5.6 (NaN guard) présents et verts
 
-### 10.3 Pas inclus dans cette PR
+### 10.3 Historique de périmètre
 
-- **Câblage du router legacy à `SelectAction`** : reporté en PR `[2]`
-  pour grouper avec l'orchestrateur. Ça permet de mesurer l'effet
-  combiné du pipeline complet d'un coup, plutôt qu'une migration
-  partielle qui mélange legacy + composants nouveaux.
-- **Test d'intégration end-to-end** : non pertinent ici (fonction
-  pure, pas de flux). Sera couvert en PR `[2]` avec un apprenant
-  simulé sur 20 sessions.
-- **Documentation utilisateur des 4 nouveaux ActivityType** dans le
-  README ou les MCP tool descriptions : noop pour cette PR, à
-  consolider avec les changements `[2]` quand l'expérience finale
-  sera visible.
+- Le câblage runtime a été réalisé ensuite par l'orchestrateur de phase.
+- `REGULATION_ACTION` n'a pas été transformé en kill switch runtime :
+  il reste un flag d'appendix prompt.
+- La documentation utilisateur des ActivityType est portée par le
+  README et par `tools/prompt.go`.
 
 ### 10.4 Test d'intégration goal-aware (rappel)
 
@@ -563,8 +543,8 @@ ActionSelector seul ne consomme pas `goal_relevance`.
 | **Misconception > retention** | OQ-5.4 = A |
 | **Stabilité high-mastery** | OQ-5.5 = B (N=3 interactions au-dessus de seuil) |
 | **NaN guard** | OQ-5.6 = B (Rest fallback) |
-| **Flag** | `REGULATION_ACTION=on` (gate la documentation prompt et le câblage futur ; la fonction elle-même est inconditionnelle puisque rien ne l'appelle encore) |
-| **Findings résolus** | F-3.1 (θ → DifficultyTarget), F-3.5 (Feynman/Transfer routables serveur — mais effective uniquement quand `[2]` câble) |
+| **Flag** | `REGULATION_ACTION=off` retire seulement l'appendix prompt ; `SelectAction` reste exécuté par l'orchestrateur |
+| **Findings résolus** | F-3.1 (θ → DifficultyTarget), F-3.5 (Feynman/Transfer routables serveur via l'orchestrateur) |
 
 ---
 

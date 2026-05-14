@@ -42,20 +42,14 @@ pour deux raisons :
 L'output de `[4]` (un `Selection.Concept`) est l'input direct de `[5]`.
 Ordre amont→aval naturel — pas une coïncidence.
 
-### Comment `[4]` arrive dans le router
+### Comment `[4]` est utilisé par le runtime
 
-Plan d'intégration (détaillé en PR `[2]` ; ici juste la cible) :
+État courant : `get_next_activity` appelle l'orchestrateur de phase,
+qui compose `[4] SelectConcept`, `[5] SelectAction` et `[3] ApplyGate`.
+Le router legacy n'est plus le chemin normal de sélection.
 
-1. **Phase MVP `[5]+[4]`** : router legacy choisit le concept ; `[4]` est
-   appelée pour le *re*-choisir si `REGULATION_CONCEPT=on` (mode shadow,
-   on-line ou off-line — à valider). Si désactivé, le router legacy
-   prévaut.
-2. **Phase MVP complet `[2]`** : l'orchestrateur `[2]` appelle
-   `SelectConcept(phase, ...)` puis `SelectAction(concept, ...)`. Le
-   router legacy est désactivé via `REGULATION_PHASE=on`.
-
-Cette PR `[4]` ajoute la fonction et son flag `REGULATION_CONCEPT=on`,
-accompagnée de tests. Le câblage effectif arrive en PR `[2]`.
+`REGULATION_CONCEPT` ne contrôle pas ce câblage runtime. Le flag ne
+fait qu'inclure ou retirer l'appendix explicatif dans `tools/prompt.go`.
 
 ---
 
@@ -114,7 +108,7 @@ courante »*. C'est un **signal**, pas une **erreur** :
 - En **DIAGNOSTIC** : aucune ambiguïté informative (P(L) saturé à 0
   ou 1 partout) — `[2]` peut transiter selon le contexte.
 
-Le caller (en l'occurrence `[2]` future) interprète `NoFringe` comme
+Le caller (l'orchestrateur `[2]`) interprète `NoFringe` comme
 une *suggestion de transition de phase*, pas comme un échec d'API.
 
 `Concept == ""` est l'indicateur opérationnel ; `NoFringe == true` le
@@ -281,8 +275,8 @@ DIAGNOSTIC(states, graph, goalRelevance):
 func BKTInfoGain(cs *models.ConceptState) float64 { ... }
 ```
 
-Tests indépendants en `algorithms/bkt_info_gain_test.go`. Vivent
-*même si* `[4]` n'est pas câblée — la formule est validée
+Tests indépendants en `algorithms/bkt_info_gain_test.go`. Ils vivent
+à côté du câblage runtime afin que la formule reste validée
 isolément. (OQ-4.2 = A.)
 
 ---
@@ -368,19 +362,17 @@ TestSelectConcept_RespectsMasteryBKTAccessor  // t.Setenv REGULATION_THRESHOLD
 
 ### 6.7 Régression
 
-`SelectConcept` n'est pas câblée par cette PR → aucun test existant
-ne casse, par construction (cohérent avec `[5]`).
+`SelectConcept` reste une fonction pure et testable isolément, même
+lorsqu'elle est appelée par l'orchestrateur.
 
 ---
 
 ## 7. Interaction amont/aval
 
-### Amont (callers futurs)
+### Amont
 
-- **`[2] PhaseController`** (PR `[2]`) : décide la phase courante,
-  appelle `SelectConcept(phase, ...)`. Seul vrai caller.
-- **Router legacy** : pas câblé directement à `[4]` — la migration passe
-  par `[2]`.
+- **`[2] PhaseController`** : décide la phase courante et appelle
+  `SelectConcept(phase, ...)`. C'est le caller runtime.
 
 ### Aval (consommateurs de l'output)
 
@@ -447,10 +439,10 @@ coût d'un comportement silencieusement dégradé.
 ### OQ-4.2 — Implémenter info-gain dans `[4]` ou différer en `[2]` ?
 
 **A.** Implémenter `BKTInfoGain` dans `algorithms/bkt_info_gain.go`
-+ tests isolés + branche DIAGNOSTIC dans `SelectConcept`. Pas de
-câblage runtime tant que `[2]` n'existe pas. Bénéfice : la formule
-est validée *avant* d'être consommée — plus facile à debugger isolée
-que sous le pipeline complet. Coût : ~80 lignes algorithms +
++ tests isolés + branche DIAGNOSTIC dans `SelectConcept`. Bénéfice :
+la formule reste validée isolément en plus de son usage par
+l'orchestrateur — plus facile à debugger isolée que sous le pipeline
+complet. Coût : ~80 lignes algorithms +
 ~50 lignes test.
 
 **B.** Reporter à PR `[2]`. Plus simple pour cette PR. Inconvénient :
@@ -641,7 +633,7 @@ les trois cas dégénérés :
 | **Création** | `algorithms/bkt_info_gain.go` | `BKTInfoGain` — fonction pure (~60 lignes) |
 | **Création** | `algorithms/bkt_info_gain_test.go` | ~100 lignes |
 | **Modif** | `tools/prompt.go` | `regulationConceptEnabled()` + `conceptSelectorAppendix` |
-| **Pas modifié** | `engine/router.go`, `tools/activity.go` | aucun câblage runtime |
+| **Câblage courant** | `engine/orchestrator.go` | l'orchestrateur appelle `SelectConcept`; `REGULATION_CONCEPT` reste limité à l'appendix prompt |
 
 ### 9.2 Critères de merge
 
@@ -681,7 +673,7 @@ les trois cas dégénérés :
 | **Tie-break** | OQ-4.4 = A (alphabétique). Test alpha/beta/gamma à scores égaux requis |
 | **MAINTENANCE urgency** | OQ-4.5 = A (`1 - retention`). Note v2 : dérivée `elapsed/stability` possible |
 | **INSTRUCTION formula** | OQ-4.6 = A (confirmer `gr × (1 - mastery)`). Tests dégénérés : `gr≈0`, `mastery≈BKT`, frange normale |
-| **Flag** | `REGULATION_CONCEPT=on` (gate doc prompt et câblage futur ; fonction inconditionnelle) |
+| **Flag** | `REGULATION_CONCEPT=off` retire seulement l'appendix prompt ; `SelectConcept` reste exécuté par l'orchestrateur |
 | **Findings résolus** | F-3.X (validation empirique de [1]) ; pose la fondation de `[2]` qui consommera `Phase` |
 
 ---
