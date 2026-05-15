@@ -1252,6 +1252,44 @@ func (s *Store) GetOAuthClient(clientID string) (*OAuthClient, error) {
 	return c, nil
 }
 
+// IsClientApproved reports whether the learner has previously consented to the
+// given OAuth client for this exact redirect_uri. R001: the consent screen is
+// only meaningful when there's something to approve — once a (learner, client,
+// redirect_uri) triple is on file, the next /authorize POST may skip the
+// approve_client prompt. A different redirect_uri (even on the same client)
+// re-prompts because the approval is scoped to redirect_uri, not client_id.
+func (s *Store) IsClientApproved(learnerID, clientID, redirectURI string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		`SELECT 1 FROM learner_approved_clients
+		 WHERE learner_id = ? AND client_id = ? AND redirect_uri = ?`,
+		learnerID, clientID, redirectURI,
+	).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("is client approved: %w", err)
+	}
+	return true, nil
+}
+
+// ApproveClient records that the learner has consented to the OAuth client for
+// this exact redirect_uri. Idempotent: re-approving the same triple is a no-op
+// (ON CONFLICT DO NOTHING preserves the original approved_at timestamp). R001.
+func (s *Store) ApproveClient(learnerID, clientID, redirectURI string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO learner_approved_clients (learner_id, client_id, redirect_uri)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(learner_id, client_id, redirect_uri) DO NOTHING`,
+		learnerID, clientID, redirectURI,
+	)
+	if err != nil {
+		return fmt.Errorf("approve client: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) CleanupExpiredCodes() (int64, error) {
 	result, err := s.db.Exec(`DELETE FROM oauth_codes WHERE expires_at < ?`, time.Now().UTC())
 	if err != nil {

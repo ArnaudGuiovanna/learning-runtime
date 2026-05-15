@@ -206,6 +206,21 @@ func buildMigrations() []migration {
 		Version: "0007_index_pending_consolidations_learner_status",
 		Body:    `CREATE INDEX IF NOT EXISTS idx_pending_consolidations_learner_status ON pending_consolidations(learner_id, status)`,
 	})
+	// R001: persist learner consent for an OAuth client + redirect_uri so
+	// returning logins don't re-prompt and the consent screen stays
+	// meaningful (i.e. only shown when there's genuinely something to
+	// approve). Keyed on (learner_id, client_id, redirect_uri) — a new
+	// redirect_uri re-prompts even for the same (learner, client) pair.
+	out = append(out, migration{
+		Version: "0008_create_learner_approved_clients",
+		Body: `CREATE TABLE IF NOT EXISTS learner_approved_clients (
+    learner_id   TEXT     NOT NULL REFERENCES learners(id),
+    client_id    TEXT     NOT NULL REFERENCES oauth_clients(client_id),
+    redirect_uri TEXT     NOT NULL,
+    approved_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (learner_id, client_id, redirect_uri)
+)`,
+	})
 	return out
 }
 
