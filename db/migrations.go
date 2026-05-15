@@ -17,7 +17,15 @@ import (
 var schemaSQL string
 
 func OpenDB(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)")
+	// _txlock=immediate: every BEGIN issued by database/sql uses BEGIN
+	// IMMEDIATE, which acquires the writer lock at tx start instead of
+	// at first write. Required for read-modify-write patterns (see
+	// applyInteraction for R008 / security-todo F-5.1) — without it,
+	// two concurrent transactions both read a stale snapshot and one
+	// silently overwrites the other on commit. modernc.org/sqlite
+	// ignores sql.TxOptions.Isolation, so the DSN flag is the supported
+	// way to control BEGIN mode (driver.go:73, conn.go:1033).
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
