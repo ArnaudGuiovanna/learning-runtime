@@ -46,6 +46,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"webhook_message_queue",
 		"webhook_push_log",
 		"pedagogical_snapshots",
+		"learner_approved_clients",
 	}
 	for _, table := range expectedTables {
 		var name string

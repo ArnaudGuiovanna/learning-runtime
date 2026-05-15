@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1325,5 +1326,112 @@ func TestRequirePKCEForPublicClient_Branches(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+// ─── Persisted client approval (R001) ───────────────────────────────────────
+
+// loginRequest builds an /authorize POST form for a learner login. When
+// approveClient is false, the approve_client field is omitted entirely (which
+// is what a returning client would send if it relied on a remembered consent).
+func loginRequest(t *testing.T, clientID, redirectURI, email, password string, approveClient bool) *http.Request {
+	t.Helper()
+	form := url.Values{}
+	form.Set("csrf_token", "tkn")
+	form.Set("mode", "login")
+	form.Set("client_id", clientID)
+	form.Set("redirect_uri", redirectURI)
+	form.Set("code_challenge", "ch")
+	form.Set("code_challenge_method", "S256")
+	form.Set("email", email)
+	form.Set("password", password)
+	if approveClient {
+		form.Set("approve_client", "yes")
+	}
+	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "tkn"})
+	return req
+}
+
+// TestAuthorizePost_LoginSkipsApprovalAfterFirstConsent verifies R001: once a
+// learner has consented to an OAuth client for a specific redirect_uri, the
+// next /authorize POST for the same triple must NOT re-prompt for approval.
+// Changing the redirect_uri (legitimately, within the client's registered
+// list) must re-prompt because the approval is scoped to (learner, client,
+// redirect_uri).
+func TestAuthorizePost_LoginSkipsApprovalAfterFirstConsent(t *testing.T) {
+	s, store := newTestServer(t)
+	// Client registered with two redirect_uris so we can verify that the
+	// approval row keys on redirect_uri and not on client_id alone.
+	if err := store.CreateOAuthClient(
+		"cid",
+		"Test Client",
+		`["https://good.example/cb","https://good.example/cb2"]`,
+	); err != nil {
+		t.Fatalf("seed client: %v", err)
+	}
+	seedLearner(t, store, "ok@e.com", "correct-password")
+
+	// 1. First /authorize WITH approve_client=yes — succeeds and persists
+	//    the approval row for (learner, cid, https://good.example/cb).
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizePost(rec, loginRequest(t, "cid", "https://good.example/cb", "ok@e.com", "correct-password", true))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("first login: status = %d, want 302; body=%q", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "https://good.example/cb?") {
+		t.Fatalf("first login: unexpected redirect %q", loc)
+	}
+
+	// 2. Second /authorize WITHOUT approve_client — must succeed (approval
+	//    remembered, screen skipped).
+	rec = httptest.NewRecorder()
+	s.HandleAuthorizePost(rec, loginRequest(t, "cid", "https://good.example/cb", "ok@e.com", "correct-password", false))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("second login (same redirect_uri, no approve_client): status = %d, want 302; body=%q", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "approve this OAuth client") {
+		t.Fatalf("second login: approval HTML returned but the client was already approved; body=%q", rec.Body.String())
+	}
+
+	// 3. Third /authorize, different (but still registered) redirect_uri,
+	//    WITHOUT approve_client — must re-prompt because the approval is
+	//    scoped to redirect_uri.
+	rec = httptest.NewRecorder()
+	s.HandleAuthorizePost(rec, loginRequest(t, "cid", "https://good.example/cb2", "ok@e.com", "correct-password", false))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("third login (different redirect_uri, no approve_client): status = %d, want 401; body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "approve this OAuth client") {
+		t.Fatalf("third login: expected approval re-prompt for new redirect_uri; body=%q", rec.Body.String())
+	}
+}
+
+// TestHandleRegister_CapsClientNameAt120Bytes verifies R001 hardening: an
+// attacker registering a client with a multi-KB phishing name (e.g. an entire
+// fake consent paragraph in client_name) is truncated to a manageable length
+// before the value is echoed back or surfaced in the consent screen.
+func TestHandleRegister_CapsClientNameAt120Bytes(t *testing.T) {
+	s, _ := newTestServer(t)
+	huge := strings.Repeat("A", 2000)
+	body := fmt.Sprintf(`{"client_name":%q,"redirect_uris":["https://good.example/cb"]}`, huge)
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.HandleRegister(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%q", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	name, _ := resp["client_name"].(string)
+	if len(name) == 0 {
+		t.Fatal("client_name missing from response")
+	}
+	if len(name) > 120 {
+		t.Fatalf("client_name not capped: len=%d (want ≤ 120 bytes); got=%q…", len(name), name[:40])
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -40,6 +41,12 @@ const (
 const (
 	registerBodyLimitBytes           int64 = 16 << 10
 	defaultMaxRegisteredOAuthClients       = 10_000
+	// clientNameMaxLen caps the byte-length of an attacker-controlled
+	// client_name on /register. The value is echoed on the consent screen
+	// and into the registration response; a multi-KB phishing string would
+	// otherwise be displayed verbatim. 120 bytes is enough for any real
+	// product name while making the consent UI usable.
+	clientNameMaxLen = 120
 )
 
 // OAuthServer implements the OAuth 2.1 authorization server.
@@ -287,6 +294,8 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			renderAuthPage(w, data, "An account with this email already exists.", "register")
 			return
 		}
+		// R001: registration always prompts for approval (the learner is
+		// brand-new — there cannot be a prior approval row to honor).
 		if r.FormValue("approve_client") != "yes" {
 			renderAuthPage(w, data, "Please confirm that you recognize and approve this OAuth client before continuing.", "register")
 			return
@@ -305,6 +314,11 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			return
 		}
 		learnerID = learner.ID
+		// R001: persist the freshly-granted approval so the next login on
+		// the same (client, redirect_uri) doesn't re-prompt the learner.
+		if err := s.store.ApproveClient(learnerID, clientID, redirectURI); err != nil {
+			s.logger.Warn("persist client approval failed", "err", err, "learner", learnerID, "client", clientID)
+		}
 	} else {
 		// Login flow.
 		// Per-account lockout (issue #36): refuse new attempts when the email
@@ -328,9 +342,21 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 			return
 		}
 		s.loginFailures.Reset(email)
-		if r.FormValue("approve_client") != "yes" {
+		// R001: if the learner has already approved this client+redirect_uri,
+		// the approval screen is no longer meaningful — skip it. Re-prompting
+		// every time trained users to click through reflexively, defeating the
+		// trust-on-first-use guarantee against a malicious dynamic-client
+		// registration. The approval is scoped to redirect_uri so a phishing
+		// client cannot reuse a previously-granted consent at a different URL.
+		approved, _ := s.store.IsClientApproved(existing.ID, clientID, redirectURI)
+		if !approved && r.FormValue("approve_client") != "yes" {
 			renderAuthPage(w, data, "Please confirm that you recognize and approve this OAuth client before continuing.", "login")
 			return
+		}
+		if !approved {
+			if err := s.store.ApproveClient(existing.ID, clientID, redirectURI); err != nil {
+				s.logger.Warn("persist client approval failed", "err", err, "learner", existing.ID, "client", clientID)
+			}
 		}
 		learnerID = existing.ID
 	}
@@ -665,6 +691,19 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	clientName := ""
 	if name, ok := req["client_name"].(string); ok {
 		clientName = name
+	}
+	// R001: cap server-side. An attacker-controlled multi-KB phishing
+	// paragraph in client_name would otherwise be displayed verbatim on
+	// the consent screen. Truncate to 120 bytes at a valid UTF-8 boundary
+	// so html/template still escapes safely.
+	if len(clientName) > clientNameMaxLen {
+		originalLen := len(clientName)
+		truncated := clientName[:clientNameMaxLen]
+		for !utf8.ValidString(truncated) && len(truncated) > 0 {
+			truncated = truncated[:len(truncated)-1]
+		}
+		clientName = truncated
+		s.logger.Warn("client_name truncated", "original_len", originalLen, "truncated_len", len(clientName))
 	}
 
 	// RFC 7591: confidential clients announce a secret-based auth method.
