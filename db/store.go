@@ -5,6 +5,7 @@
 package db
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -20,6 +21,20 @@ import (
 	"tutor-mcp/algorithms"
 	"tutor-mcp/models"
 )
+
+// querier abstracts over *sql.DB and *sql.Tx so that Store helpers can
+// run either against the package-level pool or inside an explicit
+// transaction. Both types satisfy this interface as of Go 1.x stdlib.
+//
+// Used by the *WithQ private helpers + public Tx variants that callers
+// like applyInteraction (issue R008 / security-todo F-5.1) use to group
+// a read-modify-write cycle across concept_states / interactions /
+// pedagogical_snapshots under a single BEGIN IMMEDIATE transaction.
+type querier interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
 
 // IsSafeWebhookURL validates that a webhook URL targets Discord over HTTPS.
 // SSRF guard: only Discord webhook hosts allowed (blocks IMDS, internal ranges, etc.).
@@ -60,6 +75,15 @@ func (s *Store) RawDB() *sql.DB { return s.db }
 
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
+}
+
+// BeginTx starts a serializable transaction. On modernc.org/sqlite this
+// translates to BEGIN IMMEDIATE, which acquires the writer lock at tx
+// start instead of at first write. Required for read-modify-write
+// patterns where concurrent goroutines would otherwise both read a
+// stale snapshot and one overwrite the other on commit (R008).
+func (s *Store) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 }
 
 func generateID() string {
@@ -582,9 +606,19 @@ func (s *Store) InsertConceptStateIfNotExists(cs *models.ConceptState) error {
 // ─── Concept States ───────────────────────────────────────────────────────────
 
 func (s *Store) GetConceptState(learnerID, concept string) (*models.ConceptState, error) {
+	return getConceptStateWithQ(s.db, learnerID, concept)
+}
+
+// GetConceptStateTx runs GetConceptState inside the supplied transaction.
+// Used by applyInteraction to keep the read-modify-write cycle atomic.
+func (s *Store) GetConceptStateTx(tx *sql.Tx, learnerID, concept string) (*models.ConceptState, error) {
+	return getConceptStateWithQ(tx, learnerID, concept)
+}
+
+func getConceptStateWithQ(q querier, learnerID, concept string) (*models.ConceptState, error) {
 	cs := &models.ConceptState{}
 	var lastReview, nextReview sql.NullTime
-	err := s.db.QueryRow(
+	err := q.QueryRow(
 		`SELECT id, learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
 		        reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
 		        p_slip, p_guess, theta, updated_at
@@ -610,8 +644,17 @@ func (s *Store) GetConceptState(learnerID, concept string) (*models.ConceptState
 }
 
 func (s *Store) UpsertConceptState(cs *models.ConceptState) error {
+	return upsertConceptStateWithQ(s.db, cs)
+}
+
+// UpsertConceptStateTx runs UpsertConceptState inside the supplied transaction.
+func (s *Store) UpsertConceptStateTx(tx *sql.Tx, cs *models.ConceptState) error {
+	return upsertConceptStateWithQ(tx, cs)
+}
+
+func upsertConceptStateWithQ(q querier, cs *models.ConceptState) error {
 	cs.UpdatedAt = time.Now().UTC()
-	_, err := s.db.Exec(
+	_, err := q.Exec(
 		`INSERT INTO concept_states
 		    (learner_id, concept, stability, difficulty, elapsed_days, scheduled_days,
 		     reps, lapses, card_state, last_review, next_review, p_mastery, p_learn, p_forget,
@@ -687,8 +730,17 @@ func (s *Store) GetConceptStatesByLearner(learnerID string) ([]*models.ConceptSt
 const interactionCols = `id, learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, rubric_json, rubric_score_json, created_at`
 
 func (s *Store) CreateInteraction(i *models.Interaction) error {
+	return createInteractionWithQ(s.db, i)
+}
+
+// CreateInteractionTx runs CreateInteraction inside the supplied transaction.
+func (s *Store) CreateInteractionTx(tx *sql.Tx, i *models.Interaction) error {
+	return createInteractionWithQ(tx, i)
+}
+
+func createInteractionWithQ(q querier, i *models.Interaction) error {
 	i.CreatedAt = time.Now().UTC()
-	result, err := s.db.Exec(
+	result, err := q.Exec(
 		`INSERT INTO interactions (learner_id, concept, activity_type, success, response_time, confidence, error_type, notes, hints_requested, self_initiated, calibration_id, is_proactive_review, misconception_type, misconception_detail, domain_id, bkt_slip, bkt_guess, rubric_json, rubric_score_json, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.LearnerID, i.Concept, i.ActivityType, boolToInt(i.Success),
@@ -712,7 +764,16 @@ func (s *Store) CreateInteraction(i *models.Interaction) error {
 }
 
 func (s *Store) GetRecentInteractions(learnerID, concept string, limit int) ([]*models.Interaction, error) {
-	rows, err := s.db.Query(
+	return getRecentInteractionsWithQ(s.db, learnerID, concept, limit)
+}
+
+// GetRecentInteractionsTx runs GetRecentInteractions inside the supplied transaction.
+func (s *Store) GetRecentInteractionsTx(tx *sql.Tx, learnerID, concept string, limit int) ([]*models.Interaction, error) {
+	return getRecentInteractionsWithQ(tx, learnerID, concept, limit)
+}
+
+func getRecentInteractionsWithQ(q querier, learnerID, concept string, limit int) ([]*models.Interaction, error) {
+	rows, err := q.Query(
 		`SELECT `+interactionCols+` FROM interactions WHERE learner_id = ? AND concept = ?
 		 ORDER BY created_at DESC LIMIT ?`,
 		learnerID, concept, limit,

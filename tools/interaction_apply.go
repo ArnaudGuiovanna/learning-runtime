@@ -5,6 +5,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -66,8 +67,26 @@ func applyInteraction(
 	input interactionInput,
 	now time.Time,
 ) (*models.ConceptState, map[string]any, error) {
+	// R008 / security-todo F-5.1: group the read-modify-write cycle
+	// (concept_states + interaction + pedagogical_snapshot) under a
+	// serializable transaction. Without this, concurrent record_interaction
+	// calls on the same (learner, concept) both read a stale snapshot and
+	// one silently overwrites the other on commit. BeginTx maps to
+	// BEGIN IMMEDIATE on SQLite (modernc.org/sqlite) so writers block at
+	// tx start, not at first write.
+	tx, err := deps.Store.BeginTx(context.Background())
+	if err != nil {
+		return nil, nil, fmt.Errorf("applyInteraction: begin tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
 	// Load or bootstrap concept state.
-	cs, err := deps.Store.GetConceptState(learnerID, input.Concept)
+	cs, err := deps.Store.GetConceptStateTx(tx, learnerID, input.Concept)
 	if err != nil {
 		cs = models.NewConceptState(learnerID, input.Concept)
 	}
@@ -108,7 +127,7 @@ func applyInteraction(
 		PSlip:    priorPSlip,
 		PGuess:   priorPGuess,
 	}
-	recentForBKT, err := deps.Store.GetRecentInteractions(learnerID, input.Concept, 20)
+	recentForBKT, err := deps.Store.GetRecentInteractionsTx(tx, learnerID, input.Concept, 20)
 	if err != nil {
 		deps.Logger.Warn("applyInteraction: individualized BKT profile unavailable", "err", err, "learner", learnerID, "concept", input.Concept)
 		recentForBKT = nil
@@ -164,7 +183,7 @@ func applyInteraction(
 		interaction.IsProactiveReview = true
 	}
 
-	if err := deps.Store.CreateInteraction(interaction); err != nil {
+	if err := deps.Store.CreateInteractionTx(tx, interaction); err != nil {
 		return nil, nil, fmt.Errorf("applyInteraction: create interaction: %w", err)
 	}
 
@@ -214,10 +233,10 @@ func applyInteraction(
 	cs.Theta = newTheta
 
 	// Persist updated concept state.
-	if err := deps.Store.UpsertConceptState(cs); err != nil {
+	if err := deps.Store.UpsertConceptStateTx(tx, cs); err != nil {
 		return nil, nil, fmt.Errorf("applyInteraction: upsert concept state: %w", err)
 	}
-	if err := deps.Store.CreatePedagogicalSnapshot(&models.PedagogicalSnapshot{
+	if err := deps.Store.CreatePedagogicalSnapshotTx(tx, &models.PedagogicalSnapshot{
 		InteractionID:       interaction.ID,
 		LearnerID:           learnerID,
 		DomainID:            input.DomainID,
@@ -232,6 +251,11 @@ func applyInteraction(
 	}); err != nil {
 		return nil, nil, fmt.Errorf("applyInteraction: create pedagogical snapshot: %w", err)
 	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("applyInteraction: commit tx: %w", err)
+	}
+	committed = true
 
 	return cs, observation, nil
 }

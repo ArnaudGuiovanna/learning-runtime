@@ -16,12 +16,23 @@ import (
 const pedagogicalSnapshotCols = `id, interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, interpretation_brief, created_at`
 
 func (s *Store) CreatePedagogicalSnapshot(snapshot *models.PedagogicalSnapshot) error {
+	return createPedagogicalSnapshotWithQ(s.db, snapshot)
+}
+
+// CreatePedagogicalSnapshotTx runs CreatePedagogicalSnapshot inside the
+// supplied transaction (used by applyInteraction to group the snapshot
+// write with the interaction + concept_states upsert).
+func (s *Store) CreatePedagogicalSnapshotTx(tx *sql.Tx, snapshot *models.PedagogicalSnapshot) error {
+	return createPedagogicalSnapshotWithQ(tx, snapshot)
+}
+
+func createPedagogicalSnapshotWithQ(q querier, snapshot *models.PedagogicalSnapshot) error {
 	if snapshot.CreatedAt.IsZero() {
 		snapshot.CreatedAt = time.Now().UTC()
 	} else {
 		snapshot.CreatedAt = snapshot.CreatedAt.UTC()
 	}
-	result, err := s.db.Exec(
+	result, err := q.Exec(
 		`INSERT INTO pedagogical_snapshots
 		    (interaction_id, learner_id, domain_id, concept, activity_type, before_json, observation_json, after_json, decision_json, interpretation_brief, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
