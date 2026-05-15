@@ -4,6 +4,40 @@ All notable changes to Tutor MCP are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **(security)** Transactionalize `record_interaction` to prevent lost updates
+  on `concept_states` under concurrent calls on the same (learner, concept)
+  pair. New `Store.BeginTx` + Tx-variant helpers; DSN now carries
+  `_txlock=immediate` so every `database/sql` `Begin` maps to `BEGIN IMMEDIATE`
+  on SQLite (R008).
+- **(security)** Persist OAuth client approvals in
+  `learner_approved_clients(learner_id, client_id, redirect_uri)` so a
+  returning login no longer re-prompts and the consent screen retains its
+  trust-on-first-use guarantee. Cap `client_name` at 120 bytes server-side
+  (R001).
+- **(security)** Fold learner emails to lowercase + trim at the handler so the
+  per-account login-failure tracker cannot be bypassed by rotating case
+  permutations, and so register-mode rejects case-variant duplicates. Adds
+  migrations `0009_lowercase_learner_emails` and
+  `0010_index_learners_email_lower` (functional UNIQUE index on `lower(email)`
+  as defence-in-depth) (R002).
+- **(security)** Bump the Go toolchain from 1.25.6 to 1.25.10. Closes 12
+  upstream stdlib advisories, including four `html/template` XSS variants that
+  touched `auth/pages.go`, the TLS 1.3 KeyUpdate DoS, and the `net/url` IPv6
+  host misparse that backstopped `validateRegistrationRedirectURIs` (R035).
+
+### Documentation
+
+- Condense `README.md` from 603 lines / 45 KB to 259 lines / 17 KB. Collapse
+  the three overlapping narrative pillars into one, replace per-tool walls of
+  text with grouped compact tables, and align with the live code: add
+  `set_domain_priority` to the tools list, document `TRUSTED_PROXY_CIDRS` /
+  `MCP_RATE_LIMIT_PER_MIN` / `MCP_RATE_LIMIT_BURST`, soften the `JWT_SECRET`
+  enforcement claim to match `auth/jwt.go`, fix the `#setup` anchor.
+
 ## [0.3.1] — 2026-05-14
 
 ### Added
