@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -23,6 +24,17 @@ import (
 
 	"tutor-mcp/db"
 )
+
+// NormalizeEmail folds an email address to a canonical form (lowercase +
+// trimmed). R002: SQLite's default BINARY collation treats Alice@x.com and
+// alice@x.com as different keys, which lets an attacker rotate case to bypass
+// the per-account failure-tracker lockout and lets registration create
+// duplicate accounts whose only difference is letter case. Every handler that
+// reads `email` from a form/body must call NormalizeEmail before any lookup,
+// failure-bucket write, or learner insert.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
 
 // bcryptCost is the work factor used for password and client_secret hashes.
 // Bumped from DefaultCost (10) to 12 in 2026-05 (issue #36): at cost 12 a
@@ -247,7 +259,10 @@ func (s *OAuthServer) HandleAuthorizePost(w http.ResponseWriter, r *http.Request
 	}
 
 	mode := r.FormValue("mode") // "login" or "register"
-	email := r.FormValue("email")
+	// R002: fold case + trim whitespace before any lookup or failure
+	// tracker call. Keeps both buckets and store rows in a single
+	// canonical form.
+	email := NormalizeEmail(r.FormValue("email"))
 	password := r.FormValue("password")
 
 	state := r.FormValue("state")
