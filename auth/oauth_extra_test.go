@@ -1408,6 +1408,127 @@ func TestAuthorizePost_LoginSkipsApprovalAfterFirstConsent(t *testing.T) {
 	}
 }
 
+// ─── Case-insensitive email (R002) ─────────────────────────────────────────
+
+// TestAuthorizePost_LoginEmailIsCaseInsensitive verifies R002: a learner who
+// registered as "bob@x.com" can sign back in with "Bob@x.com". Without
+// normalisation the lookup runs under SQLite's default BINARY collation and
+// silently fails — which both annoys the learner AND means the per-account
+// failure tracker keeps separate buckets per case, defeating the lockout.
+func TestAuthorizePost_LoginEmailIsCaseInsensitive(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://good.example/cb")
+	// Existing row is stored lowercase — the migration normalises rows
+	// written before the helper was in place to this shape.
+	seedLearner(t, store, "bob@x.com", "correct-password")
+
+	form := url.Values{}
+	form.Set("csrf_token", "tkn")
+	form.Set("mode", "login")
+	form.Set("client_id", "cid")
+	form.Set("redirect_uri", "https://good.example/cb")
+	form.Set("code_challenge", "ch")
+	form.Set("code_challenge_method", "S256")
+	form.Set("email", "Bob@x.com") // uppercase first letter
+	form.Set("password", "correct-password")
+	form.Set("approve_client", "yes")
+
+	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "tkn"})
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizePost(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%q", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "https://good.example/cb?") {
+		t.Fatalf("unexpected redirect %q", loc)
+	}
+}
+
+// TestAuthorizePost_LoginFailureBucketSharedAcrossEmailCases verifies that
+// the per-account lockout cannot be bypassed by toggling email case. R002:
+// without normalisation an attacker rotates Bob/BOB/bOB permutations and
+// each gets its own 5-failure budget under `loginFailures`.
+func TestAuthorizePost_LoginFailureBucketSharedAcrossEmailCases(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://good.example/cb")
+	seedLearner(t, store, "bob@x.com", "correct-password")
+
+	mkForm := func(email, password string) url.Values {
+		form := url.Values{}
+		form.Set("csrf_token", "tkn")
+		form.Set("mode", "login")
+		form.Set("client_id", "cid")
+		form.Set("redirect_uri", "https://good.example/cb")
+		form.Set("code_challenge", "ch")
+		form.Set("code_challenge_method", "S256")
+		form.Set("email", email)
+		form.Set("password", password)
+		form.Set("approve_client", "yes")
+		return form
+	}
+	postLogin := func(form url.Values) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "tkn"})
+		rec := httptest.NewRecorder()
+		s.HandleAuthorizePost(rec, req)
+		return rec
+	}
+
+	// Burn the 5-failure budget on the mixed-case form.
+	for i := 0; i < 5; i++ {
+		rec := postLogin(mkForm("Bob@x.com", "wrong-password"))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status = %d, want 401; body=%q", i+1, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Invalid email or password") {
+			t.Fatalf("attempt %d: expected invalid-credentials message; body=%q", i+1, rec.Body.String())
+		}
+	}
+
+	// A sixth attempt under a DIFFERENT case with the CORRECT password must
+	// be rejected by the failure tracker — proving the bucket is shared.
+	rec := postLogin(mkForm("BOB@x.com", "correct-password"))
+	if !strings.Contains(rec.Body.String(), "Too many failed attempts") {
+		t.Fatalf("expected per-account lockout to cover case-variant; status=%d, body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAuthorizePost_RegisterRejectsCaseDuplicate verifies R002 register-side:
+// once "alice@x.com" exists, "Alice@x.com" must also be refused, not silently
+// accepted as a second account. Without normalisation the duplicate-check at
+// HandleAuthorizePost runs under BINARY collation and lets the second row in.
+func TestAuthorizePost_RegisterRejectsCaseDuplicate(t *testing.T) {
+	s, store := newTestServer(t)
+	seedClient(t, store, "cid", "https://good.example/cb")
+	seedLearner(t, store, "alice@x.com", "first-password")
+
+	form := url.Values{}
+	form.Set("csrf_token", "tkn")
+	form.Set("mode", "register")
+	form.Set("client_id", "cid")
+	form.Set("redirect_uri", "https://good.example/cb")
+	form.Set("code_challenge", "ch")
+	form.Set("code_challenge_method", "S256")
+	form.Set("email", "Alice@x.com") // case-variant of an existing learner
+	form.Set("password", "second-password")
+	form.Set("password_confirm", "second-password")
+	form.Set("approve_client", "yes")
+
+	req := httptest.NewRequest("POST", "/authorize", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "tkn"})
+	rec := httptest.NewRecorder()
+	s.HandleAuthorizePost(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "account with this email already exists") {
+		t.Fatalf("register accepted a case-variant duplicate; status=%d, body=%q", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHandleRegister_CapsClientNameAt120Bytes verifies R001 hardening: an
 // attacker registering a client with a multi-KB phishing name (e.g. an entire
 // fake consent paragraph in client_name) is truncated to a manageable length

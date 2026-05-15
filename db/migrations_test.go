@@ -75,6 +75,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"idx_webhook_push_log_open",
 		"idx_pedagogical_snapshots_learner_created",
 		"idx_pedagogical_snapshots_domain_concept",
+		"idx_learners_email_lower",
 	}
 	for _, idx := range expectedIndexes {
 		var name string

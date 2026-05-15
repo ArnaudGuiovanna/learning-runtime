@@ -221,6 +221,25 @@ func buildMigrations() []migration {
     PRIMARY KEY (learner_id, client_id, redirect_uri)
 )`,
 	})
+	// R002: fold existing learner emails to lowercase so case-variants
+	// share a single row. If two rows differ only by case (e.g. legacy
+	// data created when the handler accepted both Bob@x.com and
+	// bob@x.com), this UPDATE fails on the existing UNIQUE(email)
+	// constraint with "UNIQUE constraint failed: learners.email" — the
+	// operator must resolve the duplicate manually before Migrate can
+	// re-run. We refuse to guess which row "wins".
+	out = append(out, migration{
+		Version: "0009_lowercase_learner_emails",
+		Body:    `UPDATE learners SET email = lower(email) WHERE email != lower(email)`,
+	})
+	// R002: defence-in-depth against direct-DB inserts that skip the
+	// handler-side NormalizeEmail. A functional UNIQUE index on lower(email)
+	// rejects any future row whose case-folded form collides with an
+	// existing learner, independently of how it arrives.
+	out = append(out, migration{
+		Version: "0010_index_learners_email_lower",
+		Body:    `CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_email_lower ON learners(lower(email))`,
+	})
 	return out
 }
 
