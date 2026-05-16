@@ -10,7 +10,7 @@
   <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/issues"><img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Status: alpha" /></a>
 </p>
 
-# Tutor MCP — Continuity layer for intelligent tutoring LLMs
+# Tutor MCP — Adaptive learning runtime for LLMs
 
 > Turn any LLM into an **intelligent tutor**. Tutor MCP is an open-source [MCP](https://modelcontextprotocol.io/) server that gives an AI assistant durable learner state, cognitive-science scheduling, session memory, misconceptions, metacognition, and auditable pedagogical decisions. No item bank — the LLM generates content, Tutor MCP remembers and decides.
 
