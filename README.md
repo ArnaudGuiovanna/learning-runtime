@@ -10,11 +10,11 @@
   <a href="https://github.com/ArnaudGuiovanna/tutor-mcp/issues"><img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Status: alpha" /></a>
 </p>
 
-# Tutor MCP — Adaptive learning runtime for LLMs
+# Tutor MCP — Continuity layer for intelligent tutoring LLMs
 
-> Self-hosted [MCP](https://modelcontextprotocol.io/) server that turns any LLM (Claude, ChatGPT, Le Chat, Gemini) into an **Intelligent Tutoring System**: BKT, FSRS, IRT, PFA, KST, Rasch/Elo calibration, evidence-gated mastery, spaced repetition, metacognitive loop. No item bank — the LLM generates content, the runtime keeps the cognitive state.
+> Turn any LLM into an **intelligent tutor**. Tutor MCP is an open-source [MCP](https://modelcontextprotocol.io/) server that gives an AI assistant durable learner state, cognitive-science scheduling, session memory, misconceptions, metacognition, and auditable pedagogical decisions. No item bank — the LLM generates content, Tutor MCP remembers and decides.
 
-Tell the LLM what you want to learn — *Spanish for travel*, *Go for backend*, *medieval history* — and the runtime orchestrates the journey: what to study next, when to review, when you've mastered a concept, when you need a nudge. Works on any subject the learner can describe in natural language.
+Tell the LLM what you want to learn — *Spanish for travel*, *Go for backend*, *medieval history* — and the runtime orchestrates the journey: what to study next, when to review, when you've mastered a concept, when you need a nudge. The next conversation starts from what the learner has mastered, forgotten, misunderstood, felt, and explicitly committed to do next.
 
 **Status — alpha v0.3.1.** The full regulation pipeline (phase FSM + concept/action selectors + gate + threshold resolver) ships default-on; the fade controller is opt-in. Suitable for individual use, small groups, and classroom-scale (≤200 active learners). Single-tenant, single-node, SQLite + in-process scheduler.
 
@@ -32,11 +32,34 @@ Tell the LLM what you want to learn — *Spanish for travel*, *Go for backend*, 
 
 Claude (web + Desktop + Code), ChatGPT (Developer Mode), Le Chat, Gemini Enterprise / CLI. See the [client setup guide](#setup) below.
 
+## Continuity model
+
+The missing layer is not content. It is continuity.
+
+LLMs can explain. Tutor MCP remembers and decides. The runtime owns the durable learner state and the pedagogical decisions; the LLM stays free to explain, reframe, question, generate exercises, and consolidate narrative memory from the traces it receives.
+
+| Layer | Stored as | What it gives the tutor |
+|---|---|---|
+| **Algorithmic state** | SQLite domains, concept states, interactions, affect, calibration, transfer, intentions | Domains, prerequisites, phase, mastery, retention, ability, review timing, transfer readiness, active misconceptions |
+| **Episodic memory** | Markdown `sessions/*.md` with YAML frontmatter | Affect, concepts touched, salient exchanges, mental-model observations, implementation intentions |
+| **Narrative state** | Markdown `MEMORY.md`, `MEMORY_pending.md`, `concepts/*.md`, `archives/*.md` | Stable learner facts, pending observations, concept notes, medium-term trajectory, contradictions to verify |
+| **Operator view** | Pedagogical snapshots + decision replay | Why an activity was selected, why a concept was held back, whether evidence was missing or noisy |
+
+`get_next_activity` merges the algorithmic signals with `episodic_context`: stable memory, pending observations, recent sessions, archives, concept notes, and detected OLM inconsistencies. The LLM receives enough context to form a brief hypothesis about the learner's current cognitive state, but it does not own the schedule.
+
 ## How it works
 
-The server sits between a learner and an LLM. **Three parallel loops** run from the first session:
+The server sits between a learner and an LLM. It splits the job cleanly:
+
+| Component | Owns | Does not own |
+|---|---|---|
+| **Deterministic engine — Tutor MCP** | Cognitive signals, phase control, evidence gates, session history, Markdown learner memory, audit trail | Learner-facing prose, examples, Socratic phrasing |
+| **Generative coach — your LLM** | Content generation, natural language coaching, interpretation briefs, session summaries, memory consolidation | Durable mastery state, review timing, prerequisite gates |
+
+Four loops run from the first session:
 
 - **Learning loop** — Before and after every exchange, the LLM calls `get_next_activity` and `record_interaction`. The runtime updates BKT mastery, FSRS recall, IRT ability, Rasch/Elo exercise calibration, transfer evidence and misconception status — in real time, on every interaction. The LLM never picks scheduling itself.
+- **Narrative memory loop** — `record_session_close` asks the LLM for a factual session trace; `update_learner_memory` stores stable memory, pending observations, concept notes, sessions and archives. The next `get_next_activity` call can use those traces to avoid a generic exercise.
 - **Metacognitive loop** — Affect check-ins (`record_affect`), calibration tracking (`calibration_check` / `record_calibration_result`) and an autonomy score observe the learner's relationship to the system. A factual mirror surfaces consolidated dependency patterns — the system aims to make itself progressively unnecessary.
 - **Motivation loop** — A brief engine selects one motivational angle per exercise (milestone, competence value, growth mindset, affect reframe, plateau recontext, utility value) and emits *signals + instruction* — never canned text. The LLM phrases it.
 
@@ -167,13 +190,13 @@ Pure-function algorithms running on every interaction, composed by the regulatio
 
 | Algorithm | Role |
 |---|---|
-| **BKT** + individualized BKT | Mastery probability per concept; recent-history profile individualizes `P(Learn)`, `P(Slip)`, `P(Guess)` — never tuned by the LLM |
-| **FSRS** | Spaced-repetition scheduling via stability/difficulty curves |
-| **IRT** | Learner ability θ from response patterns |
-| **Rasch / Elo** | Deterministic exercise-difficulty calibration signal, exposed to the LLM and stored in snapshots |
-| **PFA** | Performance Factor Analysis — weights success/failure to predict per-concept performance |
+| **BKT** + individualized BKT | Estimates mastery confidence per concept, not just whether the learner answered right today; recent-history profile individualizes `P(Learn)`, `P(Slip)`, `P(Guess)` — never tuned by the LLM |
+| **FSRS** | Decides when to bring a concept back, using stability and difficulty curves |
+| **IRT** | Tracks learner ability θ from response patterns so activity difficulty is calibrated to the current learner |
+| **Rasch / Elo** | Keeps a deterministic learner-ability vs exercise-difficulty signal, exposed to the LLM and stored in snapshots |
+| **PFA** | Weighs wins and losses on each concept to predict how the next attempt is likely to go |
 | **KST** | Validates prerequisite graph; gates new concepts on mastery of ancestors |
-| **Structured transfer** | Aggregates probes over 5 canonical dimensions and labels readiness (`unobserved`/`narrow`/`developing`/`ready`/`robust`/`blocked`) |
+| **Structured transfer** | Checks whether knowledge moves beyond the training pattern across `near`/`far`/`debugging`/`teaching`/`creative` probes |
 
 The **regulation pipeline** runs as a 7-stage chain inside `get_next_activity`: threshold resolver → goal decomposer → phase FSM (`DIAGNOSTIC ↔ INSTRUCTION ↔ MAINTENANCE`) → concept selector → gate (anti-repeat / session-budget / no-fringe escape) → action selector → fade controller. Pure functions are unit-tested (~90 tests); the orchestrator integration is covered by SQLite in-memory + migration tests. Full design rationale in [`docs/regulation-design/`](./docs/regulation-design/).
 
@@ -210,7 +233,7 @@ engine/              Orchestrator + phase FSM + selectors + gate + fade
                      + alert / motivation / mirror / replay / OLM
 models/              Typed structs (learner, domain, interactions, regulation, …)
 db/                  SQLite store + schema + idempotent migrations
-memory/              Markdown learner memory (sessions / concepts / archives)
+memory/              Markdown learner memory (stable / pending / sessions / concepts / archives)
 tools/               MCP tool handlers + system prompt + rubrics
 ```
 
